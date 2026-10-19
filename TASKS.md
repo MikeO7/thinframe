@@ -92,11 +92,14 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: edit `www/index.html` on the Mac, `deploy.sh`, page changes within 5 s.
 
 ## 10. Thin client (frame side)
-- [ ] `tfctl agent` (tfctl/src/agent.rs): config poll, heartbeat, actions, fallback URL. Runs as a
-      thread inside `tfctl kiosk` when SERVER_URL is set.
+- [ ] `tfctl agent` (tfctl/src/agent.rs): WebSocket client (RFC 6455 over TcpStream, text frames,
+      ping/pong, masking), hello/heartbeat/ack out, config/action in; reconnect with backoff; HTTP
+      GET /config + 60 s poll fallback when the socket is down; fallback URL when the server is gone
+      for 3 attempts. Runs as a thread inside `tfctl kiosk` when SERVER_URL is set.
+- [ ] Unit tests for the frame codec (mask/unmask, fragment, close) and the message types.
 - [ ] `tfctl set KEY VALUE` rewrites one key in /etc/thinframe.conf (used for first pairing).
-- Gate: change rotation in /admin, frame re-renders within one poll interval; stop the container,
-  frame shows the fallback page within 3 polls; start it, frame comes back.
+- Gate: change rotation in /admin, frame re-renders within 1 s; stop the container, frame shows the
+  fallback page within 3 reconnect attempts; start it, frame comes back and acks queued actions.
 
 ## 12. System (OS) update, A/B
 - [ ] Agent: on `system_version` change, stream `rootfs.ext4.zst` to the standby slot via `zstd -d | dd`,
@@ -129,6 +132,10 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] S0 CI job for `server/`: `go vet`, `go test ./...`, `staticcheck`, multi-arch Docker build.
 - [ ] S1 `server/`: stdlib ServeMux serving static/ at /frame/{id}, config GET/PUT, heartbeat POST,
       JSON files in /data (internal/store). `go test` covers the config merge and one-shot action clearing.
+- [ ] S1b `/api/frames/{id}/ws`: one goroutine per frame, hub keyed by id, push `config` on PUT and
+      `action` on request, resend unacked actions on reconnect, mark offline on socket close. Admin,
+      REST and MCP all go through the hub so a change reaches the frame in under a second.
+- [ ] S1c `/api/stream/{id}` SSE for the dashboard page's live data (separate from the control socket).
 - [ ] S2 `/admin`: plain HTML table of frames (id, ip, last seen, mem, temp) + edit form.
 - [ ] S3 Dockerfile builds static musl for amd64 and arm64; `docker compose up` works; GH Action
       pushes ghcr.io/mikeo7/thinframe-server on tag.

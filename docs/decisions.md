@@ -83,8 +83,7 @@ spare CPU. The frame's `tfctl agent` polls it for config and posts heartbeats. C
 Rejected: streaming pixels (VNC/RDP/WebRTC). Bandwidth and latency are worse than sending HTML
 and letting the frame's GPU composite it, and it needs a heavier client than cog.
 
-Transport is plain HTTP polling on the LAN. WebSocket push is a later refinement, not needed
-at a 15 s poll.
+Transport: see "Two planes" below. The frame opens one WebSocket; the server pushes.
 
 ## Languages: Rust on the frame, Go in the container (decided 2026-10-18)
 Rust on the frame is for the 1 MB static binary and zero-allocation idle. The container has no
@@ -208,3 +207,33 @@ Measurement, not opinion: TASK 13 adds `tfctl bench`, which replays a touch via 
 sim/qemu or a real frame and records touch→first-paint from `WEBKIT_SHOW_FPS` / a page-side
 `performance.now()` beacon posted to the server. The numbers go into the heartbeat so `/admin`
 shows latency per frame over time.
+
+## Two planes: control over one outbound WebSocket, data inside the page
+The frame never listens. `tfctl` dials `ws://<server>/api/frames/<id>/ws` with the bearer token
+and keeps it open (ping every 30 s, reconnect with backoff 1 s to 60 s). Messages are small JSON
+objects with a `type` field.
+
+| Direction | type | Payload |
+|---|---|---|
+| frame → server | `hello` | tfctl_version, system_version, slot, ip, boot_id |
+| frame → server | `heartbeat` (every 60 s, and on change) | mem_used_mb, temp_c, wifi_rssi, latency_ms, page_url, uptime_s |
+| frame → server | `ack` | id of the command, ok/error |
+| server → frame | `config` | the full config object (same as GET /config) |
+| server → frame | `action` | id + one of reboot, restart-kiosk, reload-page, update-software, update-system, rollback, screenshot |
+| server → frame | `ping` / frame → server `pong` | |
+
+Rules:
+- Config pushes are idempotent: the frame applies the whole object and restarts cog only if a
+  cog-affecting field changed.
+- Actions carry an id and are acked. The server queues unacked actions and resends on reconnect.
+- HTTP is still used for: first contact (GET /config before the socket is up), artifact downloads
+  (range requests, resumable), and as a 60 s poll fallback if the socket cannot be established.
+- The dashboard page has its own channel (SSE from the Go server at `/api/stream/<id>`) for live
+  widget data. The control socket never carries page content, so a page bug cannot block updates.
+- SSH is for humans. Nothing in the system automates over SSH.
+- MQTT, if ever wanted for Home Assistant, is a server-side bridge. The frame does not learn MQTT.
+
+Go side: `golang.org/x/net/websocket` is deprecated; use `github.com/coder/websocket` (minimal,
+stdlib-style) or `nhooyr.io/websocket`. Rust side: hand-rolled RFC 6455 client over
+`std::net::TcpStream` is ~250 lines (no TLS on the LAN) and keeps tfctl dependency-free; if TLS is
+needed later, add `tungstenite` + `rustls` and re-check the 1 MB budget.

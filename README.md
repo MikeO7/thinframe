@@ -46,8 +46,8 @@ is to render a web page. Memory and CPU go to the content.
  ┌──────────────────────────┐    Wi-Fi LAN    ┌──────────────────────────┐
  │ frameserver (Go)         │ <── GET /frame/id ── cog (WPE WebKit on DRM)│
  │  static/ dashboard       │ ── HTML/JS/data ──>│                          │
- │  /api/frames/<id>/config │ <── poll 15 s ───── tfctl agent (Rust)      │
- │  /api/frames/<id>/heartbeat <── status ───────│  (restart cog, reboot,   │
+ │  /api/frames/<id>/ws     │ <══ WebSocket ════> tfctl agent (Rust)      │
+ │   push config + actions  │     heartbeats     │  (restart cog, reboot,   │
  │  /admin                  │                    │   rotation, update)      │
  │  /data volume (json)     │                    │ OpenRC sshd iwd dhcpcd   │
  └──────────────────────────┘                    └──────────────────────────┘
@@ -64,6 +64,7 @@ Kernel  : linux-armv7 7.2.10 (Arch Linux ARM package) + panel module + DTB
           + aic8800 modules, all built by the ormarch scripts. See docs/decisions.md.
 Init    : OpenRC
 Net     : iwd (Wi-Fi) + dhcpcd, usb gadget NCM as fallback
+Control : one outbound WebSocket from tfctl; server pushes, frame acks. No inbound ports. SSH for humans only.
 Access  : sshd, key only, user `frame`, passwordless sudo
 Display : seatd + cog --platform=drm  (user `frame`, group video/input)
 Content : SERVER_URL/frame/FRAME_ID from frameserver; local www/ only as offline fallback
