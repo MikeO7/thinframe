@@ -71,7 +71,7 @@ DRM/GBM with GLES (no browser at all). That is a different project; note it, do 
 
 ## Thin client: brains in a container, frame is a display
 The frame stays exactly what it was (Alpine + cog on DRM). What changes is where the page and
-the decisions live: `frameserver`, a Rust binary in a scratch Docker image, on whatever box has
+the decisions live: `frameserver`, a Go binary in a scratch Docker image, on whatever box has
 spare CPU. The frame's `tfctl agent` polls it for config and posts heartbeats. Consequences:
 
 - Dashboard changes are a container rebuild. The SD card is written once.
