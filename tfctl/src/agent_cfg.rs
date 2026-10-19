@@ -22,7 +22,19 @@ impl Agent {
     /// affect cog. Idempotent: an unchanged object does nothing.
     pub fn apply_config(&mut self, v: &Value) {
         let mut over: Vec<(&str, String)> = Vec::new();
-        if let Some(u) = v.field_string("url").filter(|u| *u != self.cfg.url) {
+        // The server may send a path ("/frame/kitchen"); resolve it against SERVER_URL.
+        let abs = |u: String| {
+            if u.starts_with('/') {
+                format!("{}{}", self.cfg.server_url.trim_end_matches('/'), u)
+            } else {
+                u
+            }
+        };
+        if let Some(u) = v
+            .field_string("url")
+            .map(abs)
+            .filter(|u| *u != self.cfg.url)
+        {
             over.push(("FRAME_URL", u.clone()));
             self.cfg.url = u.clone();
             if !self.on_fallback {
@@ -175,6 +187,16 @@ mod tests {
             rx.try_recv().unwrap(),
             KioskCmd::SetUrl("http://nas:8080/frame/other".into())
         );
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn relative_url_resolves_against_server() {
+        let (mut a, rx, _) = agent("relurl");
+        a.apply_config(&json::parse(r#"{"url":"/frame/rel"}"#).unwrap());
+        let want = format!("{}/frame/rel", a.cfg.server_url.trim_end_matches('/'));
+        assert_eq!(a.cfg.url, want);
+        assert_eq!(rx.try_recv().unwrap(), KioskCmd::SetUrl(want));
         let _ = std::fs::remove_file(&a.conf_path);
     }
 

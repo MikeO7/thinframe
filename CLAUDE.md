@@ -8,8 +8,9 @@ Recommended order for a fresh start: S0, S1, S2 (the Go server with real tests),
 TASK 10 (`tfctl agent` talking to that server, natively on the Mac), then M1 (the sim container),
 then 1 to 3 (the image). Sections 4 to 8 and 13 need the owner at the frame; batch them.
 
-Mac prerequisites: Xcode CLT, Homebrew `git curl python3 shellcheck qemu`, Docker Desktop or
-OrbStack with `linux/arm/v7` emulation, Rust via rustup with `cargo-zigbuild`, Go 1.23.
+Mac prerequisites: Xcode CLT, Homebrew `git curl python3 shellcheck qemu cargo-zigbuild`, Docker
+(any; Buildroot cross-compiles inside a linux/arm64 or amd64 container, no armv7 emulation needed),
+Rust via rustup (cargo is at `~/.rustup/toolchains/stable-*/bin`, not on PATH), Go 1.27.
 
 ## When stuck
 Prefer reading the upstream ormarch repo (`image/cache/ormarch` after `image/build.sh inputs`)
@@ -54,6 +55,6 @@ Mac-side build scripts may stay bash.
 
 ## Style
 
-Shell on the Mac: `#!/usr/bin/env bash` with `set -euo pipefail`. On the frame only OpenRC
-service files and `local.d` one-liners are shell. Run `shellcheck` before committing. Keep scripts under 150 lines; split otherwise.
+Shell on the Mac: `#!/usr/bin/env bash` with `set -euo pipefail`. On the frame only the BusyBox
+init script `S90thinframe` is shell. Run `shellcheck` before committing. Keep scripts under 150 lines; split otherwise.
 Commit small. Branch `mikeo/<topic>`, PR, auto-merge.

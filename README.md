@@ -1,13 +1,13 @@
 # thinframe
 
 A thin client for cheap Android photo frames. The frame (PF1007L, Allwinner A33, armv7, 1 GB)
-runs Alpine Linux and one browser process; all the brains live in `frameserver`, a Go
+runs a Buildroot-built Linux and one browser process; all the brains live in `frameserver`, a Go
 binary in a Docker container on hardware with real horsepower. The frame's CPU, GPU and
 RAM go to rendering the dashboard and nothing else.
 The frame boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page
 full screen with working touch. The page, its data and the per-frame settings
 come from the container (`server/`). The container also carries the frame's entire
-operating system as an A/B update bundle: a weekly rebuild against current Alpine
+operating system as an A/B update bundle: a weekly Buildroot rebuild on its LTS branch
 keeps every frame patched with automatic rollback. The card is written once.
 The container speaks MCP, so Claude can manage frames in plain language. The display stack is a single
 process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
@@ -23,8 +23,11 @@ whatever) finishes it.
 [pangoleen/ormarch-picture-frame](https://github.com/pangoleen/ormarch-picture-frame)
 already runs a full Omarchy/Hyprland desktop on this frame. It proved the boot
 chain, panel driver, touch, and Wi-Fi. thinframe reuses those proven, pinned
-artifacts and swaps the Arch desktop for a ~150 MB Alpine root whose only job
+artifacts and swaps the Arch desktop for a ~150 MB Buildroot root whose only job
 is to render a web page. Memory and CPU go to the content.
+
+The OS is built with Buildroot: nothing is installed that is not in our defconfig, and every
+version (WPE, cog, kernel, mesa) is pinned in this repo and bumped on purpose.
 
 ## Hardware (tested unit, from the upstream project)
 
@@ -42,7 +45,7 @@ is to render a web page. Memory and CPU go to the content.
 ## Architecture
 
 ```
- server (Docker, any box)                      frame (Alpine, 1 GB A33)
+ server (Docker, any box)                      frame (Buildroot, 1 GB A33)
  ┌──────────────────────────┐    Wi-Fi LAN    ┌──────────────────────────┐
  │ frameserver (Go)         │ <── GET /frame/id ── cog (WPE WebKit on DRM)│
  │  static/ dashboard       │ ── HTML/JS/data ──>│                          │
@@ -58,15 +61,15 @@ On the card:
 microSD (MBR)
   8 KiB      u-boot-pf1007l-L.bin         (reused, pinned, from ormarch)
   4 MiB      p1 FAT32 PFBOOT              zImage, DTB, initramfs, extlinux.conf, boot.scr
-  260 MiB    p2 ext4 afroot               Alpine rootfs (grows on first boot)
+  260 MiB    p2 ext4 rootA                Buildroot rootfs (A/B slots, read-only)
 
-Kernel  : linux-armv7 7.2.10 (Arch Linux ARM package) + panel module + DTB
-          + aic8800 modules, all built by the ormarch scripts. See docs/decisions.md.
-Init    : OpenRC
+OS      : Buildroot (musl, BusyBox init), WPE WebKit 2.50 + cog 0.18.5 on DRM, mesa lima
+Kernel  : mainline 7.2.x + ormarch panel patch/DTS + aic8800 module package
+Init    : BusyBox init
 Net     : iwd (Wi-Fi) + dhcpcd, usb gadget NCM as fallback
 Control : one outbound WebSocket from tfctl; server pushes, frame acks. No inbound ports. SSH for humans only.
-Access  : sshd, key only, user `frame`, passwordless sudo
-Display : seatd + cog --platform=drm  (user `frame`, group video/input)
+Access  : dropbear, key only, user `frame`
+Display : cog --platform=drm, launched and supervised by tfctl
 Content : SERVER_URL/frame/FRAME_ID from frameserver; local www/ only as offline fallback
 Tooling : `tfctl`, one static Rust binary (musl, <1 MB): kiosk supervisor, update, wifi, status
 Update  : `tfctl update` = fetch main tarball (no git on the frame) + apply overlay + restart
@@ -118,13 +121,13 @@ Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The
 |---|---|
 | `TASKS.md` | Ordered work list with gates. Start here. |
 | `CLAUDE.md` | Rules for the agent finishing this |
-| `docs/decisions.md` | Why Alpine, why cog on DRM, why reuse the ormarch kernel |
+| `docs/decisions.md` | Why Buildroot, why cog on DRM, why reuse the ormarch kernel work |
 | `docs/hardware.md` | Facts copied from the upstream project, with confidence tags |
 | `docs/flashing.md` | The three-step user guide for a new frame |
 | `docs/update-and-ssh.md` | How to get in and how to change things on a running frame |
-| `image/build.sh` | Builds the SD image on a Mac with Docker |
+| `image/build.sh` | Builds the SD image in Docker (Buildroot external tree in `image/buildroot/`) |
 | `image/boot/` | extlinux.conf and uEnv.txt templates for the FAT partition |
-| `image/rootfs/` | Overlay copied over the Alpine minirootfs |
+| `image/rootfs/` | Root overlay applied by Buildroot (`BR2_ROOTFS_OVERLAY`) |
 | `www/` | The page the frame shows |
 | `tfctl/` | Rust: the only custom code on the frame |
 | `server/` | Go: the brains. Dockerfile builds a scratch image |

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -80,7 +82,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			var hb store.Heartbeat
 			_ = json.Unmarshal(data, &hb)
 			_, _ = s.recordHeartbeat(id, hb)
-			s.Hub.Send(id, hub.Msg{"type": "hello", "time_unix": time.Now().Unix(), "tz": time.Local.String(), "server_version": s.opts.Version})
+			s.Hub.Send(id, hub.Msg{"type": "hello", "time_unix": time.Now().Unix(), "tz": localTZ(), "server_version": s.opts.Version})
 		case "heartbeat":
 			var hb store.Heartbeat
 			_ = json.Unmarshal(data, &hb)
@@ -100,4 +102,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_, _ = s.Store.Update(id, func(f *store.Frame) { store.AddEvent(f, "frame:"+ev.Kind, ev.Text) })
 		}
 	}
+}
+
+// localTZ returns an IANA zone name for the frames: $TZ, else the /etc/localtime
+// symlink target, else UTC. Go's time.Local.String() is "Local" and useless to a frame.
+func localTZ() string {
+	if tz := os.Getenv("TZ"); tz != "" {
+		return tz
+	}
+	if target, err := os.Readlink("/etc/localtime"); err == nil {
+		if i := strings.Index(target, "zoneinfo/"); i >= 0 {
+			return target[i+len("zoneinfo/"):]
+		}
+	}
+	return "UTC"
 }

@@ -1,10 +1,15 @@
 # Decisions
 
-## Alpine, not Arch Linux ARM
-Alpine armv7 minirootfs is ~3 MB; the finished root should be under 200 MB. musl + busybox
-+ OpenRC start in a few seconds and idle at ~30 MB. Arch ARM gave us systemd and a desktop we
-do not need. Alpine is still a real package manager, so `cog`, `iwd`, `openssh` are one
-`apk add` away.
+## Buildroot, not Alpine, not Arch Linux ARM (decided 2026-10-18)
+The first plan was Alpine. On 2026-10-18 we found that Alpine 3.24 and edge no longer package
+`cog` or `wpewebkit` on any architecture (3.21 was the last), so "Alpine + cog" cannot be built
+from packages. Buildroot is the canonical way to put WPE on a small ARM board: it cross-compiles
+a complete, immutable root from a defconfig we own, with WPE WebKit 2.50 and cog 0.18.5 (DRM
+platform) as first-class packages, and lets us pick the kernel, libc (musl) and init (BusyBox).
+The result is smaller than Alpine would have been and every version is ours to bump. The cost is
+a first WebKit build of 1 to 3 hours (cached afterwards) and a more opinionated tree for the next
+person. Debian trixie armhf (cog 0.18.4, WPE 2.48.3, systemd, ~400 MB) was the fallback and is
+documented in case Buildroot proves too heavy to maintain.
 
 ## cog on DRM, not a Wayland compositor, not X
 The frame shows exactly one web page. A compositor only adds a process, a buffer copy and
@@ -25,18 +30,19 @@ Verify the exact spelling against the installed cog version. [U]
 If `apk info -L cog` has no drm platform on armv7, the fallback is `cage` + `cog --platform=wl`
 and the service file already has the lines to swap in.
 
-## Reuse the ormarch kernel
+## Kernel: Buildroot builds mainline with the ormarch patches
 Mainline needs two things this board does not have upstream: the JD9365DA panel init table and
-the AIC8800 SDIO driver. ormarch already builds both as modules against Arch's `linux-armv7`
-7.2.10 and has a DTB that booted. A kernel is distro-neutral: we unpack the Arch package for
-`/boot/zImage` and `/lib/modules/...` into the Alpine root. Later, if wanted, build the same
-sources with Alpine's `abuild` and drop the Arch dependency (not a task now).
+the AIC8800 SDIO driver. ormarch carries the panel patch, the board DTS and the AIC8800 build
+recipe, proven on hardware against 7.2.10. Buildroot builds the kernel itself: we point it at a
+pinned mainline tag, apply the ormarch panel patch and DTS from `image/buildroot/board/pf1007l/`,
+and add `aic8800` as a Buildroot kernel-module package. Phase one pins the same 7.2.x line
+ormarch tested; bumping is a one-line change once the frame is verified.
 
-## OpenRC services instead of systemd units
-Alpine default. `thinframe` is a plain `supervise-daemon` service so a crashed cog restarts.
+## BusyBox init instead of systemd
+Buildroot default. `/etc/init.d/S90thinframe` starts `tfctl kiosk`, which supervises cog itself; a BusyBox `inittab` respawn line restarts tfctl if it ever dies.
 
-## SSH key only, user `frame`, `doas` not `sudo`
-Smaller, Alpine default. Host key generated once into `image/secrets/` so re-flashing a card
+## SSH key only, user `frame`, no sudo at all
+Dropbear, key-only. tfctl runs as root for DRM, backlight, clock and updates; there is nothing else to escalate to. Host key generated once into `image/secrets/` so re-flashing a card
 does not change the fingerprint.
 
 ## Content as a local file by default
@@ -53,9 +59,8 @@ updater, the Wi-Fi helper and the status tool. The rest of the system is stock A
 OpenRC, eudev, seatd, iwd, dhcpcd, sshd.
 
 ## Nothing extra in the image
-No avahi (dbus + daemon for a name the router already knows), no chrony (busybox ntpd), no git
-(tfctl downloads a tarball), no htop/curl/rsync in the release image. Debug tools are in
-`image/packages-debug.txt` and only go into a DEBUG build.
+No avahi, no dbus, no ntp daemon, no git, no package manager at all. Debug tools (evtest,
+libinput-tools, i2c-tools) are a separate Buildroot config fragment used only for a DEBUG build.
 
 ## Where dashboard performance actually comes from
 `tfctl` is not on the hot path: it launches cog and sleeps. Frame rate and responsiveness are
