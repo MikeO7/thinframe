@@ -56,3 +56,15 @@ OpenRC, eudev, seatd, iwd, dhcpcd, sshd.
 No avahi (dbus + daemon for a name the router already knows), no chrony (busybox ntpd), no git
 (afctl downloads a tarball), no htop/curl/rsync in the release image. Debug tools are in
 `image/packages-debug.txt` and only go into a DEBUG build.
+
+## Where dashboard performance actually comes from
+`afctl` is not on the hot path: it launches cog and sleeps. Frame rate and responsiveness are
+decided by WPE WebKit (C++, GLES on lima) and by the page. Rules for `www/`:
+- No framework. Plain HTML/CSS/JS, one file if possible.
+- Animate only `transform` and `opacity` (GPU composited). No layout thrash, no box-shadow animation.
+- Few DOM nodes. Update text, do not rebuild trees.
+- Images pre-sized to the panel (800x1280 or 1280x800). No client-side scaling of 4K photos.
+- Fetch data on a timer, render diffs. Keep JS heap small; the WebProcess has ~200 MB to live in.
+
+If HTML ever becomes the bottleneck, the escape hatch is a Rust renderer drawing straight to
+DRM/GBM with GLES (no browser at all). That is a different project; note it, do not start it.

@@ -6,7 +6,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x -e SC1091,SC2034 image/build.sh scripts/*.sh image/rootfs/etc/local.d/*
       - run: grep -q '<title>alpineframe</title>' www/index.html
   afctl:
