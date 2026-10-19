@@ -1,7 +1,10 @@
 # Getting in and changing things
 
+New frame? Start at [flashing.md](flashing.md). This page is for after that.
+
 ## Paths in
-1. Wi-Fi: `ssh frame@thinframe` (router DNS from the DHCP hostname) or the IP. Key from `image/secrets/frame_id_ed25519`.
+1. Wi-Fi: `ssh frame@<frame name>` (hostname = FRAME_ID, router DNS) or the IP shown in `/admin`.
+   Key: `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh`.
 2. USB-C data cable to the Mac: the frame appears as a USB Ethernet device. Frame is
    192.168.7.2, Mac side gets 192.168.7.1 via the frame's dhcpd. `ssh frame@192.168.7.2`.
    Also a USB serial console: `screen /dev/tty.usbmodem* 115200`.

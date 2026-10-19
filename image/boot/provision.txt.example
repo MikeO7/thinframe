@@ -1,0 +1,11 @@
+# Copy to provision.txt on the PFBOOT partition. Consumed and deleted on first boot by tfctl.
+# Quotes optional. Lines starting with # ignored.
+WIFI_SSID=HomeWifi
+WIFI_PSK=correct horse battery staple
+SERVER_URL=http://nas.local:8080
+FRAME_ID=kitchen
+FRAME_TOKEN=dev-token-change-me
+# Optional. Default 3 (landscape, cable at the bottom). 1 = cable at the top.
+#COG_ROTATION=3
+# Optional. A public key to add for ssh. flash.sh fills this in.
+#SSH_PUBKEY=ssh-ed25519 AAAA... you@mac

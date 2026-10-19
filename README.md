@@ -102,13 +102,12 @@ The frame's hardware is for the dashboard, not the OS. Hard limits, checked in T
 
 ## Quick start (once TASKS.md is done)
 
-```sh
-export PF1007L_TOUCH_FIRMWARE=/path/to/gsl_m86_hd.fw
-image/build.sh                 # makes image/out/thinframe-sd.img
-scripts/write-card-macos.sh image/out/thinframe-sd.img
-# insert card, power on, wait ~40 s
-ssh frame@thinframe.local    # or frame@192.168.7.2 over the USB cable
-```
+1. Server: `docker compose up -d` on any box with Docker.
+2. Card: `curl -fsSL https://raw.githubusercontent.com/MikeO7/thinframe/main/scripts/flash.sh | bash`
+   and answer four questions (Wi-Fi, password, server, frame name).
+3. Card in the frame, power on, wait a minute. It appears in `/admin`.
+
+Full walkthrough and troubleshooting: [docs/flashing.md](docs/flashing.md).
 
 Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The frame is never touched.
 
@@ -120,6 +119,7 @@ Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The
 | `CLAUDE.md` | Rules for the agent finishing this |
 | `docs/decisions.md` | Why Alpine, why cog on DRM, why reuse the ormarch kernel |
 | `docs/hardware.md` | Facts copied from the upstream project, with confidence tags |
+| `docs/flashing.md` | The three-step user guide for a new frame |
 | `docs/update-and-ssh.md` | How to get in and how to change things on a running frame |
 | `image/build.sh` | Builds the SD image on a Mac with Docker |
 | `image/boot/` | extlinux.conf and uEnv.txt templates for the FAT partition |
@@ -128,6 +128,6 @@ Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The
 | `tfctl/` | Rust: the only custom code on the frame |
 | `server/` | Go: the brains. Dockerfile builds a scratch image |
 | `sim/` | Simulated frame container: headless WPE + agent, or QEMU of the real image |
-| `scripts/` | Card writer wrapper, deploy over SSH |
+| `scripts/` | `flash.sh` one-command flasher, `deploy.sh` dev push |
 
 License: MIT.

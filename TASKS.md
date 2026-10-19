@@ -105,6 +105,18 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] Rollback test in sim qemu mode: ship a bundle with a broken init, watch U-Boot flip back after 3 tries.
 - Gate: sim qemu frame goes 2026.10.a → .b → rollback → .c with no manual steps.
 
+## 14. Flashing must be three steps (docs/flashing.md is the spec)
+- [ ] `scripts/flash.sh`: release download with sha256, card discovery with guards, typed confirmation,
+      one sudo write + readback, `provision.txt` onto PFBOOT, eject. `--settings-only` rewrites
+      provision.txt only. Reuse ormarch `image/tools/write-card.py` guard logic.
+- [ ] `tfctl provision` on first boot (called from an OpenRC service before `thinframe`): read
+      `/boot/provision.txt`, write iwd profile, `thinframe.conf` (SERVER_URL, FRAME_ID, FRAME_TOKEN,
+      COG_ROTATION), `authorized_keys` from SSH_PUBKEY, hostname = FRAME_ID; delete the file; continue boot.
+- [ ] On-screen status page (local file, shown by cog until the server answers): "connecting to Wi-Fi",
+      "cannot reach http://…", with the IP once it has one. This is the only local page besides fallback.
+- [ ] 14b Linux variant of flash.sh (lsblk instead of diskutil).
+- Gate: a person who has not read the repo flashes a frame from docs/flashing.md alone, timed, no questions asked.
+
 ## 11. Auto-update from the container (frame side)
 - [ ] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
       `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs
@@ -125,6 +137,9 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       same handler as REST. Gate: from Claude Code, "rotate frame sim to 1" changes the sim screenshot.
 - [ ] S8 Weekly `release.yml`: rebuild image on Alpine stable + pinned kernel, QEMU boot test, publish
       container with the new `system-<date>.tar` embedded. Dependabot for Go (server), Cargo (tfctl) and GitHub Actions.
+- [ ] S9 Frames auto-register on first heartbeat with a valid token (no pre-creation in admin).
+- [ ] S10 `release.yml` publishes `thinframe-sd.img.zst` + `.sha256` as a GitHub release asset on tag,
+      so flash.sh never needs a local build.
 - [ ] S6 Artifacts: Dockerfile stage cross-builds `tfctl` for armv7 and tars `image/rootfs/`;
       server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
 - [ ] S5 `/api/data/*` adapters the dashboard needs (first: photos dir, clock, weather). Each one a
