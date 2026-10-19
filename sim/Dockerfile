@@ -1,8 +1,24 @@
-# TASK M1. Debian/Alpine with cog + wpewebkit (headless platform), plus tfctl built for the host arch.
-# Loop: tfctl agent & ; cog --platform=headless renders $SERVER_URL/frame/$FRAME_ID; screenshot to /out/frame.png.
-# Note: cog headless has no screenshot flag; use WPEWebDriver or wpe's `--enable-automation` + a
-# tiny script, or render via `wpewebkit` GTK-less minibrowser with offscreen capture. Pick the simplest
-# that works and record it in docs/decisions.md.
-FROM alpine:3.24
-RUN apk add --no-cache cog wpewebkit
-ENTRYPOINT ["/bin/sh", "-c", "echo 'TASK M1 not implemented'; exit 1"]
+# simframe: WPE WebKit (cog headless) + WPEWebDriver + the real tfctl agent + a Go driver that
+# follows the server's config and writes /out/frame.png. Runs on amd64 or arm64; no hardware.
+FROM rust:1-slim-trixie AS tfctl
+WORKDIR /src
+COPY tfctl/ .
+RUN cargo build --release && strip target/release/tfctl
+
+FROM golang:1.27-trixie AS driver
+WORKDIR /src
+COPY sim/go.mod ./
+COPY sim/cmd ./cmd
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /simframe ./cmd/simframe
+
+FROM debian:trixie-slim
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+      cog wpewebkit-driver fonts-dejavu-core ca-certificates iproute2 \
+      libgles2 libegl1 libgl1-mesa-dri libegl-mesa0 libgbm1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=tfctl /src/target/release/tfctl /usr/bin/tfctl
+COPY --from=driver /simframe /usr/bin/simframe
+ENV SERVER_URL=http://frameserver:8080 FRAME_ID=sim SHOT_INTERVAL_S=5 OUT_DIR=/out \
+    LIBGL_ALWAYS_SOFTWARE=1 EGL_PLATFORM=surfaceless WEBKIT_DISABLE_DMABUF_RENDERER=1 GALLIUM_DRIVER=llvmpipe
+VOLUME /out
+ENTRYPOINT ["/usr/bin/simframe"]

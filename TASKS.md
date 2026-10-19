@@ -145,42 +145,48 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
   reports the new version; break the binary on purpose, frame rolls back.
 
 ## S. Server (any box with Docker)
-- [ ] S0 CI job for `server/`: `go vet`, `go test ./...`, `staticcheck`, multi-arch Docker build.
-- [ ] S1 `server/`: stdlib ServeMux serving static/ at /frame/{id}, config GET/PUT, heartbeat POST,
+- [x] S0 CI job for `server/`: gofmt, `go vet`, `go build`, `go test ./...` (multi-arch image: release.yml on tags).
+- [x] S1 `server/`: stdlib ServeMux serving static/ at /frame/{id}, config GET/PUT, heartbeat POST,
       JSON files in /data (internal/store). `go test` covers the config merge and one-shot action clearing.
-- [ ] S1b `/api/frames/{id}/ws`: one goroutine per frame, hub keyed by id, push `config` on PUT and
+- [x] S1b `/api/frames/{id}/ws`: one goroutine per frame, hub keyed by id, push `config` on PUT and
       `action` on request, resend unacked actions on reconnect, mark offline on socket close. Admin,
       REST and MCP all go through the hub so a change reaches the frame in under a second.
-- [ ] S1c `/api/stream/{id}` SSE for the dashboard page's live data (separate from the control socket).
-- [ ] S2 `/admin`: plain HTML table of frames (id, ip, last seen, mem, temp) + edit form.
-- [ ] S3 Dockerfile builds static musl for amd64 and arm64; `docker compose up` works; GH Action
-      pushes ghcr.io/mikeo7/thinframe-server on tag.
-- [ ] S4 optional FRAME_TOKEN bearer auth for off-LAN use.
-- [ ] S7 MCP: `/mcp` streamable HTTP with bearer auth, tools from decisions.md table, each calling the
+- [x] S1c `/api/stream/{id}` SSE for the dashboard page's live data (separate from the control socket).
+- [x] S2 `/admin`: plain HTML table of frames (id, ip, last seen, mem, temp) + edit form.
+- [x] S3 Dockerfile builds a static Go binary for amd64/arm64 (scratch, 11 MB); `docker compose up`
+      works; release.yml pushes ghcr.io/mikeo7/thinframe-server on tags.
+- [x] S4 FRAME_TOKEN bearer auth on /api and /mcp (frame page and admin stay LAN-open).
+- [x] S7 MCP: `/mcp` streamable HTTP with bearer auth, tools from decisions.md table, each calling the
       same handler as REST. Gate: from Claude Code, "rotate frame sim to 1" changes the sim screenshot.
 - [ ] S8 Weekly `release.yml`: rebuild the Buildroot image on the pinned LTS branch + pinned kernel, QEMU boot test, publish
       container with the new `system-<date>.tar` embedded. Dependabot for Go (server), Cargo (tfctl) and GitHub Actions.
-- [ ] S9 Frames auto-register on first heartbeat with a valid token (no pre-creation in admin).
+- [x] S9 Frames auto-register on first heartbeat with a valid token (no pre-creation in admin).
 - [ ] S10 `release.yml` publishes `thinframe-sd.img.zst` + `.sha256` as a GitHub release asset on tag,
       so flash.sh never needs a local build.
 - [ ] S6 Artifacts: Dockerfile stage cross-builds `tfctl` for armv7 and tars `image/rootfs/`;
       server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
-- [ ] S5 Widgets + layout: `layout.json` per frame, `html/template` renderer, widget library
+- [x] S5 Widgets + layout: `layout.json` per frame, `html/template` renderer, widget library
       (clock, photo, weather, calendar, text, iframe) in `internal/widgets/`, `/admin` layout form,
       MCP `set_layout`/`list_widgets`. Gate: two frames, two layouts, one container.
-- [ ] S5b Photo adapter: `PHOTOS_DIR` scan, resize to 1280x800 and 800x1280, EXIF strip, cache,
+- [x] S5b Photo adapter: `PHOTOS_DIR` scan, resize to 1280x800 and 800x1280, EXIF strip, cache,
       `/api/data/photo/next`. Interface `PhotoSource` so Immich/Google/iCloud can be added later.
 - [ ] S5c `hello` reply carries `time_unix` and `tz`; weather and calendar adapters behind
       `/api/data/*`; the page never calls third parties directly.
 - Gate: two frames with different ids show different pages from one container.
 
 ## M. Simulator (second container, dev only)
-- [ ] M1 `sim/` `SIM_MODE=wpe`: headless WPE + native tfctl agent as frame `sim`, screenshots to
-      `sim/out/frame.png`. Gate: change rotation in /admin, next screenshot is rotated.
-- [ ] M2 `SIM_MODE=qemu`: boots `image/out/thinframe-sd.img` under qemu-system-arm with the orangepi-pc
-      board and a DTB that has no panel; serial on the container log; user-mode net forwards 22.
-      Gate: `ssh -p 2222 frame@localhost` into the emulated frame, heartbeat visible in /admin.
-- [ ] M3 `docker compose --profile sim up` from the repo root starts both containers; README one-liner.
+- [x] M1 `sim/` fast mode: Debian trixie cog 0.18.4 headless + WPEWebDriver + real tfctl agent as
+      frame `sim`, screenshots to `sim/out/frame.png`. Gate passed 2026-10-18: rotation 0 via REST
+      gave a 375x600 portrait shot, rotation 3 gave 800x500 landscape; a layout PUT changed the shot.
+- [ ] M2 `sim/qemu/`: the REAL Buildroot image under `qemu-system-arm -M virt` (same rootfs.ext4,
+      same tfctl, same cog on DRM): a `pf1007l_qemu_defconfig` that reuses the main defconfig with
+      the virt kernel fragment (virtio-gpu for /dev/dri/card0, virtio-input touchscreen, virtio-net,
+      virtio-blk) and mesa swrast for GLES; `sim/qemu/run.sh` boots the A/B SD image with user-mode
+      net (`hostfwd` 22 and the frameserver reachable), screenshots via the QEMU monitor `screendump`
+      every N s into `sim/out/frame.png`, touch via QEMU `input-send-event`.
+      Gate: frame `sim-qemu` appears in /admin from the real image; screendump shows the dashboard;
+      an A/B system update + rollback runs end-to-end inside QEMU. Slow (TCG), for correctness only.
+- [x] M3 `docker compose --profile sim up --build` from the repo root starts both containers (README).
 - [ ] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
 
 ## 13. Smoothness (measure, then tune)

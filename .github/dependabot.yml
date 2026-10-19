@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /server
+    schedule: { interval: weekly }
+  - package-ecosystem: gomod
+    directory: /sim
+    schedule: { interval: weekly }
+  - package-ecosystem: cargo
+    directory: /tfctl
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /server
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /sim
+    schedule: { interval: weekly }

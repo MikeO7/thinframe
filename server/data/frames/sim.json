@@ -1,0 +1,105 @@
+{
+  "id": "sim",
+  "config": {
+    "rotation": 3,
+    "brightness": 100,
+    "page_version": 2
+  },
+  "layout": {
+    "cols": 2,
+    "rows": 2,
+    "theme": "light",
+    "widgets": [
+      {
+        "id": "hello",
+        "type": "text",
+        "x": 0,
+        "y": 0,
+        "w": 2,
+        "h": 1,
+        "props": {
+          "text": "Hello from the server"
+        }
+      },
+      {
+        "id": "clock",
+        "type": "clock",
+        "x": 0,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      },
+      {
+        "id": "status",
+        "type": "status",
+        "x": 1,
+        "y": 1,
+        "w": 1,
+        "h": 1
+      }
+    ]
+  },
+  "first_seen": "2026-10-19T03:41:21.453674169Z",
+  "last_seen": "2026-10-19T03:49:05.921698146Z",
+  "last_heartbeat": {
+    "at": "2026-10-19T03:49:05.921698146Z",
+    "uptime_s": 354,
+    "mem_used_mb": 853,
+    "mem_total_mb": 0,
+    "ip": "10.89.0.7",
+    "wifi_rssi": 0,
+    "temp_c": 0,
+    "tfctl_version": "0.1.0",
+    "system_version": "",
+    "slot": "UUID=ef1232e7-210b-4ab9-89ea-e14aae606099",
+    "page_url": "http://frameserver:8080/frame/sim",
+    "latency_ms": 0,
+    "screen_state": "on",
+    "cog_pid": 14,
+    "load_avg": 0
+  },
+  "pending_actions": null,
+  "action_history": null,
+  "events": [
+    {
+      "at": "2026-10-19T03:41:21.453680044Z",
+      "kind": "ws",
+      "text": "connected from 10.89.0.3:38598"
+    },
+    {
+      "at": "2026-10-19T03:44:14.607951768Z",
+      "kind": "ws",
+      "text": "connected from 10.89.0.3:33490"
+    },
+    {
+      "at": "2026-10-19T03:45:48.433455386Z",
+      "kind": "ws",
+      "text": "connected from 10.89.0.5:54146"
+    },
+    {
+      "at": "2026-10-19T03:46:18.644335068Z",
+      "kind": "layout",
+      "text": "3 widgets, page_version 2"
+    },
+    {
+      "at": "2026-10-19T03:48:04.890700326Z",
+      "kind": "ws",
+      "text": "connected from 10.89.0.7:48602"
+    },
+    {
+      "at": "2026-10-19T03:48:35.034875211Z",
+      "kind": "config",
+      "text": "set [rotation]"
+    },
+    {
+      "at": "2026-10-19T03:48:47.070554748Z",
+      "kind": "config",
+      "text": "set [rotation]"
+    },
+    {
+      "at": "2026-10-19T03:49:24.08244776Z",
+      "kind": "ws",
+      "text": "disconnected"
+    }
+  ]
+}

@@ -218,6 +218,10 @@ func TestLayoutAndPage(t *testing.T) {
 	if !strings.Contains(string(page), "hello frame") || !strings.Contains(string(page), `id="w-c"`) {
 		t.Fatalf("page: %s", page)
 	}
+	_, simPage := do(t, "GET", ts.URL+"/frame/hall?sim=1280x800", "", nil)
+	if !strings.Contains(string(simPage), "width:1280px;height:800px") {
+		t.Fatalf("sim size not applied")
+	}
 	_, cfg := do(t, "GET", ts.URL+"/api/frames/hall/config", "", nil)
 	if !strings.Contains(string(cfg), `"page_version":2`) {
 		t.Fatalf("page_version not bumped: %s", cfg)
