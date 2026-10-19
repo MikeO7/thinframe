@@ -14,9 +14,9 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       stable armv7 minirootfs from https://alpinelinux.org/downloads/ . Record the date.
 
 ## 0b. tfctl builds
-- [ ] `cargo build --release --target armv7-unknown-linux-musleabihf` (cargo-zigbuild or cross)
+- [x] `cargo build --release --target armv7-unknown-linux-musleabihf` (cargo-zigbuild or cross)
       produces a static binary. CI does it and fails if `tfctl` is over 1 MB.
-- [ ] `tfctl status` runs on the Mac host build and prints the config line.
+- [x] `tfctl status` runs on the Mac host build and prints the config line.
 - Gate: CI green, binary size logged.
 
 ## 1. Build the boot inputs (Mac, no frame)
@@ -92,15 +92,15 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: edit `www/index.html` on the Mac, `deploy.sh`, page changes within 5 s.
 
 ## 10. Thin client (frame side)
-- [ ] `tfctl agent` (tfctl/src/agent.rs): WebSocket client (RFC 6455 over TcpStream, text frames,
+- [x] `tfctl agent` (tfctl/src/agent.rs): WebSocket client (RFC 6455 over TcpStream, text frames,
       ping/pong, masking), hello/heartbeat/ack out, config/action in; reconnect with backoff; HTTP
       GET /config + 60 s poll fallback when the socket is down; fallback URL when the server is gone
       for 3 attempts. Runs as a thread inside `tfctl kiosk` when SERVER_URL is set.
-- [ ] Unit tests for the frame codec (mask/unmask, fragment, close) and the message types.
+- [x] Unit tests for the frame codec (mask/unmask, fragment, close) and the message types.
 - [ ] Set system clock and TZ from the `hello` reply on every connect (no NTP on the frame).
 - [ ] `brightness` and `schedule` in config: backlight via sysfs, cog SIGSTOP/SIGCONT, touch wakes
       for 60 s, `screen` action, `screen_state` in heartbeat. Evaluated locally so it survives outages.
-- [ ] `tfctl set KEY VALUE` rewrites one key in /etc/thinframe.conf (used for first pairing).
+- [x] `tfctl set KEY VALUE` rewrites one key in /etc/thinframe.conf (used for first pairing).
 - Gate: change rotation in /admin, frame re-renders within 1 s; stop the container, frame shows the
   fallback page within 3 reconnect attempts; start it, frame comes back and acks queued actions.
 
