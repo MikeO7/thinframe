@@ -3,6 +3,11 @@
 Ordered. Each has a gate. Do not start the next until the gate is checked and logged in
 `docs/log.md`. Items marked (owner) need a human at the frame.
 
+## K. Kernel on Alpine (later; removes the Arch kernel dependency)
+- [ ] K1 Build the ormarch panel patch + aic8800 modules against Alpine's `linux-lts` with `abuild`
+      in a Docker armv7 container; publish as apk in a repo the image build pulls from.
+- Gate: same frame boots on the Alpine kernel; weekly rebuild tracks Alpine kernel updates.
+
 ## 0. Repo hygiene
 - [ ] `shellcheck` passes on every `.sh` in CI (`.github/workflows/ci.yml`).
 - [ ] Pin `ALPINE_VERSION` and `ALPINE_MINIROOTFS_SHA256` in `image/build.sh` to the current
@@ -38,11 +43,17 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: `image/build.sh test` boots the rootfs in QEMU (`-M orangepi-pc`, same trick ormarch
   uses) to an OpenRC login prompt and `ssh` works to the guest.
 
-## 3. Assemble the card image
-- [ ] `image/build.sh assemble` writes MBR (signature `50463037`), U-Boot at 8 KiB, FAT32
-      `PFBOOT` at 4 MiB (256 MiB) with zImage, DTB, `extlinux/extlinux.conf`, `boot.scr`,
-      `uEnv.txt`; ext4 `afroot` with the rootfs. Root by `PARTUUID=50463037-02`.
-- [ ] First-boot service `/etc/local.d/10-growroot.start` grows p2 to the card and removes itself.
+## 3. Assemble the card image (A/B layout, see decisions.md)
+- [ ] `image/build.sh assemble`: MBR sig `50463037`, U-Boot at 8 KiB, p1 FAT32 `PFBOOT` 256 MiB
+      (`zImage.a`, DTBs, `extlinux/extlinux.conf` with labels a/b, `boot.scr`, `uEnv.txt` with
+      `slot=a tries=0`), p2 ext4 `rootA` 1 GiB, p3 ext4 `rootB` 1 GiB (empty), p4 ext4 `data` to end.
+- [ ] Root mounts read-only; `/etc/thinframe.conf`, `/etc/ssh`, `/var/lib/iwd`, `/var/log`,
+      `/var/lib/thinframe` are bind mounts from `data` (fstab in the overlay).
+- [ ] First boot grows p4 (not the root) to the card.
+- [ ] `image/build.sh bundle` also emits `system-<ver>.tar` (zImage, rootfs.ext4.zst, sha256,
+      version.json) for the container to ship.
+- [ ] boot.scr: read `slot`/`tries` from `uEnv.txt`; if `tries>0` decrement and write back; if it hits
+      0, flip slot. (ormarch's boot.scr has the counter/state-file machinery; extend, don't rewrite.)
 - Gate: image self-check in `build.sh` passes; `image/out/thinframe-sd.img.sha256` written.
 
 ## 4. First boot on the frame (owner)
@@ -87,6 +98,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: change rotation in /admin, frame re-renders within one poll interval; stop the container,
   frame shows the fallback page within 3 polls; start it, frame comes back.
 
+## 12. System (OS) update, A/B
+- [ ] Agent: on `system_version` change, stream `rootfs.ext4.zst` to the standby slot via `zstd -d | dd`,
+      copy `zImage.<slot>`, verify both sha256, set `slot=<new> tries=3`, reboot.
+- [ ] First heartbeat after boot writes `tries=0` (slot good) and reports `slot`, `system_version`.
+- [ ] Rollback test in sim qemu mode: ship a bundle with a broken init, watch U-Boot flip back after 3 tries.
+- Gate: sim qemu frame goes 2026.10.a → .b → rollback → .c with no manual steps.
+
 ## 11. Auto-update from the container (frame side)
 - [ ] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
       `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs
@@ -103,16 +121,24 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] S3 Dockerfile builds static musl for amd64 and arm64; `docker compose up` works; GH Action
       pushes ghcr.io/mikeo7/thinframe-server on tag.
 - [ ] S4 optional FRAME_TOKEN bearer auth for off-LAN use.
+- [ ] S7 MCP: `/mcp` streamable HTTP with bearer auth, tools from decisions.md table, each calling the
+      same handler as REST. Gate: from Claude Code, "rotate frame sim to 1" changes the sim screenshot.
+- [ ] S8 Weekly `release.yml`: rebuild image on Alpine stable + pinned kernel, QEMU boot test, publish
+      container with the new `system-<date>.tar` embedded. Dependabot for Go and Rust deps.
 - [ ] S6 Artifacts: Dockerfile stage cross-builds `tfctl` for armv7 and tars `image/rootfs/`;
       server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
 - [ ] S5 `/api/data/*` adapters the dashboard needs (first: photos dir, clock, weather). Each one a
       small module; the page never calls third parties directly.
 - Gate: two frames with different ids show different pages from one container.
 
-## M. Simulator
-- [ ] M1 `sim/`: container with headless WPE + native tfctl agent as frame `sim`, screenshots to
+## M. Simulator (second container, dev only)
+- [ ] M1 `sim/` `SIM_MODE=wpe`: headless WPE + native tfctl agent as frame `sim`, screenshots to
       `sim/out/frame.png`. Gate: change rotation in /admin, next screenshot is rotated.
-- [ ] M2 `make sim` one-liner starts server + sim and opens /admin.
+- [ ] M2 `SIM_MODE=qemu`: boots `image/out/thinframe-sd.img` under qemu-system-arm with the orangepi-pc
+      board and a DTB that has no panel; serial on the container log; user-mode net forwards 22.
+      Gate: `ssh -p 2222 frame@localhost` into the emulated frame, heartbeat visible in /admin.
+- [ ] M3 `docker compose --profile sim up` from the repo root starts both containers; README one-liner.
+- [ ] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
 
 ## 9. Polish (optional, after everything above)
 - [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank

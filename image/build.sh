@@ -22,7 +22,7 @@ KVER="7.2.10-1-armv7-ARCH"
 
 # card layout (same as ormarch so the same U-Boot boot.scr works)
 SIG="50463037"                   # PARTUUID=50463037-01 / -02
-IMG_MIB=2048
+IMG_MIB=3072                     # p1 256M boot, p2+p3 1G root slots, p4 data (grows)
 P1_START_MIB=4
 P1_MIB=256
 TOUCH_FW="${PF1007L_TOUCH_FIRMWARE:-}"

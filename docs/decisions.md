@@ -109,3 +109,72 @@ supervise-daemon runs the old one (TASK 11).
 ## Simulator
 See `sim/README.md`. Tier 1 (headless WPE + native agent in a container) is the one worth
 building: same engine as the frame, full control loop, no hardware.
+
+## Full OS updates: A/B root slots, driven by the container
+"Patched" means the kernel and every Alpine package, not only tfctl. The frame never runs `apk`:
+the image is immutable and replaced whole. Card layout grows from 2 to 4 partitions:
+
+| Part | Content | Why |
+|---|---|---|
+| p1 FAT32 `PFBOOT` | U-Boot script, `extlinux.conf`, `uEnv.txt`, `zImage.a` `zImage.b`, DTBs | U-Boot picks the slot from `uEnv.txt` (`slot=a|b`, `tries=N`) |
+| p2 ext4 `rootA` | Alpine root, read-only mount | active or standby |
+| p3 ext4 `rootB` | Alpine root, read-only mount | standby or active |
+| p4 ext4 `data` | `/etc/thinframe.conf`, ssh host keys, iwd profiles, logs, www fallback | survives updates; bind-mounted over the read-only root |
+
+Update flow: CI builds `system-<ver>.tar` = {zImage, modules, rootfs.ext4.zst, sha256}. The container
+ships it under `/api/artifacts/`. The agent sees `system_version` change, streams the rootfs into the
+standby slot, copies the kernel to `zImage.<slot>`, sets `slot=<new> tries=3` in `uEnv.txt`, reboots.
+U-Boot's `boot.scr` (already has a counter in the ormarch build) decrements `tries`; after three failed
+boots it falls back to the old slot. On success the agent's first heartbeat sets `tries=0`, marking the
+slot good. The server shows each frame's slot, version and last-good in `/admin`.
+
+Why not `apk upgrade` in place: no atomicity, no rollback, drift between frames, and a half-applied
+upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edge case.
+
+## Staying patched
+- A scheduled GitHub Action rebuilds the image weekly against the current Alpine stable branch and
+  the pinned kernel, runs the QEMU boot test, and publishes `system-<date>.tar` with the container
+  image. Frames pick it up on their next poll. Alpine's security fixes reach the frame within a week.
+- Kernel: pinned to the ormarch-built 7.2.x line until TASK K1 (build the same patches on Alpine's
+  `linux-lts` via `abuild`) lands; then it tracks Alpine's kernel updates for free.
+- Dependabot/Renovate on `server/` and `tfctl/` dependencies.
+- Baseline on the frame: root fs read-only; no password login anywhere; sshd key-only, `frame` user
+  only; `doas` for exactly the commands tfctl needs; iwd with WPA2/3 only; no inbound ports besides
+  22; all frame→server traffic over the LAN with a shared bearer token (`FRAME_TOKEN`); artifacts
+  verified by sha256 from the signed-in config response before install. Outbound HTTPS from the
+  frame is unnecessary: the container fetches the world, the frame only talks to the container.
+- Secrets never in the image: host key, token and Wi-Fi PSK live on `data` and are provisioned once.
+
+## Two containers
+`frameserver` is production: one binary, one volume, no build tools. `simframe` is development
+only: it depends on `frameserver` and pretends to be a frame. They never share an image.
+Root `compose.yml` runs the first by default and both with `--profile sim`.
+`simframe` has two modes, picked by `SIM_MODE`:
+
+| Mode | What runs | Speed | Tests |
+|---|---|---|---|
+| `wpe` (default) | headless WPE WebKit + native tfctl agent, screenshots to `sim/out/` | seconds | dashboard rendering, config loop, heartbeats, tfctl updates |
+| `qemu` | the real SD image under `qemu-system-arm` (orangepi-pc board, serial console, user-mode net) | ~1 min boot | OpenRC, networking, A/B system update and rollback |
+
+Neither mode has the DSI panel or the touch controller; those two gates stay on hardware.
+
+## MCP in the backend
+`frameserver` exposes an MCP server (streamable HTTP at `/mcp`, bearer token) so Claude Code or
+Claude Desktop can drive it in natural language: "rotate the kitchen frame", "put the weather
+widget top-left on all frames", "update every frame to the latest system image", "show me what
+the sim frame looks like". Go: `github.com/modelcontextprotocol/go-sdk`. Tools are thin wrappers
+over the same handlers the REST API and `/admin` use, so there is one code path.
+
+Initial tool list (TASK S7):
+
+| Tool | Does |
+|---|---|
+| `list_frames` | ids, ip, last heartbeat, versions, slot, temp, mem |
+| `get_frame` / `set_frame_config` | read / change url, rotation, brightness, page_version, tags |
+| `frame_action` | reboot, restart-kiosk, update-software, update-system, rollback |
+| `get_screenshot` | PNG from the sim (and from real frames once TASK 12 adds a capture path) |
+| `list_widgets` / `set_layout` | dashboard composition stored per frame as JSON the page reads |
+| `get_logs` | last N heartbeats and agent events for a frame |
+| `release_status` | what system/software versions the container carries and which frames lag |
+
+Writes that touch many frames (`update_system` with no id) require `confirm: true`.

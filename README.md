@@ -6,8 +6,10 @@ binary in a Docker container on hardware with real horsepower. The frame's CPU, 
 RAM go to rendering the dashboard and nothing else.
 The frame boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page
 full screen with working touch. The page, its data and the per-frame settings
-come from the container (`server/`). The container also carries the frame's own
-software updates: rebuild it and every frame updates itself. The card is written once. The display stack is a single
+come from the container (`server/`). The container also carries the frame's entire
+operating system as an A/B update bundle: a weekly rebuild against current Alpine
+keeps every frame patched with automatic rollback. The card is written once.
+The container speaks MCP, so Claude can manage frames in plain language. The display stack is a single
 process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
 compositor.
 
@@ -69,6 +71,18 @@ Tooling : `tfctl`, one static Rust binary (musl, <1 MB): kiosk supervisor, updat
 Update  : `tfctl update` = fetch main tarball (no git on the frame) + apply overlay + restart
 ```
 
+## Containers
+
+| Container | Role | Runs where |
+|---|---|---|
+| `frameserver` | the brains: dashboard, per-frame config, heartbeats, artifacts, `/admin`, `/mcp` | your server, always |
+| `simframe` | a fake frame: headless WPE + agent (fast) or the real SD image in QEMU (full OS) | dev machine, `--profile sim` |
+
+```sh
+docker compose up -d                       # production: frameserver only
+docker compose --profile sim up --build    # dev: frameserver + simframe, screenshots in sim/out/
+```
+
 ## Budget
 
 The frame's hardware is for the dashboard, not the OS. Hard limits, checked in TASKS.md:
@@ -109,7 +123,7 @@ Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The
 | `www/` | The page the frame shows |
 | `tfctl/` | Rust: the only custom code on the frame |
 | `server/` | The brains (Go recommended, see decisions.md) + Dockerfile + compose |
-| `sim/` | Simulated frame: headless WPE + agent in a container |
+| `sim/` | Simulated frame container: headless WPE + agent, or QEMU of the real image |
 | `scripts/` | Card writer wrapper, deploy over SSH |
 
 License: MIT.
