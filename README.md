@@ -1,0 +1,95 @@
+# alpineframe
+
+Alpine Linux for the PF1007L 10.1" Android photo frame (Allwinner A33, armv7).
+It boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page full
+screen with working touch. Nothing else runs. The display stack is a single
+process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
+compositor.
+
+Status: **stub.** The design is fixed and every file has its job written at the
+top. Nothing here has booted yet. `TASKS.md` is the ordered list of what is
+left, with a gate after each step. `CLAUDE.md` has the rules for whoever (or
+whatever) finishes it.
+
+## Why this exists
+
+[pangoleen/ormarch-picture-frame](https://github.com/pangoleen/ormarch-picture-frame)
+already runs a full Omarchy/Hyprland desktop on this frame. It proved the boot
+chain, panel driver, touch, and Wi-Fi. alpineframe reuses those proven, pinned
+artifacts and swaps the Arch desktop for a ~150 MB Alpine root whose only job
+is to render a web page. Memory and CPU go to the content.
+
+## Hardware (tested unit, from the upstream project)
+
+| Part | Value |
+|---|---|
+| Board | EFERCRO PF1007L_MB_V1.0 (Humblestead HM-PF1007-BK, AiMOR firmware) |
+| SoC / RAM | Allwinner A33, 4x Cortex-A7, armv7 32-bit, 1 GB |
+| Panel | MIPI-DSI 800x1280 native (portrait). Jadard JD9365DA class. Frame is used landscape: rotate 270 (Hyprland `transform 3`). |
+| Touch | Silead GSL, I2C0 0x40, needs proprietary `gsl_m86_hd.fw` (not in Git) |
+| Wi-Fi | AIC8800DC on SDIO, 2.4 GHz only, out-of-tree driver |
+| GPU | Mali-400 MP2, Mesa lima, GLES 2 only |
+| USB | One USB-C, device mode (powers the frame). Gadget serial + NCM network for recovery |
+| Storage | 16 GB eMMC. **Never written.** We boot from SD only. |
+
+## Architecture
+
+```
+microSD (MBR)
+  8 KiB      u-boot-pf1007l-L.bin         (reused, pinned, from ormarch)
+  4 MiB      p1 FAT32 PFBOOT              zImage, DTB, initramfs, extlinux.conf, boot.scr
+  260 MiB    p2 ext4 afroot               Alpine rootfs (grows on first boot)
+
+Kernel  : linux-armv7 7.2.10 (Arch Linux ARM package) + panel module + DTB
+          + aic8800 modules, all built by the ormarch scripts. See docs/decisions.md.
+Init    : OpenRC
+Net     : iwd (Wi-Fi) + dhcpcd, usb gadget NCM as fallback
+Access  : sshd, key only, user `frame`, passwordless sudo
+Display : seatd + cog --platform=drm  (user `frame`, group video/input)
+Content : /var/lib/alpineframe/www/index.html  (or FRAME_URL in /etc/alpineframe.conf)
+Tooling : `afctl`, one static Rust binary (musl, <1 MB): kiosk supervisor, update, wifi, status
+Update  : `afctl update` = fetch main tarball (no git on the frame) + apply overlay + restart
+```
+
+## Budget
+
+The frame's hardware is for the dashboard, not the OS. Hard limits, checked in TASKS.md:
+
+| Thing | Limit |
+|---|---|
+| Root filesystem | under 200 MB |
+| RAM used before cog starts | under 60 MB |
+| RAM used with the page up | under 300 MB |
+| Processes besides cog, OpenRC, sshd, iwd, dhcpcd, udev, seatd | none |
+| Custom code | one Rust binary, `afctl`, under 1 MB, no shell helpers |
+| Boot to page | under 20 s |
+
+## Quick start (once TASKS.md is done)
+
+```sh
+export PF1007L_TOUCH_FIRMWARE=/path/to/gsl_m86_hd.fw
+image/build.sh                 # makes image/out/alpineframe-sd.img
+scripts/write-card-macos.sh image/out/alpineframe-sd.img
+# insert card, power on, wait ~40 s
+ssh frame@alpineframe.local    # or frame@192.168.7.2 over the USB cable
+```
+
+Change the page: edit `www/index.html`, then `scripts/deploy.sh frame@alpineframe.local`.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `TASKS.md` | Ordered work list with gates. Start here. |
+| `CLAUDE.md` | Rules for the agent finishing this |
+| `docs/decisions.md` | Why Alpine, why cog on DRM, why reuse the ormarch kernel |
+| `docs/hardware.md` | Facts copied from the upstream project, with confidence tags |
+| `docs/update-and-ssh.md` | How to get in and how to change things on a running frame |
+| `image/build.sh` | Builds the SD image on a Mac with Docker |
+| `image/boot/` | extlinux.conf and uEnv.txt templates for the FAT partition |
+| `image/rootfs/` | Overlay copied over the Alpine minirootfs |
+| `www/` | The page the frame shows |
+| `afctl/` | Rust: the only custom code on the frame |
+| `scripts/` | Card writer wrapper, deploy over SSH |
+
+License: MIT.

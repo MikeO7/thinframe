@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>alpineframe</title>
+<style>
+  :root { --bg:#0b0d10; --fg:#e8e6e3; --dim:#7a8088; --accent:#f2b84b; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family: system-ui, "Noto Sans", sans-serif; overflow:hidden; user-select:none; }
+  #clock { position:absolute; left:4vw; top:6vh; font-size:18vh; font-weight:200; letter-spacing:-.03em; line-height:1; }
+  #date  { position:absolute; left:4vw; top:28vh; font-size:4.5vh; color:var(--dim); }
+  #photo { position:absolute; right:0; top:0; width:50vw; height:100vh; object-fit:cover; opacity:.9; }
+  #info  { position:absolute; left:4vw; bottom:5vh; font-size:3vh; color:var(--dim); }
+  .corner { position:absolute; width:12vh; height:12vh; border:2px dashed var(--dim); opacity:.35; }
+  #tl{left:0;top:0} #tr{right:0;top:0} #bl{left:0;bottom:0} #br{right:0;bottom:0}
+  #tap { position:absolute; width:6vh; height:6vh; border-radius:50%; background:var(--accent);
+    transform:translate(-50%,-50%); display:none; pointer-events:none; }
+</style>
+</head>
+<body>
+  <div id="clock">--:--</div>
+  <div id="date"></div>
+  <img id="photo" alt="" src="https://picsum.photos/800/1280" onerror="this.style.display='none'">
+  <div id="info">alpineframe · touch anywhere · corners are the TASK 6 calibration targets</div>
+  <div class="corner" id="tl"></div><div class="corner" id="tr"></div>
+  <div class="corner" id="bl"></div><div class="corner" id="br"></div>
+  <div id="tap"></div>
+<script>
+  const pad = n => String(n).padStart(2,'0');
+  function tick(){ const d=new Date();
+    clock.textContent = pad(d.getHours())+':'+pad(d.getMinutes());
+    date.textContent = d.toLocaleDateString(undefined,{weekday:'long', day:'numeric', month:'long'}); }
+  tick(); setInterval(tick, 5000);
+  // Touch debug: shows a dot and the coordinates. Remove when the frame is done.
+  addEventListener('pointerdown', e => {
+    tap.style.left=e.clientX+'px'; tap.style.top=e.clientY+'px'; tap.style.display='block';
+    info.textContent = `tap ${Math.round(e.clientX)},${Math.round(e.clientY)} of ${innerWidth}x${innerHeight}`;
+    setTimeout(()=>tap.style.display='none', 600);
+  });
+  // Rotate photo every 10 minutes.
+  setInterval(()=>{ photo.src='https://picsum.photos/800/1280?'+Date.now(); }, 600000);
+</script>
+</body>
+</html>

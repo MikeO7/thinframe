@@ -1,0 +1,4 @@
+# Silead touch calibration for the rotated panel. Values are a placeholder; measure in TASK 6.
+# Identity = "1 0 0 0 1 0". Vertical flip = "1 0 0 0 -1 1". Upstream found a vertical flip
+# was needed after the compositor's own rotation; cog drm rotation may behave differently.
+ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="silead_ts", ENV{LIBINPUT_CALIBRATION_MATRIX}="1 0 0 0 1 0"

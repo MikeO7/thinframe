@@ -1,0 +1,23 @@
+# One package per line. Installed with `apk add` into the rootfs. Keep it short: every
+# package is RAM at boot and disk on the card. Diagnostics are a separate, optional list.
+alpine-base
+openrc
+eudev
+eudev-openrc
+e2fsprogs
+sfdisk
+kmod
+openssh-server
+doas
+iwd
+iwd-openrc
+dhcpcd
+seatd
+seatd-openrc
+cog
+wpewebkit
+libinput
+mesa-dri-gallium
+mesa-egl
+mesa-gles
+font-noto

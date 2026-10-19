@@ -1,0 +1,4 @@
+# Read by the ormarch U-Boot boot.scr. Plain name=value lines.
+# pf_mode=auto | linux | ums   (ums = present the card to the Mac as a USB disk)
+#pf_mode=auto
+#pf_extlinux=/extlinux/extlinux.conf

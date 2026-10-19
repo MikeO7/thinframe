@@ -1,0 +1,9 @@
+# Copy to afctl/.cargo/config.toml (TASK 2). Static musl build for the frame.
+[build]
+target = "armv7-unknown-linux-musleabihf"
+
+[target.armv7-unknown-linux-musleabihf]
+# cross-rs or `cargo zigbuild` avoid needing a local arm toolchain:
+#   cargo install cargo-zigbuild && cargo zigbuild --release --target armv7-unknown-linux-musleabihf
+linker = "arm-linux-musleabihf-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]

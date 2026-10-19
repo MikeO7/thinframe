@@ -1,0 +1,17 @@
+[package]
+name = "afctl"
+version = "0.1.0"
+edition = "2021"
+description = "alpineframe control binary: kiosk supervisor, update, wifi, status"
+license = "MIT"
+
+[dependencies]
+# Keep this list tiny. Every crate costs binary size and compile time on armv7.
+# Arg parsing is hand-rolled on purpose (no clap). Add only: nix (signals/procs) if needed.
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

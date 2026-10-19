@@ -1,0 +1,5 @@
+# Optional. `image/build.sh rootfs DEBUG=1` adds these. Not in the release image.
+evtest
+libinput-tools
+i2c-tools
+busybox-extras
