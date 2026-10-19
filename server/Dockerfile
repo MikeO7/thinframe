@@ -1,5 +1,5 @@
 # Multi-arch (amd64/arm64). Static Go binary, scratch base, a few MB.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum* ./
