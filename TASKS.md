@@ -80,6 +80,24 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] `scripts/deploy.sh host` pushes the working tree (not Git) for fast iteration.
 - Gate: edit `www/index.html` on the Mac, `deploy.sh`, page changes within 5 s.
 
+## 10. Thin client (frame side)
+- [ ] `afctl agent` (afctl/src/agent.rs): config poll, heartbeat, actions, fallback URL. Runs as a
+      thread inside `afctl kiosk` when SERVER_URL is set.
+- [ ] `afctl set KEY VALUE` rewrites one key in /etc/alpineframe.conf (used for first pairing).
+- Gate: change rotation in /admin, frame re-renders within one poll interval; stop the container,
+  frame shows the fallback page within 3 polls; start it, frame comes back.
+
+## S. Server (any box with Docker)
+- [ ] S1 `server/`: axum skeleton serving static/ at /frame/<id>, config GET/PUT, heartbeat POST,
+      JSON files in /data. `cargo test` covers the config merge and one-shot action clearing.
+- [ ] S2 `/admin`: plain HTML table of frames (id, ip, last seen, mem, temp) + edit form.
+- [ ] S3 Dockerfile builds static musl for amd64 and arm64; `docker compose up` works; GH Action
+      pushes ghcr.io/mikeo7/alpineframe-server on tag.
+- [ ] S4 optional FRAME_TOKEN bearer auth for off-LAN use.
+- [ ] S5 `/api/data/*` adapters the dashboard needs (first: photos dir, clock, weather). Each one a
+      small module; the page never calls third parties directly.
+- Gate: two frames with different ids show different pages from one container.
+
 ## 9. Polish (optional, after everything above)
 - [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
       console via `consoleblank`.

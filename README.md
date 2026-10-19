@@ -2,7 +2,9 @@
 
 Alpine Linux for the PF1007L 10.1" Android photo frame (Allwinner A33, armv7).
 It boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page full
-screen with working touch. Nothing else runs. The display stack is a single
+screen with working touch. Nothing else runs. The frame is a dumb terminal: the
+page, the data and the per-frame settings come from `frameserver`, a Rust
+binary in a Docker container on real hardware (`server/`). The display stack is a single
 process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
 compositor.
 
@@ -35,6 +37,19 @@ is to render a web page. Memory and CPU go to the content.
 ## Architecture
 
 ```
+ server (Docker, any box)                      frame (Alpine, 1 GB A33)
+ ┌──────────────────────────┐    Wi-Fi LAN    ┌──────────────────────────┐
+ │ frameserver (Rust)       │ <── GET /frame/id ── cog (WPE WebKit on DRM)│
+ │  static/ dashboard       │ ── HTML/JS/data ──>│                          │
+ │  /api/frames/<id>/config │ <── poll 15 s ───── afctl agent (Rust)      │
+ │  /api/frames/<id>/heartbeat <── status ───────│  (restart cog, reboot,   │
+ │  /admin                  │                    │   rotation, update)      │
+ │  /data volume (json)     │                    │ OpenRC sshd iwd dhcpcd   │
+ └──────────────────────────┘                    └──────────────────────────┘
+```
+
+On the card:
+```
 microSD (MBR)
   8 KiB      u-boot-pf1007l-L.bin         (reused, pinned, from ormarch)
   4 MiB      p1 FAT32 PFBOOT              zImage, DTB, initramfs, extlinux.conf, boot.scr
@@ -46,7 +61,7 @@ Init    : OpenRC
 Net     : iwd (Wi-Fi) + dhcpcd, usb gadget NCM as fallback
 Access  : sshd, key only, user `frame`, passwordless sudo
 Display : seatd + cog --platform=drm  (user `frame`, group video/input)
-Content : /var/lib/alpineframe/www/index.html  (or FRAME_URL in /etc/alpineframe.conf)
+Content : SERVER_URL/frame/FRAME_ID from frameserver; local www/ only as offline fallback
 Tooling : `afctl`, one static Rust binary (musl, <1 MB): kiosk supervisor, update, wifi, status
 Update  : `afctl update` = fetch main tarball (no git on the frame) + apply overlay + restart
 ```
@@ -74,7 +89,7 @@ scripts/write-card-macos.sh image/out/alpineframe-sd.img
 ssh frame@alpineframe.local    # or frame@192.168.7.2 over the USB cable
 ```
 
-Change the page: edit `www/index.html`, then `scripts/deploy.sh frame@alpineframe.local`.
+Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The frame is never touched.
 
 ## Layout
 
@@ -90,6 +105,7 @@ Change the page: edit `www/index.html`, then `scripts/deploy.sh frame@alpinefram
 | `image/rootfs/` | Overlay copied over the Alpine minirootfs |
 | `www/` | The page the frame shows |
 | `afctl/` | Rust: the only custom code on the frame |
+| `server/` | Rust + Dockerfile + compose: the brains, runs anywhere |
 | `scripts/` | Card writer wrapper, deploy over SSH |
 
 License: MIT.

@@ -68,3 +68,20 @@ decided by WPE WebKit (C++, GLES on lima) and by the page. Rules for `www/`:
 
 If HTML ever becomes the bottleneck, the escape hatch is a Rust renderer drawing straight to
 DRM/GBM with GLES (no browser at all). That is a different project; note it, do not start it.
+
+## Thin client: brains in a container, frame is a display
+The frame stays exactly what it was (Alpine + cog on DRM). What changes is where the page and
+the decisions live: `frameserver`, a Rust binary in a scratch Docker image, on whatever box has
+spare CPU. The frame's `afctl agent` polls it for config and posts heartbeats. Consequences:
+
+- Dashboard changes are a container rebuild. The SD card is written once.
+- Heavy work (image resizing, API calls, caching, scheduling) runs on the server. The frame's 1 GB
+  holds only WebKit and the rendered page.
+- Many frames, one server, per-frame config by id.
+- Offline: the frame falls back to a local page; the dashboard should also cache itself.
+
+Rejected: streaming pixels (VNC/RDP/WebRTC). Bandwidth and latency are worse than sending HTML
+and letting the frame's GPU composite it, and it needs a heavier client than cog.
+
+Transport is plain HTTP polling on the LAN. WebSocket push is a later refinement, not needed
+at a 15 s poll.

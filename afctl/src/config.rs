@@ -17,6 +17,12 @@ pub struct Config {
     /// https://github.com/<owner>/alpineframe/archive/refs/heads/main.tar.gz
     pub repo_tarball: String,
     pub health_interval_s: u64,
+    /// Thin-client mode: base URL of frameserver, e.g. http://nas.local:8080. Empty = standalone.
+    pub server_url: String,
+    pub frame_id: String,
+    pub poll_interval_s: u64,
+    /// Shown when the server is unreachable.
+    pub fallback_url: String,
 }
 
 impl Default for Config {
@@ -33,6 +39,10 @@ impl Default for Config {
             )
             .into(),
             health_interval_s: 30,
+            server_url: String::new(),
+            frame_id: "frame".into(),
+            poll_interval_s: 15,
+            fallback_url: "file:///var/lib/alpineframe/www/index.html".into(),
         }
     }
 }
@@ -60,6 +70,15 @@ pub fn parse(text: &str) -> Config {
     cfg.platform = get("COG_PLATFORM", &cfg.platform);
     cfg.user = get("FRAME_USER", &cfg.user);
     cfg.repo_tarball = get("REPO_TARBALL", &cfg.repo_tarball);
+    cfg.server_url = get("SERVER_URL", &cfg.server_url);
+    cfg.frame_id = get("FRAME_ID", &cfg.frame_id);
+    cfg.fallback_url = get("FALLBACK_URL", &cfg.fallback_url);
+    if let Some(v) = kv.get("POLL_INTERVAL_S") {
+        cfg.poll_interval_s = v.parse().unwrap_or(cfg.poll_interval_s);
+    }
+    if !cfg.server_url.is_empty() && !kv.contains_key("FRAME_URL") {
+        cfg.url = format!("{}/frame/{}", cfg.server_url.trim_end_matches('/'), cfg.frame_id);
+    }
     cfg.extra_args = get("COG_EXTRA_ARGS", "")
         .split_whitespace()
         .map(String::from)
@@ -84,5 +103,11 @@ mod tests {
         assert_eq!(c.rotation, 1);
         assert_eq!(c.extra_args, vec!["--a", "--b"]);
         assert_eq!(c.platform, "drm");
+    }
+
+    #[test]
+    fn server_url_derives_frame_url() {
+        let c = parse("SERVER_URL=http://nas:8080/\nFRAME_ID=kitchen\n");
+        assert_eq!(c.url, "http://nas:8080/frame/kitchen");
     }
 }

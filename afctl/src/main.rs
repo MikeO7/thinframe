@@ -7,6 +7,7 @@
 //!   afctl update     fetch main of the GitHub repo as a tarball, apply overlay + www, restart
 //!   afctl wifi SSID PSK   write iwd profile, reconnect
 //!   afctl status     one screen: uptime, ip, wifi, mem, cog pid, url, temp
+//!   afctl agent      poll the server for config, post heartbeats (also runs inside kiosk)
 //!
 //! Config: /etc/alpineframe.conf (KEY=VALUE, see image/rootfs/etc/alpineframe.conf).
 //! Size budget: release binary under 1 MB. Check with `ls -l` in CI.
@@ -14,6 +15,7 @@
 use std::env;
 use std::process::ExitCode;
 
+mod agent;
 mod config;
 mod kiosk;
 mod status;
@@ -21,7 +23,7 @@ mod update;
 mod wifi;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: afctl <kiosk|update|wifi SSID PSK|status>");
+    eprintln!("usage: afctl <kiosk|agent|update|wifi SSID PSK|status>");
     ExitCode::from(2)
 }
 
@@ -39,6 +41,7 @@ fn main() -> ExitCode {
         Some("update") => update::run(&cfg),
         Some("wifi") if args.len() == 3 => wifi::run(&args[1], &args[2]),
         Some("status") => status::run(&cfg),
+        Some("agent") => agent::run(&cfg),
         _ => return usage(),
     };
     match result {
