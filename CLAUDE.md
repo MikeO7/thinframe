@@ -2,6 +2,20 @@
 
 Read `README.md`, then `TASKS.md`. Work the tasks in order. Do not skip a gate.
 
+## Where to start, and what you can do without the frame
+Everything in sections 0, 0b, S, M1 and 1 to 3 runs on the Mac or in Docker with no hardware.
+Recommended order for a fresh start: S0, S1, S2 (the Go server with real tests), then 0b and
+TASK 10 (`tfctl agent` talking to that server, natively on the Mac), then M1 (the sim container),
+then 1 to 3 (the image). Sections 4 to 8 and 13 need the owner at the frame; batch them.
+
+Mac prerequisites: Xcode CLT, Homebrew `git curl python3 shellcheck qemu`, Docker Desktop or
+OrbStack with `linux/arm/v7` emulation, Rust via rustup with `cargo-zigbuild`, Go 1.23.
+
+## When stuck
+Prefer reading the upstream ormarch repo (`image/cache/ormarch` after `image/build.sh inputs`)
+over inventing. Its `docs/experiments.md` has 2000 lines of what was tried on this exact board.
+If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the gate.
+
 ## Safety
 
 - **Never write the eMMC.** No `dd`, `sfdisk`, `mkfs` or `fastboot flash` to `/dev/mmcblk0`

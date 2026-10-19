@@ -1,7 +1,7 @@
 # thinframe
 
 A thin client for cheap Android photo frames. The frame (PF1007L, Allwinner A33, armv7, 1 GB)
-runs Alpine Linux and one browser process; all the brains live in `frameserver`, a Rust
+runs Alpine Linux and one browser process; all the brains live in `frameserver`, a Go
 binary in a Docker container on hardware with real horsepower. The frame's CPU, GPU and
 RAM go to rendering the dashboard and nothing else.
 The frame boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page
@@ -44,7 +44,7 @@ is to render a web page. Memory and CPU go to the content.
 ```
  server (Docker, any box)                      frame (Alpine, 1 GB A33)
  ┌──────────────────────────┐    Wi-Fi LAN    ┌──────────────────────────┐
- │ frameserver (Rust)       │ <── GET /frame/id ── cog (WPE WebKit on DRM)│
+ │ frameserver (Go)         │ <── GET /frame/id ── cog (WPE WebKit on DRM)│
  │  static/ dashboard       │ ── HTML/JS/data ──>│                          │
  │  /api/frames/<id>/config │ <── poll 15 s ───── tfctl agent (Rust)      │
  │  /api/frames/<id>/heartbeat <── status ───────│  (restart cog, reboot,   │
