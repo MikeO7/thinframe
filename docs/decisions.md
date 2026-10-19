@@ -237,3 +237,30 @@ Go side: `golang.org/x/net/websocket` is deprecated; use `github.com/coder/webso
 stdlib-style) or `nhooyr.io/websocket`. Rust side: hand-rolled RFC 6455 client over
 `std::net::TcpStream` is ~250 lines (no TLS on the LAN) and keeps tfctl dependency-free; if TLS is
 needed later, add `tungstenite` + `rustls` and re-check the 1 MB budget.
+
+## Dashboard composition: server renders HTML from a layout JSON
+Each frame has `layout.json` in its store entry: a grid (e.g. 4x3 on 1280x800) of widget
+instances `{type, pos, size, props}`. The Go server renders the full page with `html/template`
+from a widget library in `server/internal/widgets/` (clock, photo, weather, calendar, text,
+iframe). The frame receives finished HTML plus small JSON over SSE for live values. No layout
+logic, no templating and no framework on the frame. MCP `set_layout`/`list_widgets` edit the JSON;
+`/admin` shows it as a form. Adding a widget = one Go file + one template; the frame is untouched.
+
+## Photos: folder adapter first
+`PHOTOS_DIR` (a NAS mount into the container) is the first and default source. The server scans,
+resizes once to the panel size (1280x800 and 800x1280), strips EXIF, caches under `/data/cache`,
+and serves `/api/data/photo/next?frame=<id>` with a per-frame rotation and a "recent first" bias.
+Google Photos, iCloud shared albums and Immich are later adapters behind the same interface
+(`PhotoSource` with `List()` and `Open(id)`). The frame only ever downloads a pre-sized JPEG.
+
+## Clock comes from the server
+The A33 has an RTC with no backup battery; the frame boots in 1970. The server's `hello` reply
+carries `time_unix` and `tz`; `tfctl` sets the system clock and `TZ` on every connect. No NTP
+daemon on the frame. Without a server the clock is wrong and the fallback page says so.
+
+## Night mode and backlight
+Config gains `brightness` (0 to 100) and `schedule`: `{"off":"23:00","on":"06:30","days":"mon-sun"}`
+evaluated on the frame in local time, so it works through a server outage. Off means backlight 0
+via `/sys/class/backlight/*/brightness` and cog paused (SIGSTOP) so the CPU idles; on restores
+both and reloads the page. The server can override with the `screen` action (`on|off`) and
+a frame reports `screen_state` in heartbeats. Touch during off turns the screen on for 60 s.

@@ -97,6 +97,9 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       GET /config + 60 s poll fallback when the socket is down; fallback URL when the server is gone
       for 3 attempts. Runs as a thread inside `tfctl kiosk` when SERVER_URL is set.
 - [ ] Unit tests for the frame codec (mask/unmask, fragment, close) and the message types.
+- [ ] Set system clock and TZ from the `hello` reply on every connect (no NTP on the frame).
+- [ ] `brightness` and `schedule` in config: backlight via sysfs, cog SIGSTOP/SIGCONT, touch wakes
+      for 60 s, `screen` action, `screen_state` in heartbeat. Evaluated locally so it survives outages.
 - [ ] `tfctl set KEY VALUE` rewrites one key in /etc/thinframe.conf (used for first pairing).
 - Gate: change rotation in /admin, frame re-renders within 1 s; stop the container, frame shows the
   fallback page within 3 reconnect attempts; start it, frame comes back and acks queued actions.
@@ -149,8 +152,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       so flash.sh never needs a local build.
 - [ ] S6 Artifacts: Dockerfile stage cross-builds `tfctl` for armv7 and tars `image/rootfs/`;
       server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
-- [ ] S5 `/api/data/*` adapters the dashboard needs (first: photos dir, clock, weather). Each one a
-      small module; the page never calls third parties directly.
+- [ ] S5 Widgets + layout: `layout.json` per frame, `html/template` renderer, widget library
+      (clock, photo, weather, calendar, text, iframe) in `internal/widgets/`, `/admin` layout form,
+      MCP `set_layout`/`list_widgets`. Gate: two frames, two layouts, one container.
+- [ ] S5b Photo adapter: `PHOTOS_DIR` scan, resize to 1280x800 and 800x1280, EXIF strip, cache,
+      `/api/data/photo/next`. Interface `PhotoSource` so Immich/Google/iCloud can be added later.
+- [ ] S5c `hello` reply carries `time_unix` and `tz`; weather and calendar adapters behind
+      `/api/data/*`; the page never calls third parties directly.
 - Gate: two frames with different ids show different pages from one container.
 
 ## M. Simulator (second container, dev only)

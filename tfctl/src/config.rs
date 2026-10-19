@@ -23,6 +23,11 @@ pub struct Config {
     pub poll_interval_s: u64,
     /// Shown when the server is unreachable.
     pub fallback_url: String,
+    /// 0..100, applied to /sys/class/backlight/*/brightness (TASK 10)
+    pub brightness: u8,
+    /// "HH:MM" local time; empty = never off (TASK 10)
+    pub screen_off: String,
+    pub screen_on: String,
 }
 
 impl Default for Config {
@@ -43,6 +48,9 @@ impl Default for Config {
             frame_id: "frame".into(),
             poll_interval_s: 15,
             fallback_url: "file:///var/lib/thinframe/www/index.html".into(),
+            brightness: 100,
+            screen_off: String::new(),
+            screen_on: String::new(),
         }
     }
 }
@@ -73,6 +81,11 @@ pub fn parse(text: &str) -> Config {
     cfg.server_url = get("SERVER_URL", &cfg.server_url);
     cfg.frame_id = get("FRAME_ID", &cfg.frame_id);
     cfg.fallback_url = get("FALLBACK_URL", &cfg.fallback_url);
+    cfg.screen_off = get("SCREEN_OFF", &cfg.screen_off);
+    cfg.screen_on = get("SCREEN_ON", &cfg.screen_on);
+    if let Some(v) = kv.get("BRIGHTNESS") {
+        cfg.brightness = v.parse().unwrap_or(cfg.brightness).min(100);
+    }
     if let Some(v) = kv.get("POLL_INTERVAL_S") {
         cfg.poll_interval_s = v.parse().unwrap_or(cfg.poll_interval_s);
     }
