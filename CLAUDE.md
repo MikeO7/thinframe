@@ -1,4 +1,4 @@
-# Rules for working on alpineframe
+# Rules for working on thinframe
 
 Read `README.md`, then `TASKS.md`. Work the tasks in order. Do not skip a gate.
 
@@ -32,8 +32,8 @@ something on hardware, change its tag and add a dated line to `docs/log.md`.
 A task is done when its gate line in `TASKS.md` is checked and `docs/log.md` has the evidence
 (command + output, or a photo path). Nothing is "probably fine".
 
-## Custom code is Rust, in `afctl/`
-No new shell scripts on the frame. If something needs logic, it is a subcommand of `afctl`.
+## Custom code is Rust, in `tfctl/`
+No new shell scripts on the frame. If something needs logic, it is a subcommand of `tfctl`.
 Minimal dependencies; justify every crate in `docs/decisions.md`. Binary must stay under 1 MB.
 Mac-side build scripts may stay bash.
 

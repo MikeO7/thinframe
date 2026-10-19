@@ -2,7 +2,7 @@
 name = "frameserver"
 version = "0.1.0"
 edition = "2021"
-description = "alpineframe brains: serves the dashboard, holds per-frame config, receives heartbeats"
+description = "thinframe brains: serves the dashboard, holds per-frame config, receives heartbeats"
 license = "MIT"
 
 [dependencies]

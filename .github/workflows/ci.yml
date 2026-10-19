@@ -7,10 +7,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           shellcheck -x -e SC1091,SC2034,SC2317 image/build.sh scripts/*.sh image/rootfs/etc/local.d/*
-      - run: grep -q '<title>alpineframe</title>' www/index.html
-  afctl:
+      - run: grep -q '<title>thinframe</title>' www/index.html
+  tfctl:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: afctl } }
+    defaults: { run: { working-directory: tfctl } }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -21,7 +21,7 @@ jobs:
       - run: pip install cargo-zigbuild && cargo zigbuild --release --target armv7-unknown-linux-musleabihf
       - name: size budget (1 MB)
         run: |
-          f=target/armv7-unknown-linux-musleabihf/release/afctl
+          f=target/armv7-unknown-linux-musleabihf/release/tfctl
           ls -l "$f"; [ "$(stat -c %s "$f")" -lt 1048576 ]
       - uses: actions/upload-artifact@v4
-        with: { name: afctl-armv7, path: afctl/target/armv7-unknown-linux-musleabihf/release/afctl }
+        with: { name: tfctl-armv7, path: tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl }

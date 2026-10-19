@@ -5,7 +5,7 @@ logic of its own; it renders `/frame/<id>` and obeys `/api/frames/<id>/config`.
 
 ```sh
 cd server && docker compose up -d --build
-# on the frame (once): doas afctl set SERVER_URL http://nas.local:8080 FRAME_ID livingroom
+# on the frame (once): doas tfctl set SERVER_URL http://nas.local:8080 FRAME_ID livingroom
 ```
 
 Dashboard pages live in `server/static/`. Edit, rebuild (or bind-mount `static/` in dev), the frame

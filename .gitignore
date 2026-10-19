@@ -6,4 +6,4 @@ image/vendor/
 *.img
 *.fw
 .DS_Store
-afctl/target/
+tfctl/target/

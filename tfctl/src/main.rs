@@ -1,15 +1,15 @@
-//! afctl: the one custom binary on the frame. Static musl, no runtime deps, no allocator
+//! tfctl: the one custom binary on the frame. Static musl, no runtime deps, no allocator
 //! surprises. Everything that is not the browser lives here so the shell layer stays
 //! busybox + OpenRC only.
 //!
 //! Subcommands (see TASKS.md for which are done):
-//!   afctl kiosk      run cog on DRM, restart on crash, health-check the page (service entry point)
-//!   afctl update     fetch main of the GitHub repo as a tarball, apply overlay + www, restart
-//!   afctl wifi SSID PSK   write iwd profile, reconnect
-//!   afctl status     one screen: uptime, ip, wifi, mem, cog pid, url, temp
-//!   afctl agent      poll the server for config, post heartbeats (also runs inside kiosk)
+//!   tfctl kiosk      run cog on DRM, restart on crash, health-check the page (service entry point)
+//!   tfctl update     fetch main of the GitHub repo as a tarball, apply overlay + www, restart
+//!   tfctl wifi SSID PSK   write iwd profile, reconnect
+//!   tfctl status     one screen: uptime, ip, wifi, mem, cog pid, url, temp
+//!   tfctl agent      poll the server for config, post heartbeats (also runs inside kiosk)
 //!
-//! Config: /etc/alpineframe.conf (KEY=VALUE, see image/rootfs/etc/alpineframe.conf).
+//! Config: /etc/thinframe.conf (KEY=VALUE, see image/rootfs/etc/thinframe.conf).
 //! Size budget: release binary under 1 MB. Check with `ls -l` in CI.
 
 use std::env;
@@ -23,7 +23,7 @@ mod update;
 mod wifi;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: afctl <kiosk|agent|update|wifi SSID PSK|status>");
+    eprintln!("usage: tfctl <kiosk|agent|update|wifi SSID PSK|status>");
     ExitCode::from(2)
 }
 
@@ -32,7 +32,7 @@ fn main() -> ExitCode {
     let cfg = match config::load(config::DEFAULT_PATH) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("afctl: config: {e}");
+            eprintln!("tfctl: config: {e}");
             return ExitCode::from(1);
         }
     };
@@ -47,7 +47,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("afctl: {e}");
+            eprintln!("tfctl: {e}");
             ExitCode::from(1)
         }
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Write image/out/alpineframe-sd.img to a microSD card on macOS, with guards.
-# Usage: scripts/write-card-macos.sh image/out/alpineframe-sd.img [/dev/diskN]
+# Write image/out/thinframe-sd.img to a microSD card on macOS, with guards.
+# Usage: scripts/write-card-macos.sh image/out/thinframe-sd.img [/dev/diskN]
 # Without a disk argument it lists candidates and exits.
 # Guards (TASK 3): refuse non-removable, refuse >64 GB or <4 GB, refuse disks with a mounted
 # system/home volume, require typed confirmation of the disk name, verify readback hash.

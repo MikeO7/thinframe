@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 
-pub const DEFAULT_PATH: &str = "/etc/alpineframe.conf";
+pub const DEFAULT_PATH: &str = "/etc/thinframe.conf";
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -14,7 +14,7 @@ pub struct Config {
     pub rotation: u8,
     pub extra_args: Vec<String>,
     pub user: String,
-    /// https://github.com/<owner>/alpineframe/archive/refs/heads/main.tar.gz
+    /// https://github.com/<owner>/thinframe/archive/refs/heads/main.tar.gz
     pub repo_tarball: String,
     pub health_interval_s: u64,
     /// Thin-client mode: base URL of frameserver, e.g. http://nas.local:8080. Empty = standalone.
@@ -28,13 +28,13 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            url: "file:///var/lib/alpineframe/www/index.html".into(),
+            url: "file:///var/lib/thinframe/www/index.html".into(),
             platform: "drm".into(),
             rotation: 3,
             extra_args: vec![],
             user: "frame".into(),
             repo_tarball: concat!(
-                "https://github.com/MikeO7/alpineframe/",
+                "https://github.com/MikeO7/thinframe/",
                 "archive/refs/heads/main.tar.gz"
             )
             .into(),
@@ -42,7 +42,7 @@ impl Default for Config {
             server_url: String::new(),
             frame_id: "frame".into(),
             poll_interval_s: 15,
-            fallback_url: "file:///var/lib/alpineframe/www/index.html".into(),
+            fallback_url: "file:///var/lib/thinframe/www/index.html".into(),
         }
     }
 }

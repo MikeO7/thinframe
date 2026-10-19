@@ -1,8 +1,8 @@
 [package]
-name = "afctl"
+name = "tfctl"
 version = "0.1.0"
 edition = "2021"
-description = "alpineframe control binary: kiosk supervisor, update, wifi, status"
+description = "thinframe control binary: kiosk supervisor, update, wifi, status"
 license = "MIT"
 
 [dependencies]

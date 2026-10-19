@@ -1,10 +1,13 @@
-# alpineframe
+# thinframe
 
-Alpine Linux for the PF1007L 10.1" Android photo frame (Allwinner A33, armv7).
-It boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page full
-screen with working touch. Nothing else runs. The frame is a dumb terminal: the
-page, the data and the per-frame settings come from `frameserver`, a Rust
-binary in a Docker container on real hardware (`server/`). The display stack is a single
+A thin client for cheap Android photo frames. The frame (PF1007L, Allwinner A33, armv7, 1 GB)
+runs Alpine Linux and one browser process; all the brains live in `frameserver`, a Rust
+binary in a Docker container on hardware with real horsepower. The frame's CPU, GPU and
+RAM go to rendering the dashboard and nothing else.
+The frame boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page
+full screen with working touch. The page, its data and the per-frame settings
+come from the container (`server/`). The frame is never deployed to after the
+card is written. The display stack is a single
 process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
 compositor.
 
@@ -17,7 +20,7 @@ whatever) finishes it.
 
 [pangoleen/ormarch-picture-frame](https://github.com/pangoleen/ormarch-picture-frame)
 already runs a full Omarchy/Hyprland desktop on this frame. It proved the boot
-chain, panel driver, touch, and Wi-Fi. alpineframe reuses those proven, pinned
+chain, panel driver, touch, and Wi-Fi. thinframe reuses those proven, pinned
 artifacts and swaps the Arch desktop for a ~150 MB Alpine root whose only job
 is to render a web page. Memory and CPU go to the content.
 
@@ -41,7 +44,7 @@ is to render a web page. Memory and CPU go to the content.
  ┌──────────────────────────┐    Wi-Fi LAN    ┌──────────────────────────┐
  │ frameserver (Rust)       │ <── GET /frame/id ── cog (WPE WebKit on DRM)│
  │  static/ dashboard       │ ── HTML/JS/data ──>│                          │
- │  /api/frames/<id>/config │ <── poll 15 s ───── afctl agent (Rust)      │
+ │  /api/frames/<id>/config │ <── poll 15 s ───── tfctl agent (Rust)      │
  │  /api/frames/<id>/heartbeat <── status ───────│  (restart cog, reboot,   │
  │  /admin                  │                    │   rotation, update)      │
  │  /data volume (json)     │                    │ OpenRC sshd iwd dhcpcd   │
@@ -62,8 +65,8 @@ Net     : iwd (Wi-Fi) + dhcpcd, usb gadget NCM as fallback
 Access  : sshd, key only, user `frame`, passwordless sudo
 Display : seatd + cog --platform=drm  (user `frame`, group video/input)
 Content : SERVER_URL/frame/FRAME_ID from frameserver; local www/ only as offline fallback
-Tooling : `afctl`, one static Rust binary (musl, <1 MB): kiosk supervisor, update, wifi, status
-Update  : `afctl update` = fetch main tarball (no git on the frame) + apply overlay + restart
+Tooling : `tfctl`, one static Rust binary (musl, <1 MB): kiosk supervisor, update, wifi, status
+Update  : `tfctl update` = fetch main tarball (no git on the frame) + apply overlay + restart
 ```
 
 ## Budget
@@ -76,17 +79,17 @@ The frame's hardware is for the dashboard, not the OS. Hard limits, checked in T
 | RAM used before cog starts | under 60 MB |
 | RAM used with the page up | under 300 MB |
 | Processes besides cog, OpenRC, sshd, iwd, dhcpcd, udev, seatd | none |
-| Custom code | one Rust binary, `afctl`, under 1 MB, no shell helpers |
+| Custom code | one Rust binary, `tfctl`, under 1 MB, no shell helpers |
 | Boot to page | under 20 s |
 
 ## Quick start (once TASKS.md is done)
 
 ```sh
 export PF1007L_TOUCH_FIRMWARE=/path/to/gsl_m86_hd.fw
-image/build.sh                 # makes image/out/alpineframe-sd.img
-scripts/write-card-macos.sh image/out/alpineframe-sd.img
+image/build.sh                 # makes image/out/thinframe-sd.img
+scripts/write-card-macos.sh image/out/thinframe-sd.img
 # insert card, power on, wait ~40 s
-ssh frame@alpineframe.local    # or frame@192.168.7.2 over the USB cable
+ssh frame@thinframe.local    # or frame@192.168.7.2 over the USB cable
 ```
 
 Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The frame is never touched.
@@ -104,7 +107,7 @@ Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The
 | `image/boot/` | extlinux.conf and uEnv.txt templates for the FAT partition |
 | `image/rootfs/` | Overlay copied over the Alpine minirootfs |
 | `www/` | The page the frame shows |
-| `afctl/` | Rust: the only custom code on the frame |
+| `tfctl/` | Rust: the only custom code on the frame |
 | `server/` | Rust + Dockerfile + compose: the brains, runs anywhere |
 | `scripts/` | Card writer wrapper, deploy over SSH |
 

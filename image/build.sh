@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the alpineframe SD image on a Mac.
+# Build the thinframe SD image on a Mac.
 #
 #   image/build.sh            all: inputs rootfs assemble sums
 #   image/build.sh inputs     fetch/build U-Boot, kernel, DTB, panel + Wi-Fi modules via ormarch
@@ -52,8 +52,8 @@ step_inputs() {
 
 step_secrets() {
 	say "secrets"
-	[ -f "$SECRETS/frame_id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -C frame@alpineframe -f "$SECRETS/frame_id_ed25519"
-	[ -f "$SECRETS/ssh_host_ed25519_key" ] || ssh-keygen -q -t ed25519 -N "" -C alpineframe-host -f "$SECRETS/ssh_host_ed25519_key"
+	[ -f "$SECRETS/frame_id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -C frame@thinframe -f "$SECRETS/frame_id_ed25519"
+	[ -f "$SECRETS/ssh_host_ed25519_key" ] || ssh-keygen -q -t ed25519 -N "" -C thinframe-host -f "$SECRETS/ssh_host_ed25519_key"
 	if [ -n "$TOUCH_FW" ]; then
 		[ "$(sha "$TOUCH_FW")" = "$TOUCH_FW_SHA256" ] || stop "touch firmware hash mismatch"
 	else
@@ -90,7 +90,7 @@ step_assemble() {
 	stop "TASK 3 not done: see TASKS.md"
 }
 
-step_sums() { say "sums"; (cd "$OUT" && shasum -a 256 ./*.img > alpineframe-sd.img.sha256 && cat alpineframe-sd.img.sha256); }
+step_sums() { say "sums"; (cd "$OUT" && shasum -a 256 ./*.img > thinframe-sd.img.sha256 && cat thinframe-sd.img.sha256); }
 step_test()  { stop "TASK 2 gate: QEMU test not written (see ormarch image/tools/qemu-test.sh)"; }
 step_clean() { rm -rf "$WORK" "$OUT"; echo "cleaned work/ and out/ (cache/ and secrets/ kept)"; }
 
