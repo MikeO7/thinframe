@@ -17,6 +17,9 @@ pub struct Status {
     pub cog_pid: Option<u32>,
     pub temp_c: Option<f64>,
     pub wifi_rssi: Option<i64>,
+    /// /etc/thinframe.version: the software (tfctl + overlay) release installed (TASK 11).
+    pub software_version: Option<String>,
+    /// /etc/thinframe.system-version: the OS image on this slot, written at image build time.
     pub system_version: Option<String>,
     pub slot: Option<String>,
 }
@@ -35,7 +38,8 @@ fn spawn(cmd: &str, args: &[&str]) -> Option<String> {
 pub fn collect() -> Status {
     let mut st = Status {
         uptime_s: read("/proc/uptime").and_then(|t| parse_uptime(&t)),
-        system_version: read("/etc/thinframe.version").map(|s| s.trim().to_string()),
+        software_version: read("/etc/thinframe.version").map(|s| s.trim().to_string()),
+        system_version: read("/etc/thinframe.system-version").map(|s| s.trim().to_string()),
         slot: read("/proc/cmdline").and_then(|c| parse_slot(&c)),
         temp_c: read("/sys/class/thermal/thermal_zone0/temp")
             .and_then(|t| t.trim().parse::<f64>().ok())
@@ -120,14 +124,9 @@ pub fn parse_rssi(text: &str) -> Option<i64> {
         .and_then(|v| v.parse().ok())
 }
 
-/// Boot slot from the kernel cmdline: `tf.slot=b`, else the root device name.
+/// Boot slot ("a"/"b") from the kernel cmdline: `tf.slot=`, PARTUUID or /dev/mmcblkXpN (slot.rs).
 pub fn parse_slot(cmdline: &str) -> Option<String> {
-    let words: Vec<&str> = cmdline.split_whitespace().collect();
-    words
-        .iter()
-        .find_map(|w| w.strip_prefix("tf.slot="))
-        .or_else(|| words.iter().find_map(|w| w.strip_prefix("root=")))
-        .map(String::from)
+    crate::slot::from_cmdline(cmdline).map(|s| s.name().to_string())
 }
 
 fn find_pid(name: &str) -> Option<u32> {
@@ -148,6 +147,7 @@ impl Status {
             .set("wifi_rssi", self.wifi_rssi)
             .set("temp_c", self.temp_c)
             .set("tfctl_version", VERSION)
+            .set("software_version", self.software_version.clone())
             .set("system_version", self.system_version.clone())
             .set("slot", self.slot.clone())
             .set("page_url", page_url)
@@ -168,7 +168,8 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     );
     println!("server   : {} id={}", cfg.server_url, cfg.frame_id);
     println!(
-        "tfctl    : {VERSION}  system={} slot={}",
+        "tfctl    : {VERSION}  software={} system={} slot={}",
+        show(&st.software_version),
         show(&st.system_version),
         show(&st.slot)
     );
@@ -206,10 +207,8 @@ mod tests {
             parse_slot("console=ttyS0 root=/dev/mmcblk1p3 tf.slot=b rw"),
             Some("b".into())
         );
-        assert_eq!(
-            parse_slot("root=/dev/mmcblk1p2"),
-            Some("/dev/mmcblk1p2".into())
-        );
+        assert_eq!(parse_slot("root=/dev/mmcblk1p2"), Some("a".into()));
+        assert_eq!(parse_slot("root=PARTUUID=50463037-03 ro"), Some("b".into()));
         assert_eq!(
             parse_rssi("  Connected network  Home\n  RSSI   -52 dBm\n"),
             Some(-52)

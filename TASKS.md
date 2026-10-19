@@ -105,9 +105,11 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
   fallback page within 3 reconnect attempts; start it, frame comes back and acks queued actions.
 
 ## 12. System (OS) update, A/B
-- [ ] Agent: on `system_version` change, stream `rootfs.ext4.zst` to the standby slot via `zstd -d | dd`,
+- [x] Agent: on `system_version` change, stream `rootfs.ext4.zst` to the standby slot via `zstd -d | dd`,
       copy `zImage.<slot>`, verify both sha256, set `slot=<new> tries=3`, reboot.
-- [ ] First heartbeat after boot writes `tries=0` (slot good) and reports `slot`, `system_version`.
+      (tfctl/src/sysupdate.rs + slot.rs; `dd` only to the disk with MBR signature 50463037. Hardware unverified.)
+- [x] First heartbeat after boot writes `tries=0` (slot good) and reports `slot`, `system_version`.
+      (On every agent connect: `confirm_slot`, event `slot-confirmed`. `/etc/thinframe.system-version` must be in the image.)
 - [ ] Rollback test in sim qemu mode: ship a bundle with a broken init, watch U-Boot flip back after 3 tries.
 - Gate: sim qemu frame goes 2026.10.a → .b → rollback → .c with no manual steps.
 
@@ -115,9 +117,11 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] `scripts/flash.sh`: release download with sha256, card discovery with guards, typed confirmation,
       one sudo write + readback, `provision.txt` onto PFBOOT, eject. `--settings-only` rewrites
       provision.txt only. Reuse ormarch `image/tools/write-card.py` guard logic.
-- [ ] `tfctl provision` on first boot (called from an OpenRC service before `thinframe`): read
+- [x] `tfctl provision` on first boot (called from an OpenRC service before `thinframe`): read
       `/boot/provision.txt`, write iwd profile, `thinframe.conf` (SERVER_URL, FRAME_ID, FRAME_TOKEN,
       COG_ROTATION), `authorized_keys` from SSH_PUBKEY, hostname = FRAME_ID; delete the file; continue boot.
+      (tfctl/src/provision.rs, `--boot-dir`; keys go to /home/frame/.ssh and /data/ssh/authorized_keys, the
+      image bind-mounts /data/ssh over /etc/dropbear. Init must mount PFBOOT rw around the call.)
 - [ ] On-screen status page (local file, shown by cog until the server answers): "connecting to Wi-Fi",
       "cannot reach http://…", with the IP once it has one. This is the only local page besides fallback.
 - [ ] 14b Linux variant of flash.sh (lsblk instead of diskutil).
@@ -130,6 +134,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       from `/etc/thinframe/splash.png` (tiny PNG decoder, no crates) centred, draw one text line with
       an embedded bitmap font. Runs from OpenRC `boot` runlevel right after udev, before networking.
       Hands the DRM device over when cog starts.
+      (Done: background + centred text line, SPLASH_BG/SPLASH_TEXT, rotation, kiosk draws it before cog and
+      holds "cog missing" if cog is absent; tfctl/src/{drm,splash,font}.rs. Pending: PNG decoder, hardware check.)
 - [ ] Local status page (`/var/lib/thinframe/www/status.html`) shows the same logo and live text:
       "joining <ssid>", "reaching <server>", IP, then hands over to the dashboard.
 - [ ] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
@@ -137,10 +143,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: power on → dark ≤10 s → logo → status text → dashboard, no kernel or console text visible; photo in docs/img/.
 
 ## 11. Auto-update from the container (frame side)
-- [ ] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
+- [x] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
       `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs
       (`tfctl.prev` kept), applies overlay with the exclusions, writes the version, restarts service.
-- [ ] Rollback: if tfctl exits twice within 60 s after an update, service start_pre swaps `tfctl.prev` back.
+      (tfctl/src/update.rs; restart = tfctl stops cog and exits 0, the inittab respawn runs the new binary.)
+- [x] Rollback: if tfctl exits twice within 60 s after an update, service start_pre swaps `tfctl.prev` back.
+      (Done inside tfctl itself: `update::record_start` at kiosk start, starts log in /data/thinframe/starts,
+      event `software-rollback` sent on the next connect. No shell in start_pre needed.)
 - Gate: bump a version in the container, rebuild, frame updates itself within one poll and heartbeat
   reports the new version; break the binary on purpose, frame rolls back.
 

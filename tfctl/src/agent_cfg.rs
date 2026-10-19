@@ -5,9 +5,11 @@ use crate::agent::Agent;
 use crate::config;
 use crate::json::Value;
 use crate::kiosk::KioskCmd;
-use crate::update;
+use crate::sysupdate;
+use crate::update::{self, Artifacts};
 use std::io;
 use std::process::Command;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -80,10 +82,15 @@ impl Agent {
             }
             self.cfg.page_version = p;
         }
-        for k in ["software_version", "system_version"] {
-            if let Some(ver) = v.field_string(k) {
-                eprintln!("tfctl: agent: {k}={ver} (auto-update is TASK 11/12)");
-            }
+        if let Some(ver) = v.field_string("software_version") {
+            self.software_version = ver;
+        }
+        if let Some(ver) = v.field_string("system_version") {
+            self.system_version = ver;
+        }
+        if v.get("artifacts").is_some() {
+            self.artifacts = Artifacts::parse(v);
+            self.tried.clear();
         }
         if !over.is_empty() {
             let refs: Vec<(&str, &str)> = over.iter().map(|(k, v)| (*k, v.as_str())).collect();
@@ -111,10 +118,95 @@ impl Agent {
                     _ => Err(io::Error::other("screen: value must be on|off")),
                 }
             }
-            "update-software" => update::software(&self.cfg, v.field_string("version").as_deref()),
-            "update-system" => update::system(&self.cfg, v.field_string("version").as_deref()),
-            "rollback" => update::rollback(&self.cfg),
+            "update-software" => {
+                let ver = self.want(v, &self.software_version)?;
+                update::software(&self.cfg, &self.artifacts, &ver, &self.paths)?;
+                self.exit = true;
+                Ok(())
+            }
+            "update-system" => {
+                let ver = self.want(v, &self.system_version)?;
+                self.artifacts.get("system")?;
+                self.start_system_update(ver)
+            }
+            "rollback" => {
+                let slot = sysupdate::rollback(&self.paths)?;
+                self.event("rollback", &format!("booting slot {} next", slot.name()));
+                sysupdate::reboot_soon();
+                Ok(())
+            }
             other => Err(io::Error::other(format!("unknown action '{other}'"))),
+        }
+    }
+
+    /// Version from the action's `version` field, else the last config's.
+    fn want(&self, v: &Value, fallback: &str) -> io::Result<String> {
+        v.field_string("version")
+            .filter(|s| !s.is_empty())
+            .or_else(|| (!fallback.is_empty()).then(|| fallback.to_string()))
+            .ok_or_else(|| io::Error::other("no version known; wait for a config"))
+    }
+
+    /// The system update downloads ~150 MB and writes a partition: minutes, so it runs in its
+    /// own thread and the action is acked as accepted. The result arrives as an `event`; on
+    /// success the frame reboots into the new slot.
+    fn start_system_update(&mut self, ver: String) -> io::Result<()> {
+        if self.busy.swap(true, Ordering::SeqCst) {
+            return Err(io::Error::other("a system update is already running"));
+        }
+        let (cfg, arts, paths) = (self.cfg.clone(), self.artifacts.clone(), self.paths.clone());
+        let (events, busy) = (self.events.clone(), self.busy.clone());
+        thread::Builder::new()
+            .name("sysupdate".into())
+            .spawn(move || {
+                let res = sysupdate::system(&cfg, &arts, &ver, &paths);
+                let (kind, text) = match &res {
+                    Ok(slot) => (
+                        "system-update",
+                        format!("{ver} written to slot {}, rebooting", slot.name()),
+                    ),
+                    Err(e) => ("system-update-failed", format!("{ver}: {e}")),
+                };
+                eprintln!("tfctl: agent: event {kind}: {text}");
+                if let Ok(mut q) = events.lock() {
+                    q.push((kind.into(), text));
+                }
+                busy.store(false, Ordering::SeqCst);
+                if res.is_ok() {
+                    sysupdate::reboot_soon();
+                }
+            })?;
+        Ok(())
+    }
+
+    /// TASK 11/12: a config whose versions differ from what this root carries starts the
+    /// update by itself. Only on a frame that has the version files; a dev box never updates.
+    pub(crate) fn maybe_auto_update(&mut self) {
+        let want = self.software_version.clone();
+        if let Some(have) = update::installed_version(&self.paths) {
+            if !want.is_empty() && have != want && !self.tried.contains(&want) {
+                self.tried.push(want.clone());
+                eprintln!("tfctl: agent: software {have} -> {want}");
+                match update::software(&self.cfg, &self.artifacts, &want, &self.paths) {
+                    Ok(()) => self.exit = true,
+                    Err(e) => self.event("software-update-failed", &format!("{want}: {e}")),
+                }
+            }
+        }
+        let want = self.system_version.clone();
+        if let Some(have) = sysupdate::system_version(&self.paths) {
+            if !want.is_empty()
+                && have != want
+                && !self.tried.contains(&want)
+                && self.artifacts.get("system").is_ok()
+                && !self.busy.load(Ordering::SeqCst)
+            {
+                self.tried.push(want.clone());
+                eprintln!("tfctl: agent: system {have} -> {want}");
+                if let Err(e) = self.start_system_update(want) {
+                    eprintln!("tfctl: agent: {e}");
+                }
+            }
         }
     }
 }
@@ -207,12 +299,42 @@ mod tests {
         assert!(a.action("screen", &screen).is_ok());
         assert!(a.action("restart-kiosk", &Value::obj()).is_ok());
         assert!(a.action("update-system", &Value::obj()).is_err());
+        assert!(a.action("update-software", &Value::obj()).is_err());
         assert!(a.action("bogus", &Value::obj()).is_err());
         let got: Vec<_> = rx.try_iter().collect();
         assert_eq!(got, vec![KioskCmd::Screen(false), KioskCmd::Restart]);
         let h = a.hello().to_string();
         assert!(h.starts_with(r#"{"type":"hello","frame_id":"k","#));
         assert!(h.contains(r#""page_version":"1""#));
+    }
+
+    #[test]
+    fn config_carries_versions_and_artifacts() {
+        let (mut a, _rx, _) = agent("versions");
+        let sum = "c".repeat(64);
+        let v = json::parse(&format!(
+            r#"{{"software_version":"2026.10.2","system_version":"2026.10.1",
+                "artifacts":{{"tfctl":"tfctl-armv7:{sum}","system":"system-2026.10.1.tar:{sum}"}}}}"#
+        ))
+        .unwrap();
+        a.apply_config(&v);
+        assert_eq!(a.software_version, "2026.10.2");
+        assert_eq!(a.system_version, "2026.10.1");
+        assert_eq!(a.artifacts.get("tfctl").unwrap().0, "tfctl-armv7");
+        // No version files on a dev box: nothing is attempted.
+        a.paths = update::Paths::under(&std::env::temp_dir().join("tfctl-nowhere"));
+        a.maybe_auto_update();
+        assert!(!a.exit && a.tried.is_empty());
+        // The explicit action fails cleanly when the server is not there.
+        a.cfg.server_url = "http://127.0.0.1:1".into();
+        let e = a
+            .action(
+                "update-software",
+                &json::parse(r#"{"version":"x"}"#).unwrap(),
+            )
+            .unwrap_err();
+        assert!(!a.exit, "{e}");
+        let _ = std::fs::remove_file(&a.conf_path);
     }
 
     #[test]

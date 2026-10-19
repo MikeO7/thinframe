@@ -34,6 +34,9 @@ pub struct Config {
     pub page_version: String,
     /// Time zone name or POSIX TZ string from the server's hello reply.
     pub tz: String,
+    /// Splash screen (TASK 15): background "#rrggbb" and the one text line.
+    pub splash_bg: u32,
+    pub splash_text: String,
     /// Where this config was loaded from (and where overrides are written back).
     pub path: String,
 }
@@ -62,6 +65,8 @@ impl Default for Config {
             token: String::new(),
             page_version: String::new(),
             tz: String::new(),
+            splash_bg: 0x0b0d10,
+            splash_text: "thinframe".into(),
             path: DEFAULT_PATH.into(),
         }
     }
@@ -105,6 +110,10 @@ pub fn parse(text: &str) -> Config {
     cfg.token = get("FRAME_TOKEN", &cfg.token);
     cfg.page_version = get("PAGE_VERSION", &cfg.page_version);
     cfg.tz = get("TZ", &cfg.tz);
+    cfg.splash_text = get("SPLASH_TEXT", &cfg.splash_text);
+    if let Some(bg) = kv.get("SPLASH_BG").and_then(|v| parse_rgb(v)) {
+        cfg.splash_bg = bg;
+    }
     if let Some(v) = kv.get("BRIGHTNESS") {
         cfg.brightness = v.parse().unwrap_or(cfg.brightness).min(100);
     }
@@ -126,6 +135,14 @@ pub fn parse(text: &str) -> Config {
         cfg.health_interval_s = v.parse().unwrap_or(cfg.health_interval_s);
     }
     cfg
+}
+
+/// "#rrggbb" or "rrggbb" -> 0xrrggbb.
+pub fn parse_rgb(s: &str) -> Option<u32> {
+    let h = s.trim().trim_start_matches('#');
+    (h.len() == 6)
+        .then(|| u32::from_str_radix(h, 16).ok())
+        .flatten()
 }
 
 /// Rewrite the given keys in place (comments, order and unrelated lines preserved), append the
@@ -215,6 +232,19 @@ mod tests {
         assert_eq!(c.rotation, 1);
         assert_eq!(c.extra_args, vec!["--a", "--b"]);
         assert_eq!(c.platform, "drm");
+    }
+
+    #[test]
+    fn splash_keys() {
+        let c = parse("SPLASH_BG=\"#102030\"\nSPLASH_TEXT=\"kitchen\"\n");
+        assert_eq!((c.splash_bg, c.splash_text.as_str()), (0x102030, "kitchen"));
+        let d = parse("SPLASH_BG=nope\n");
+        assert_eq!(
+            (d.splash_bg, d.splash_text.as_str()),
+            (0x0b0d10, "thinframe")
+        );
+        assert_eq!(parse_rgb("ffffff"), Some(0xffffff));
+        assert_eq!(parse_rgb("#fff"), None);
     }
 
     #[test]
