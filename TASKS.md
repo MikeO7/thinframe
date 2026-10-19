@@ -3,15 +3,14 @@
 Ordered. Each has a gate. Do not start the next until the gate is checked and logged in
 `docs/log.md`. Items marked (owner) need a human at the frame.
 
-## K. Kernel on Alpine (later; removes the Arch kernel dependency)
-- [ ] K1 Build the ormarch panel patch + aic8800 modules against Alpine's `linux-lts` with `abuild`
-      in a Docker armv7 container; publish as apk in a repo the image build pulls from.
-- Gate: same frame boots on the Alpine kernel; weekly rebuild tracks Alpine kernel updates.
+## K. Kernel bumps
+- [ ] K1 Move the kernel pin from the ormarch-tested 7.2.x tag to current mainline stable; re-apply
+      the panel patch; verify on the frame. Then track stable in the weekly rebuild.
 
 ## 0. Repo hygiene
 - [ ] `shellcheck` passes on every `.sh` in CI (`.github/workflows/ci.yml`).
-- [ ] Pin `ALPINE_VERSION` and `ALPINE_MINIROOTFS_SHA256` in `image/build.sh` to the current
-      stable armv7 minirootfs from https://alpinelinux.org/downloads/ . Record the date.
+- [ ] Pin `BUILDROOT_VERSION` in `image/build.sh` to the current LTS release and record the date.
+      Record WPE/cog/kernel versions from the defconfig in `docs/log.md`.
 
 ## 0b. tfctl builds
 - [x] `cargo build --release --target armv7-unknown-linux-musleabihf` (cargo-zigbuild or cross)
@@ -26,22 +25,23 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       `aic8800DC` firmware dir. Hashes written to `image/out/inputs.sha256`.
 - Gate: `ls image/work/inputs` shows every file in the list above; hashes match a second run.
 
-## 2. Alpine rootfs (Mac, Docker linux/arm/v7)
-- [ ] `image/build.sh rootfs` unpacks the minirootfs, copies `image/rootfs/` over it, then
-      `apk add` the package list in `image/packages.txt`, installs the kernel modules dir
-      from the Arch package under `/lib/modules/7.2.10-1-armv7-ARCH/`, adds the extra `.ko`
-      files to `.../updates/`, runs `depmod`, installs firmware, enables OpenRC services:
-      `devfs dmesg mdev`→ replace mdev with `udev udev-trigger udev-settle` (eudev; libinput
-      needs it), `hostname modules sysctl networking iwd dhcpcd chronyd sshd seatd thinframe`.
-- [ ] Check: Alpine's `kmod` loads `.ko.zst` (Arch compresses modules). If not, decompress
-      them during the build. [U]
-- [ ] Check: Alpine armv7 has `cog` built with the `drm` platform. Run
-      `apk info -L cog | grep -i drm` inside the container. If absent, see docs/decisions.md
-      fallback (cage + cog wayland) and update `image/rootfs/etc/conf.d/thinframe`.
-- [ ] User `frame` (uid 1000, groups wheel video input seat), passwordless doas, key-only SSH,
-      host key from `image/secrets/` so the fingerprint never changes between builds.
-- Gate: `image/build.sh test` boots the rootfs in QEMU (`-M orangepi-pc`, same trick ormarch
-  uses) to an OpenRC login prompt and `ssh` works to the guest.
+## 2. Buildroot image (Docker, cross-compile; no armv7 emulation needed)
+- [ ] `image/buildroot/` is a BR2_EXTERNAL tree: `external.desc`, `Config.in`, `external.mk`,
+      `configs/pf1007l_defconfig`, `board/pf1007l/{linux.config,linux.fragment,patches/,dts/,
+      rootfs-overlay -> ../../rootfs,post-image.sh,genimage.cfg,uboot/}`, `package/aic8800/`
+      (kernel module package from the radxa source ormarch pinned), `package/tfctl/` (installs the
+      prebuilt armv7 binary from tfctl/).
+- [ ] Defconfig: arm cortex-a7 neon-vfpv4 musl, BusyBox init, mainline kernel pinned to the ormarch
+      7.2.x tag with the panel patch + DTS, mesa3d (lima, gbm, egl, gles), libdrm, libinput, eudev,
+      wpewebkit (no wayland), cog with `BR2_PACKAGE_COG_PLATFORM_DRM`, iwd, dhcpcd, dropbear,
+      e2fsprogs (resize2fs), zstd, ca-certificates, font (DejaVu or Noto), tzdata. No X, no
+      wayland, no dbus, no systemd.
+- [ ] `image/build.sh` runs Buildroot in a Docker container (`image/Dockerfile.br`) with `dl/` and
+      `ccache` on bind-mounted volumes so rebuilds take minutes. First build: 1 to 3 h.
+- [ ] Touch firmware: `PF1007L_TOUCH_FIRMWARE` copied into the overlay at build time, never committed.
+- [ ] DEBUG fragment adds evtest, libinput-tools, i2c-tools, strace.
+- Gate: `output/images/rootfs.ext4` under 200 MB; QEMU (vexpress or orangepi-pc board with the
+  kernel built here) boots to a login prompt and dropbear answers.
 
 ## 3. Assemble the card image (A/B layout, see decisions.md)
 - [ ] `image/build.sh assemble`: MBR sig `50463037`, U-Boot at 8 KiB, p1 FAT32 `PFBOOT` 256 MiB
@@ -158,7 +158,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] S4 optional FRAME_TOKEN bearer auth for off-LAN use.
 - [ ] S7 MCP: `/mcp` streamable HTTP with bearer auth, tools from decisions.md table, each calling the
       same handler as REST. Gate: from Claude Code, "rotate frame sim to 1" changes the sim screenshot.
-- [ ] S8 Weekly `release.yml`: rebuild image on Alpine stable + pinned kernel, QEMU boot test, publish
+- [ ] S8 Weekly `release.yml`: rebuild the Buildroot image on the pinned LTS branch + pinned kernel, QEMU boot test, publish
       container with the new `system-<date>.tar` embedded. Dependabot for Go (server), Cargo (tfctl) and GitHub Actions.
 - [ ] S9 Frames auto-register on first heartbeat with a valid token (no pre-creation in admin).
 - [ ] S10 `release.yml` publishes `thinframe-sd.img.zst` + `.sha256` as a GitHub release asset on tag,
