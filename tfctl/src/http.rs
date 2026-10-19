@@ -1,6 +1,9 @@
 //! Minimal HTTP/1.1 over TcpStream: URL splitting, one GET, response parsing. LAN only, no TLS.
+use crate::sha256::Sha256;
+use std::fs;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::path::Path;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -131,9 +134,106 @@ pub fn get(url: &Url, token: &str, timeout: Duration) -> io::Result<Response> {
     })
 }
 
+/// Streaming GET into a file, hashing on the way: the body never sits in memory (a rootfs
+/// image is ~150 MB). Returns the body's SHA-256 hex. Non-200 is an error; a body shorter than
+/// Content-Length is an error. No Range resume yet (the server supports it; TODO when Wi-Fi
+/// drops prove to be a problem).
+pub fn download(url: &Url, token: &str, timeout: Duration, dest: &Path) -> io::Result<String> {
+    let mut s = connect(url, timeout)?;
+    let mut req = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: tfctl\r\n",
+        url.path,
+        url.host_header()
+    );
+    if !token.is_empty() {
+        req.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    req.push_str("\r\n");
+    s.write_all(req.as_bytes())?;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 16384];
+    let (status, headers, end) = loop {
+        let n = s.read(&mut chunk)?;
+        if n == 0 {
+            return Err(io::Error::other("connection closed before headers"));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(h) = parse_head(&buf) {
+            break h;
+        }
+        if buf.len() > 64 << 10 {
+            return Err(io::Error::other("http head too large"));
+        }
+    };
+    if status != 200 {
+        return Err(io::Error::other(format!("GET {}: HTTP {status}", url.path)));
+    }
+    let want = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.parse::<u64>().ok());
+    let mut out = fs::File::create(dest)?;
+    let mut hash = Sha256::new();
+    let mut got = 0u64;
+    let mut data = buf[end..].to_vec();
+    loop {
+        out.write_all(&data)?;
+        hash.update(&data);
+        got += data.len() as u64;
+        if want.is_some_and(|w| got >= w) {
+            break;
+        }
+        let n = s.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        data = chunk[..n].to_vec();
+    }
+    out.sync_all()?;
+    if let Some(w) = want {
+        if got != w {
+            return Err(io::Error::other(format!("short body: {got} of {w} bytes")));
+        }
+    }
+    Ok(hash.finish_hex())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One-shot HTTP server on localhost for the download test.
+    pub fn serve_once(response: Vec<u8>) -> Url {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let mut req = [0u8; 4096];
+            let _ = c.read(&mut req);
+            c.write_all(&response).unwrap();
+        });
+        Url::parse(&format!("http://127.0.0.1:{port}/api/artifacts/x")).unwrap()
+    }
+
+    #[test]
+    fn downloads_and_hashes() {
+        let body: Vec<u8> = (0..100_000u32).map(|i| (i % 253) as u8).collect();
+        let mut resp =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+        resp.extend_from_slice(&body);
+        let dest = std::env::temp_dir().join(format!("tfctl-dl-{}", std::process::id()));
+        let sum = download(&serve_once(resp), "t", Duration::from_secs(5), &dest).unwrap();
+        assert_eq!(sum, crate::sha256::sha256_hex(&body));
+        assert_eq!(fs::read(&dest).unwrap(), body);
+        fs::remove_file(&dest).unwrap();
+        let resp = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_vec();
+        let e = download(&serve_once(resp), "", Duration::from_secs(5), &dest).unwrap_err();
+        assert!(e.to_string().contains("HTTP 404"));
+        let resp = b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc".to_vec();
+        let e = download(&serve_once(resp), "", Duration::from_secs(5), &dest).unwrap_err();
+        assert!(e.to_string().contains("short body"), "{e}");
+        let _ = fs::remove_file(&dest);
+    }
 
     #[test]
     fn parses_urls() {

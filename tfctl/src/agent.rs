@@ -8,11 +8,13 @@ use crate::config::Config;
 use crate::http::{self, Url};
 use crate::json::{self, Value};
 use crate::kiosk::{KioskCmd, SCREEN_ON};
-use crate::{status, sys, ws};
+use crate::update::{self, Artifacts, Paths};
+use crate::{status, sys, sysupdate, ws};
 use std::io;
 use std::process::Command;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -35,6 +37,7 @@ pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
             Ok(mut c) => {
                 eprintln!("tfctl: agent: connected to {}", a.cfg.server_url);
                 a.server_ok();
+                a.on_connect();
                 let started = Instant::now();
                 match a.session(&mut c) {
                     Ok(()) => return Ok(()),
@@ -50,6 +53,7 @@ pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
             Err(e) => {
                 eprintln!("tfctl: agent: connect {}: {e}", a.cfg.server_url);
                 match a.http_poll() {
+                    Ok(()) if a.exit => return Ok(()),
                     Ok(()) => a.server_ok(),
                     Err(e) => {
                         eprintln!("tfctl: agent: http poll: {e}");
@@ -70,6 +74,19 @@ pub struct Agent {
     pub(crate) conf_path: String,
     failures: u32,
     pub(crate) on_fallback: bool,
+    /// Latest `software_version`, `system_version` and `artifacts` from the server config.
+    pub(crate) software_version: String,
+    pub(crate) system_version: String,
+    pub(crate) artifacts: Artifacts,
+    pub(crate) paths: Paths,
+    /// Events queued for the socket (kind, text); the system-update thread appends too.
+    pub(crate) events: Arc<Mutex<Vec<(String, String)>>>,
+    /// A system update is running in its thread.
+    pub(crate) busy: Arc<AtomicBool>,
+    /// Leave the loop (and the process) once the current ack is out: a new tfctl is installed.
+    pub(crate) exit: bool,
+    /// Versions an automatic update already failed on; retried only after a new config push.
+    pub(crate) tried: Vec<String>,
 }
 
 impl Agent {
@@ -87,7 +104,49 @@ impl Agent {
             conf_path: conf_path.to_string(),
             failures: 0,
             on_fallback: false,
+            software_version: String::new(),
+            system_version: String::new(),
+            artifacts: Artifacts::default(),
+            paths: Paths::system(),
+            events: Arc::new(Mutex::new(Vec::new())),
+            busy: Arc::new(AtomicBool::new(false)),
+            exit: false,
+            tried: Vec::new(),
         })
+    }
+
+    pub(crate) fn event(&self, kind: &str, text: &str) {
+        eprintln!("tfctl: agent: event {kind}: {text}");
+        if let Ok(mut q) = self.events.lock() {
+            q.push((kind.to_string(), text.to_string()));
+        }
+    }
+
+    /// Right after a connect: the slot we booted is good, a pending software update has
+    /// survived, and anything queued while offline (a rollback at start) gets reported.
+    fn on_connect(&mut self) {
+        let mut found = Vec::new();
+        found.extend(sysupdate::confirm_slot(&self.paths));
+        found.extend(update::confirm_software(&self.paths));
+        found.extend(update::drain_events(&self.paths));
+        for (k, t) in found {
+            self.event(&k, &t);
+        }
+    }
+
+    fn flush_events(&self, c: &mut ws::Client) -> io::Result<()> {
+        let queued: Vec<(String, String)> = match self.events.lock() {
+            Ok(mut q) => q.drain(..).collect(),
+            Err(_) => return Ok(()),
+        };
+        for (kind, text) in queued {
+            let v = Value::obj()
+                .set("type", "event")
+                .set("kind", kind)
+                .set("text", text);
+            c.send_text(&v.to_string())?;
+        }
+        Ok(())
     }
 
     fn api(&self, path: &str) -> Url {
@@ -139,6 +198,10 @@ impl Agent {
         let text = String::from_utf8_lossy(&r.body);
         let v = json::parse(&text).map_err(io::Error::other)?;
         self.apply_config(&v);
+        self.maybe_auto_update();
+        if self.exit {
+            let _ = self.send(KioskCmd::Exit);
+        }
         Ok(())
     }
 
@@ -176,6 +239,13 @@ impl Agent {
                 Some(_) => last_rx = Instant::now(),
                 None => {}
             }
+            self.flush_events(c)?;
+            if self.exit {
+                eprintln!("tfctl: agent: new tfctl installed, exiting for respawn");
+                c.close();
+                let _ = self.send(KioskCmd::Exit);
+                return Ok(());
+            }
             if last_hb.elapsed() >= HEARTBEAT {
                 c.send_text(&self.status_json("heartbeat").to_string())?;
                 last_hb = Instant::now();
@@ -203,7 +273,10 @@ impl Agent {
         };
         match v.get("type").and_then(Value::as_str).unwrap_or("") {
             "hello" | "welcome" => self.on_hello(&v),
-            "config" => self.apply_config(v.get("config").unwrap_or(&v)),
+            "config" => {
+                self.apply_config(v.get("config").unwrap_or(&v));
+                self.maybe_auto_update();
+            }
             "action" => {
                 let name = v.field_string("name").unwrap_or_default();
                 let res = self.action(&name, &v);

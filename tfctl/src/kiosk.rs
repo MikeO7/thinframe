@@ -5,7 +5,8 @@
 //! the agent thread arrive over an mpsc channel; the night-mode schedule is evaluated here once
 //! a minute so it keeps working through a server outage. SIGTERM is forwarded to cog.
 use crate::config::Config;
-use crate::{agent, screen, sys};
+use crate::update::{self, Paths, StartCheck};
+use crate::{agent, screen, splash, sys};
 use std::io;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,15 +26,25 @@ pub enum KioskCmd {
     Screen(bool),
     Brightness(u8),
     Schedule(String, String),
+    /// Stop cog and return from `supervise`: a new tfctl was installed, init respawns us.
+    Exit,
 }
 
 const RESTART_DELAY: Duration = Duration::from_secs(3);
 const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 const FAST_FAIL: Duration = Duration::from_secs(60);
 const FAST_FAIL_LIMIT: u32 = 5;
+/// No cog binary: hold the splash instead of looping on spawn errors.
+const MISSING_DELAY: Duration = Duration::from_secs(3600);
 
 pub fn run(cfg: &Config) -> io::Result<()> {
     sys::trap_term();
+    // TASK 11 rollback: two fast crashes after an update put tfctl.prev back; exit so the
+    // respawn runs it.
+    if let StartCheck::RolledBack(v) = update::record_start(&Paths::system()) {
+        eprintln!("tfctl: kiosk: software {v} rolled back, exiting for respawn");
+        return Ok(());
+    }
     let (tx, rx) = mpsc::channel();
     if !cfg.server_url.is_empty() {
         let (c, tx) = (cfg.clone(), tx.clone());
@@ -62,6 +73,11 @@ pub struct Kiosk {
     next_spawn: Instant,
     sched_state: Option<bool>,
     last_sched: Instant,
+    splash_bg: u32,
+    splash_text: String,
+    /// Held from start until cog is spawned (TASK 15); shown again when cog is missing.
+    splash: Option<splash::Splash>,
+    exit: bool,
 }
 
 impl Kiosk {
@@ -82,6 +98,17 @@ impl Kiosk {
             next_spawn: Instant::now(),
             sched_state: None,
             last_sched: Instant::now() - Duration::from_secs(60),
+            splash_bg: cfg.splash_bg,
+            splash_text: cfg.splash_text.clone(),
+            splash: None,
+            exit: false,
+        }
+    }
+
+    fn show_splash(&mut self, text: &str) {
+        match splash::show(self.splash_bg, text, self.rotation) {
+            Ok(s) => self.splash = Some(s),
+            Err(e) => eprintln!("tfctl: splash: {e}"),
         }
     }
 
@@ -106,11 +133,19 @@ impl Kiosk {
     }
 
     fn spawn(&mut self) {
+        // Release the DRM device (and master) so cog can take it.
+        self.splash = None;
         match self.command().spawn() {
             Ok(child) => {
                 eprintln!("tfctl: kiosk: started pid {} -> {}", child.id(), self.url);
                 self.child = Some(child);
                 self.last_spawn = Instant::now();
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                eprintln!("tfctl: kiosk: spawn: {e}; holding splash");
+                self.show_splash("cog missing");
+                self.child = None;
+                self.next_spawn = Instant::now() + MISSING_DELAY;
             }
             Err(e) => {
                 eprintln!("tfctl: kiosk: spawn: {e}");
@@ -208,6 +243,10 @@ impl Kiosk {
                 self.sched_state = None;
                 self.last_sched = Instant::now() - Duration::from_secs(60);
             }
+            KioskCmd::Exit => {
+                self.kill_child();
+                self.exit = true;
+            }
         }
     }
 
@@ -229,10 +268,13 @@ impl Kiosk {
 
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
         let _ = screen::set_brightness(self.brightness);
+        let text = self.splash_text.clone();
+        self.show_splash(&text);
         loop {
-            if sys::term_requested() {
-                eprintln!("tfctl: kiosk: SIGTERM, stopping cog");
+            if sys::term_requested() || self.exit {
+                eprintln!("tfctl: kiosk: stopping cog");
                 self.kill_child();
+                self.splash = None;
                 return Ok(());
             }
             if let Some(c) = &mut self.child {
