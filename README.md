@@ -95,6 +95,10 @@ The frame's hardware is for the dashboard, not the OS. Hard limits, checked in T
 | Processes besides cog, OpenRC, sshd, iwd, dhcpcd, udev, seatd | none |
 | Custom code | one Rust binary, `tfctl`, under 1 MB, no shell helpers |
 | Boot to page | under 20 s |
+| Touch to visible response | under 50 ms (one tap to a highlighted button) |
+| Scroll / transition frame rate | 60 fps, no dropped frames in a 10 s swipe test |
+| CPU idle with the page up | under 5 % |
+| Processes awake on touch | cog's WebProcess only. tfctl sleeps, no cron, no logging daemon |
 
 ## Quick start (once TASKS.md is done)
 

@@ -140,6 +140,14 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] M3 `docker compose --profile sim up` from the repo root starts both containers; README one-liner.
 - [ ] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
 
+## 13. Smoothness (measure, then tune)
+- [ ] Confirm GPU compositing in WPE on lima (`WEBKIT_SHOW_FPS=1`); fix before anything else.
+- [ ] cpufreq governor experiment: performance vs ondemand, record touch latency and idle temp.
+- [ ] libinput: no gestures/tap timeouts; page uses pointer events and `touch-action: none`.
+- [ ] No swap/zram; WebProcess memory cap env; `ps` audit shows only the allowed process list.
+- [ ] `tfctl bench`: replay a tap, record touch→first-paint; beacon from page; shown in /admin.
+- Gate: touch→response under 50 ms, 60 fps in a 10 s swipe test, idle CPU under 5 %, logged in docs/log.md.
+
 ## 9. Polish (optional, after everything above)
 - [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
       console via `consoleblank`.

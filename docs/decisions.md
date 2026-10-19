@@ -178,3 +178,34 @@ Initial tool list (TASK S7):
 | `release_status` | what system/software versions the container carries and which frames lag |
 
 Writes that touch many frames (`update_system` with no id) require `confirm: true`.
+
+## Buttery smooth: the frame does nothing but render
+Interaction latency is the product. Everything else in this repo exists to keep the frame idle
+when a finger is not on it, and fully available when one is.
+
+What the frame runs when the page is up: kernel, OpenRC (asleep), udev (asleep), seatd, sshd
+(asleep until a connection), iwd + dhcpcd (asleep), tfctl (one thread, wakes every 15 s for a
+~1 KB HTTP poll), cog's UIProcess + WebProcess + NetworkProcess. That is the whole list, and
+TASK 9's `ps` audit fails if anything else appears.
+
+Levers, in the order to pull them (TASK 13):
+1. **GPU path**: confirm WPE uses lima GLES for compositing (`WEBKIT_SHOW_FPS=1`, check
+   `/sys/kernel/debug/dri/0/`). Software rendering is the usual cause of a laggy frame.
+2. **cpufreq**: `performance` governor while a touch is down, `ondemand` otherwise, or simply
+   `performance` at a fixed 1.008 GHz: the A33's idle draw difference is small and the frame is
+   mains powered. Measure both.
+3. **Input**: libinput with no gestures, no tap timeouts; `cog` gets raw touch, the page uses
+   `pointerdown`, not `click`, and `touch-action: none` where it scrolls itself.
+4. **No memory pressure**: no swap, no zram, WebProcess memory cap via
+   `WEBKIT_MEMORY_PRESSURE_*` so it GCs before the kernel reclaims.
+5. **Page rules** (see "Where dashboard performance comes from"): the server pre-renders anything
+   expensive (image resize, charts as SVG, data joins). The page receives finished HTML and small
+   JSON. Transitions use `transform`/`opacity` only; `will-change` on the elements that move.
+6. **Nothing periodic on the frame** besides tfctl's poll: no cron, no syslog to disk, no ntp
+   daemon (one-shot `ntpd -q` at boot and on resume), `dmesg` ring only.
+7. **Panel refresh**: run the page at the panel's native 59.7 Hz; no vsync-off tricks.
+
+Measurement, not opinion: TASK 13 adds `tfctl bench`, which replays a touch via `evemu` on the
+sim/qemu or a real frame and records touch→first-paint from `WEBKIT_SHOW_FPS` / a page-side
+`performance.now()` beacon posted to the server. The numbers go into the heartbeat so `/admin`
+shows latency per frame over time.
