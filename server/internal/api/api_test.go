@@ -157,7 +157,7 @@ func TestWebSocketControlPlane(t *testing.T) {
 		t.Fatalf("%d %s", resp.StatusCode, body)
 	}
 	m = readMsg(t, c)
-	if m["type"] != "action" || m["name"] != "screen" {
+	if m["type"] != "action" || m["name"] != "screen" || m["state"] != "off" {
 		t.Fatalf("action %v", m)
 	}
 	send(t, c, map[string]any{"type": "ack", "id": m["id"], "ok": true})

@@ -190,7 +190,7 @@ func (s *Server) Act(id, name string, args map[string]string) (store.Action, err
 	if !ok {
 		return store.Action{}, fmt.Errorf("%w: unknown action %q (valid: %s)", ErrInvalid, name, strings.Join(ValidActions, ", "))
 	}
-	a := store.Action{ID: newID(), Name: name, Args: args, CreatedAt: time.Now().UTC()}
+	a := store.Action{ID: newID(), Name: name, Args: normalizeArgs(name, args), CreatedAt: time.Now().UTC()}
 	_, err := s.Store.Update(id, func(f *store.Frame) {
 		f.Pending = append(f.Pending, a)
 		store.AddEvent(f, "action", name)
@@ -242,8 +242,28 @@ func (s *Server) pushConfig(f store.Frame) {
 	s.Hub.Send(f.ID, hub.Msg{"type": "config", "config": s.ConfigFor(f)})
 }
 
+// actionMsg is the wire form. Args are sent as a map and also flattened to the
+// top level, which is what tfctl reads (e.g. {"name":"screen","state":"off"}).
 func actionMsg(a store.Action) hub.Msg {
-	return hub.Msg{"type": "action", "id": a.ID, "name": a.Name, "args": a.Args}
+	m := hub.Msg{"type": "action", "id": a.ID, "name": a.Name, "args": a.Args}
+	for k, v := range a.Args {
+		if _, taken := m[k]; !taken {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// normalizeArgs maps the generic "arg" key used by the admin form and MCP to the
+// key each action expects.
+func normalizeArgs(name string, args map[string]string) map[string]string {
+	if v, ok := args["arg"]; ok {
+		switch name {
+		case "screen":
+			args["state"] = v
+		}
+	}
+	return args
 }
 
 // ---- helpers -----------------------------------------------------------------
