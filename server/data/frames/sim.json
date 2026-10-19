@@ -3,7 +3,7 @@
   "config": {
     "rotation": 3,
     "brightness": 100,
-    "page_version": 2
+    "page_version": 3
   },
   "layout": {
     "cols": 2,
@@ -40,13 +40,13 @@
     ]
   },
   "first_seen": "2026-10-19T03:41:21.453674169Z",
-  "last_seen": "2026-10-19T03:49:05.921698146Z",
+  "last_seen": "2026-10-19T03:53:56.928853637Z",
   "last_heartbeat": {
-    "at": "2026-10-19T03:49:05.921698146Z",
-    "uptime_s": 354,
-    "mem_used_mb": 853,
+    "at": "2026-10-19T03:53:56.928853637Z",
+    "uptime_s": 645,
+    "mem_used_mb": 858,
     "mem_total_mb": 0,
-    "ip": "10.89.0.7",
+    "ip": "10.89.0.3",
     "wifi_rssi": 0,
     "temp_c": 0,
     "tfctl_version": "0.1.0",
@@ -98,6 +98,31 @@
     },
     {
       "at": "2026-10-19T03:49:24.08244776Z",
+      "kind": "ws",
+      "text": "disconnected"
+    },
+    {
+      "at": "2026-10-19T03:51:55.873107683Z",
+      "kind": "ws",
+      "text": "connected from 10.89.0.3:43828"
+    },
+    {
+      "at": "2026-10-19T03:52:23.894583684Z",
+      "kind": "layout",
+      "text": "3 widgets, page_version 3"
+    },
+    {
+      "at": "2026-10-19T03:52:23.910459549Z",
+      "kind": "config",
+      "text": "set [rotation]"
+    },
+    {
+      "at": "2026-10-19T03:52:37.936650203Z",
+      "kind": "config",
+      "text": "set [rotation]"
+    },
+    {
+      "at": "2026-10-19T03:54:44.651683171Z",
       "kind": "ws",
       "text": "disconnected"
     }
