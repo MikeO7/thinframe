@@ -29,7 +29,14 @@ func (s *Server) handleFramePage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	b, err := widgets.Render(f)
+	var simW, simH int
+	if sim := r.URL.Query().Get("sim"); sim != "" {
+		_, _ = fmt.Sscanf(sim, "%dx%d", &simW, &simH)
+		if simW < 100 || simH < 100 || simW > 4096 || simH > 4096 {
+			simW, simH = 0, 0
+		}
+	}
+	b, err := widgets.RenderSim(f, simW, simH)
 	if err != nil {
 		writeErr(w, err)
 		return

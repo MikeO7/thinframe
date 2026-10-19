@@ -14,9 +14,11 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /simframe ./cmd/simfram
 FROM debian:trixie-slim
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       cog wpewebkit-driver fonts-dejavu-core ca-certificates iproute2 \
+      libgles2 libegl1 libgl1-mesa-dri libegl-mesa0 libgbm1 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=tfctl /src/target/release/tfctl /usr/bin/tfctl
 COPY --from=driver /simframe /usr/bin/simframe
-ENV SERVER_URL=http://frameserver:8080 FRAME_ID=sim SHOT_INTERVAL_S=5 OUT_DIR=/out
+ENV SERVER_URL=http://frameserver:8080 FRAME_ID=sim SHOT_INTERVAL_S=5 OUT_DIR=/out \
+    LIBGL_ALWAYS_SOFTWARE=1 EGL_PLATFORM=surfaceless WEBKIT_DISABLE_DMABUF_RENDERER=1 GALLIUM_DRIVER=llvmpipe
 VOLUME /out
 ENTRYPOINT ["/usr/bin/simframe"]

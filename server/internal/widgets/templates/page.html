@@ -6,6 +6,7 @@
 <meta name="thinframe-page-version" content="{{.PageVersion}}">
 <title>thinframe {{.FrameID}}</title>
 <style>{{.CSS}}</style>
+{{if gt .SimW 0}}<style>#grid{width:{{.SimW}}px;height:{{.SimH}}px;transform-origin:0 0;transform:scale(min(calc(100vw / {{.SimW}}), calc(100vh / {{.SimH}})))}</style>{{end}}
 </head>
 <body>
 <main id="grid" style="grid-template-columns:repeat({{.Layout.Cols}},1fr);grid-template-rows:repeat({{.Layout.Rows}},1fr)">

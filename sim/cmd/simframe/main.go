@@ -69,26 +69,39 @@ func main() {
 	go func() { log.Printf("tfctl agent exited: %v", agent.Wait()); os.Exit(1) }()
 
 	waitFor(driverURL + "/status")
-	sess := newSession()
-	log.Printf("webdriver session %s", sess)
-
-	var curURL string
-	var curRot int
+	var sess, curURL string
+	var pw, ph int
 	for {
 		url, rot := readConf(server, id)
-		if url != curURL || rot != curRot {
-			w, h := 1280, 800
-			if rot%2 == 0 {
-				w, h = 800, 1280
+		// cog's headless surface is fixed at 800x600; the page renders at the panel
+		// size and scales to fit (server ?sim=WxH), and we crop the screenshot back.
+		pw, ph = 1280, 800
+		if rot%2 == 0 {
+			pw, ph = 800, 1280
+		}
+		if strings.HasPrefix(url, server) {
+			sep := "?"
+			if strings.Contains(url, "?") {
+				sep = "&"
 			}
-			wd("POST", "/session/"+sess+"/window/rect", map[string]any{"width": w, "height": h})
+			url = fmt.Sprintf("%s%ssim=%dx%d", url, sep, pw, ph)
+		}
+		if sess == "" {
+			sess = newSession()
+			curURL = ""
+			log.Printf("webdriver session %s", sess)
+		}
+		if url != curURL {
 			wd("POST", "/session/"+sess+"/url", map[string]any{"url": url})
-			log.Printf("navigate %s (rotation %d, %dx%d)", url, rot, w, h)
-			curURL, curRot = url, rot
+			log.Printf("navigate %s (panel %dx%d)", url, pw, ph)
+			curURL = url
 			time.Sleep(1500 * time.Millisecond)
 		}
-		if err := shoot(sess, filepath.Join(outDir, "frame.png")); err != nil {
+		if err := shoot(sess, filepath.Join(outDir, "frame.png"), pw, ph); err != nil {
 			log.Printf("screenshot: %v", err)
+			if strings.Contains(err.Error(), "invalid session") {
+				sess = "" // recreate on the next loop
+			}
 		}
 		time.Sleep(time.Duration(interval) * time.Second)
 	}
@@ -143,6 +156,10 @@ func wd(method, path string, body any) map[string]any {
 	}
 	if resp.StatusCode >= 400 {
 		log.Printf("webdriver %s %s: %d %s", method, path, resp.StatusCode, raw)
+		if out.Value == nil {
+			out.Value = map[string]any{}
+		}
+		out.Value["_error"] = string(raw)
 	}
 	return out.Value
 }
@@ -195,25 +212,29 @@ func readConf(server, id string) (string, int) {
 	return url, rot
 }
 
-func shoot(sess, path string) error {
+func shoot(sess, path string, pw, ph int) error {
 	v := wd("GET", "/session/"+sess+"/screenshot", nil)
 	s, _ := v["_string"].(string)
 	if s == "" {
+		if e, _ := v["_error"].(string); strings.Contains(e, "invalid session") {
+			return fmt.Errorf("invalid session")
+		}
 		return fmt.Errorf("empty screenshot")
 	}
 	raw, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
 		return err
 	}
-	// The panel is physically portrait; rotation 1/3 means the content is landscape and
-	// what a viewer sees is the content as-is. We save the content orientation (what the
-	// user sees), which is simply the rendered page. Keep the PNG as-is.
 	img, err := png.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
-	rgba := image.NewRGBA(img.Bounds())
-	draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
+	// Crop to the scaled panel rectangle (the page scaled itself to fit the surface).
+	b := img.Bounds()
+	scale := min(float64(b.Dx())/float64(pw), float64(b.Dy())/float64(ph))
+	cw, ch := int(float64(pw)*scale), int(float64(ph)*scale)
+	rgba := image.NewRGBA(image.Rect(0, 0, cw, ch))
+	draw.Draw(rgba, rgba.Bounds(), img, b.Min, draw.Src)
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
