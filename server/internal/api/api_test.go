@@ -97,6 +97,20 @@ func readMsg(t *testing.T, c *websocket.Conn) map[string]any {
 	return m
 }
 
+// closeAndWait closes a frame socket and waits until the server has finished
+// its disconnect bookkeeping, so TempDir cleanup never races a store write.
+func closeAndWait(t *testing.T, s *Server, id string, c *websocket.Conn) {
+	t.Helper()
+	_ = c.Close(websocket.StatusNormalClosure, "test done")
+	deadline := time.Now().Add(3 * time.Second)
+	for s.Hub.Online(id) {
+		if time.Now().After(deadline) {
+			t.Fatal("frame never went offline")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func send(t *testing.T, c *websocket.Conn, v any) {
 	b, _ := json.Marshal(v)
 	if err := c.Write(context.Background(), websocket.MessageText, b); err != nil {
@@ -111,7 +125,7 @@ func TestWebSocketControlPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.CloseNow()
+	defer closeAndWait(t, s, "sim", c)
 
 	// 1. config arrives on connect
 	m := readMsg(t, c)
@@ -182,7 +196,7 @@ func TestPendingActionResentOnReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.CloseNow()
+	defer closeAndWait(t, s, "f1", c)
 	_ = readMsg(t, c) // config
 	m := readMsg(t, c)
 	if m["type"] != "action" || m["name"] != "reboot" {
