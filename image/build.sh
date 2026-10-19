@@ -64,7 +64,8 @@ step_secrets() {
 step_rootfs() {
 	say "rootfs: Alpine $ALPINE_VERSION armv7"
 	need docker; need curl
-	local tgz="$CACHE/$(basename "$ALPINE_MINIROOTFS_URL")"
+	local tgz
+	tgz="$CACHE/$(basename "$ALPINE_MINIROOTFS_URL")"
 	[ -f "$tgz" ] || curl -fL -o "$tgz" "$ALPINE_MINIROOTFS_URL"
 	[ "$(sha "$tgz")" = "$ALPINE_MINIROOTFS_SHA256" ] || stop "minirootfs hash mismatch (pin it in TASK 0)"
 	# TODO(TASK 2): docker run --platform linux/arm/v7 alpine:$ALPINE_VERSION with bind mounts:

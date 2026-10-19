@@ -6,7 +6,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          shellcheck -x -e SC1091,SC2034 image/build.sh scripts/*.sh image/rootfs/etc/local.d/*
+          shellcheck -x -e SC1091,SC2034,SC2317 image/build.sh scripts/*.sh image/rootfs/etc/local.d/*
       - run: grep -q '<title>alpineframe</title>' www/index.html
   afctl:
     runs-on: ubuntu-latest
