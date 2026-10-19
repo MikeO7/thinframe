@@ -272,3 +272,9 @@ the same limit. From the moment the kernel binds the panel the screen is ours: `
 draws the logo and one line of text directly to a DRM dumb buffer (no GLES, no compositor, no
 extra process), the local status page continues the same look while Wi-Fi and the server come up,
 then the dashboard takes over. Console output is routed away from the panel entirely.
+
+## SD first, eMMC later
+Running from SD is the only configuration where recovery is "remove the card". It stays the
+default until A/B updates have proven themselves. Installing to the eMMC (TASKS section E) removes
+the card and the vendor software entirely; recovery then needs a rescue card or FEL over USB, and
+a verified eMMC backup is a hard prerequisite so the frame can be returned to stock.

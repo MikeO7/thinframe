@@ -191,6 +191,18 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] `tfctl bench`: replay a tap, record touch→first-paint; beacon from page; shown in /admin.
 - Gate: touch→response under 50 ms, 60 fps in a 10 s swipe test, idle CPU under 5 %, logged in docs/log.md.
 
+## E. Install to internal storage (later; needs an explicit go from the owner)
+- [ ] E1 `tfctl backup-emmc`: stream the whole eMMC over the control socket or USB to the server
+      (`/data/backups/<frame>-emmc.img.zst`), verify sha256. Refuses to continue without it.
+- [ ] E2 `tfctl install-emmc`: write U-Boot to the eMMC boot offset, create the same 4-partition
+      layout, copy the active slot and data partition, update `extlinux`/`uEnv` for mmcblk0 vs mmcblk1
+      naming, verify, print "remove the card and reboot".
+- [ ] E3 FEL recovery doc: sunxi-tools on the Mac, `sunxi-fel` + the SD image to boot without a card,
+      and how to restore the backup to return to Android.
+- [ ] E4 Boot order check: with a card inserted the card still wins (boot ROM order), so a rescue card
+      always works.
+- Gate: frame boots thinframe with no card; rescue card boots; backup restores Android on a test unit.
+
 ## 9. Polish (optional, after everything above)
 - [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
       console via `consoleblank`.
