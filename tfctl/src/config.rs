@@ -28,6 +28,14 @@ pub struct Config {
     /// "HH:MM" local time; empty = never off (TASK 10)
     pub screen_off: String,
     pub screen_on: String,
+    /// Shared secret with frameserver, sent as `Authorization: Bearer`.
+    pub token: String,
+    /// Last page_version applied from the server; reload cog when it changes.
+    pub page_version: String,
+    /// Time zone name or POSIX TZ string from the server's hello reply.
+    pub tz: String,
+    /// Where this config was loaded from (and where overrides are written back).
+    pub path: String,
 }
 
 impl Default for Config {
@@ -51,17 +59,28 @@ impl Default for Config {
             brightness: 100,
             screen_off: String::new(),
             screen_on: String::new(),
+            token: String::new(),
+            page_version: String::new(),
+            tz: String::new(),
+            path: DEFAULT_PATH.into(),
         }
     }
+}
+
+/// Path from $TFCTL_CONF (sim, tests on the Mac) or the default.
+pub fn path() -> String {
+    std::env::var("TFCTL_CONF").unwrap_or_else(|_| DEFAULT_PATH.into())
 }
 
 pub fn load(path: &str) -> io::Result<Config> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Config::default()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
-    Ok(parse(&text))
+    let mut cfg = parse(&text);
+    cfg.path = path.to_string();
+    Ok(cfg)
 }
 
 pub fn parse(text: &str) -> Config {
@@ -83,6 +102,9 @@ pub fn parse(text: &str) -> Config {
     cfg.fallback_url = get("FALLBACK_URL", &cfg.fallback_url);
     cfg.screen_off = get("SCREEN_OFF", &cfg.screen_off);
     cfg.screen_on = get("SCREEN_ON", &cfg.screen_on);
+    cfg.token = get("FRAME_TOKEN", &cfg.token);
+    cfg.page_version = get("PAGE_VERSION", &cfg.page_version);
+    cfg.tz = get("TZ", &cfg.tz);
     if let Some(v) = kv.get("BRIGHTNESS") {
         cfg.brightness = v.parse().unwrap_or(cfg.brightness).min(100);
     }
@@ -106,9 +128,85 @@ pub fn parse(text: &str) -> Config {
     cfg
 }
 
+/// Rewrite the given keys in place (comments, order and unrelated lines preserved), append the
+/// ones that were missing, drop duplicates of a rewritten key. Atomic via rename.
+pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
+    let text = match fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    let tmp = format!("{path}.tmp");
+    fs::write(&tmp, apply_overrides(&text, kv))?;
+    fs::rename(&tmp, path)
+}
+
+pub fn apply_overrides(text: &str, kv: &[(&str, &str)]) -> String {
+    let quote = |v: &str| format!("\"{}\"", v.replace(['"', '\n', '\r'], ""));
+    let mut seen = vec![false; kv.len()];
+    let mut out = String::with_capacity(text.len() + 64);
+    for line in text.lines() {
+        let t = line.trim();
+        let key = (!t.is_empty() && !t.starts_with('#'))
+            .then(|| t.split_once('=').map(|(k, _)| k.trim()))
+            .flatten();
+        if let Some(i) = key.and_then(|k| kv.iter().position(|(kk, _)| *kk == k)) {
+            if seen[i] {
+                continue;
+            }
+            seen[i] = true;
+            out.push_str(&format!("{}={}\n", kv[i].0, quote(kv[i].1)));
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    for (i, (k, v)) in kv.iter().enumerate() {
+        if !seen[i] {
+            out.push_str(&format!("{k}={}\n", quote(v)));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overrides_rewrite_in_place_and_append() {
+        let src = "# head\nSERVER_URL=\"\"\n#FRAME_URL=\"x\"\nCOG_ROTATION=3\nCOG_ROTATION=1\n";
+        let out = apply_overrides(
+            src,
+            &[
+                ("COG_ROTATION", "2"),
+                ("FRAME_URL", "http://a/\"b"),
+                ("BRIGHTNESS", "50"),
+            ],
+        );
+        assert_eq!(
+            out,
+            "# head\nSERVER_URL=\"\"\n#FRAME_URL=\"x\"\nCOG_ROTATION=\"2\"\nFRAME_URL=\"http://a/b\"\nBRIGHTNESS=\"50\"\n"
+        );
+        let c = parse(&out);
+        assert_eq!(c.rotation, 2);
+        assert_eq!(c.url, "http://a/b");
+        assert_eq!(c.brightness, 50);
+    }
+
+    #[test]
+    fn save_overrides_creates_file() {
+        let dir = std::env::temp_dir().join(format!("tfctl-cfg-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("thinframe.conf");
+        let ps = p.to_str().unwrap();
+        save_overrides(ps, &[("FRAME_ID", "kitchen")]).unwrap();
+        save_overrides(ps, &[("FRAME_TOKEN", "t0k")]).unwrap();
+        let c = load(ps).unwrap();
+        assert_eq!(c.frame_id, "kitchen");
+        assert_eq!(c.token, "t0k");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn parses_quoted_values_and_comments() {
