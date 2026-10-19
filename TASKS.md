@@ -114,9 +114,9 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
   reports the new version; break the binary on purpose, frame rolls back.
 
 ## S. Server (any box with Docker)
-- [ ] S0 Pick the language (Go recommended, see decisions.md), delete the other stub, update CI.
-- [ ] S1 `server/`: axum skeleton serving static/ at /frame/<id>, config GET/PUT, heartbeat POST,
-      JSON files in /data. `cargo test` covers the config merge and one-shot action clearing.
+- [ ] S0 CI job for `server/`: `go vet`, `go test ./...`, `staticcheck`, multi-arch Docker build.
+- [ ] S1 `server/`: stdlib ServeMux serving static/ at /frame/{id}, config GET/PUT, heartbeat POST,
+      JSON files in /data (internal/store). `go test` covers the config merge and one-shot action clearing.
 - [ ] S2 `/admin`: plain HTML table of frames (id, ip, last seen, mem, temp) + edit form.
 - [ ] S3 Dockerfile builds static musl for amd64 and arm64; `docker compose up` works; GH Action
       pushes ghcr.io/mikeo7/thinframe-server on tag.
@@ -124,7 +124,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] S7 MCP: `/mcp` streamable HTTP with bearer auth, tools from decisions.md table, each calling the
       same handler as REST. Gate: from Claude Code, "rotate frame sim to 1" changes the sim screenshot.
 - [ ] S8 Weekly `release.yml`: rebuild image on Alpine stable + pinned kernel, QEMU boot test, publish
-      container with the new `system-<date>.tar` embedded. Dependabot for Go and Rust deps.
+      container with the new `system-<date>.tar` embedded. Dependabot for Go (server), Cargo (tfctl) and GitHub Actions.
 - [ ] S6 Artifacts: Dockerfile stage cross-builds `tfctl` for armv7 and tars `image/rootfs/`;
       server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
 - [ ] S5 `/api/data/*` adapters the dashboard needs (first: photos dir, clock, weather). Each one a

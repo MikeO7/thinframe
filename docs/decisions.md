@@ -86,12 +86,11 @@ and letting the frame's GPU composite it, and it needs a heavier client than cog
 Transport is plain HTTP polling on the LAN. WebSocket push is a later refinement, not needed
 at a 15 s poll.
 
-## Server language: Go (recommended; decide and delete the other option)
-Rust on the frame is for the 1 MB static binary. The container has no size pressure. Go gives:
-stdlib HTTP server + embed for static files, `CGO_ENABLED=0 GOARCH=arm64|amd64` static builds in
-one command, fast compiles, and less friction for whoever finishes it. Rust (axum) is a fine
-alternative if one language is preferred across the repo. The HTTP contract in
-`server/src/main.rs` (or `server/main.go`) is the same either way.
+## Languages: Rust on the frame, Go in the container (decided 2026-10-18)
+Rust on the frame is for the 1 MB static binary and zero-allocation idle. The container has no
+size pressure, so Go: stdlib HTTP server + `embed` for static files, `CGO_ENABLED=0` static
+builds for amd64 and arm64 in one command, fast compiles, official MCP SDK. No other languages
+anywhere: no Python helpers, no Node in the dashboard build. The page is hand-written HTML/CSS/JS.
 
 ## Updates flow from the container
 Three layers, three mechanisms:

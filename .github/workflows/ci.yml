@@ -25,3 +25,14 @@ jobs:
           ls -l "$f"; [ "$(stat -c %s "$f")" -lt 1048576 ]
       - uses: actions/upload-artifact@v4
         with: { name: tfctl-armv7, path: tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl }
+  server:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: server } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: server/go.mod }
+      - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...

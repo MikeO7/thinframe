@@ -32,7 +32,8 @@ something on hardware, change its tag and add a dated line to `docs/log.md`.
 A task is done when its gate line in `TASKS.md` is checked and `docs/log.md` has the evidence
 (command + output, or a photo path). Nothing is "probably fine".
 
-## Custom code is Rust, in `tfctl/`
+## Languages
+Frame: Rust only, in `tfctl/`. Container: Go only, in `server/`. Nothing else, anywhere.
 No new shell scripts on the frame. If something needs logic, it is a subcommand of `tfctl`.
 Minimal dependencies; justify every crate in `docs/decisions.md`. Binary must stay under 1 MB.
 Mac-side build scripts may stay bash.

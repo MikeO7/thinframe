@@ -1,14 +1,17 @@
-# Multi-arch (amd64/arm64) image. Static musl binary, scratch base, ~5 MB.
-FROM --platform=$BUILDPLATFORM rust:1-alpine AS build
-RUN apk add --no-cache musl-dev
+# Multi-arch (amd64/arm64). Static Go binary, scratch base, a few MB.
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
+COPY go.mod go.sum* ./
+RUN go mod download
 COPY . .
-# TASK S1: cross-compile for $TARGETPLATFORM (use cargo-zigbuild or rust:alpine per-arch build)
-RUN cargo build --release
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /frameserver ./cmd/frameserver
+
+# TASK S6: a second stage cross-builds tfctl for armv7 (cargo-zigbuild) and tars image/rootfs/
+# into /artifacts with sha256 sidecars; system-<ver>.tar is copied in from image/out by release.yml.
 
 FROM scratch
-COPY --from=build /src/target/release/frameserver /frameserver
-COPY static /static
+COPY --from=build /frameserver /frameserver
 VOLUME /data
 EXPOSE 8080
 ENTRYPOINT ["/frameserver"]

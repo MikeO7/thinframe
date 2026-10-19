@@ -93,7 +93,7 @@ The frame's hardware is for the dashboard, not the OS. Hard limits, checked in T
 | RAM used before cog starts | under 60 MB |
 | RAM used with the page up | under 300 MB |
 | Processes besides cog, OpenRC, sshd, iwd, dhcpcd, udev, seatd | none |
-| Custom code | one Rust binary, `tfctl`, under 1 MB, no shell helpers |
+| Custom code on the frame | one Rust binary, `tfctl`, under 1 MB, no shell helpers. Container is Go. |
 | Boot to page | under 20 s |
 | Touch to visible response | under 50 ms (one tap to a highlighted button) |
 | Scroll / transition frame rate | 60 fps, no dropped frames in a 10 s swipe test |
@@ -126,7 +126,7 @@ Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The
 | `image/rootfs/` | Overlay copied over the Alpine minirootfs |
 | `www/` | The page the frame shows |
 | `tfctl/` | Rust: the only custom code on the frame |
-| `server/` | The brains (Go recommended, see decisions.md) + Dockerfile + compose |
+| `server/` | Go: the brains. Dockerfile builds a scratch image |
 | `sim/` | Simulated frame container: headless WPE + agent, or QEMU of the real image |
 | `scripts/` | Card writer wrapper, deploy over SSH |
 
