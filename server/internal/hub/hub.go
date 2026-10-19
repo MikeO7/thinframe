@@ -53,14 +53,23 @@ func (h *Hub) Add(ctx context.Context, id string, ws *websocket.Conn) (done func
 	}()
 	return func() {
 		h.mu.Lock()
+		cur, ok := h.conns[id]
+		mine := ok && cur == c
+		h.mu.Unlock()
+		if !mine {
+			return
+		}
+		// OnClose runs while the frame still counts as online, so callers that
+		// wait for Online(id) == false know all bookkeeping has finished.
+		if h.OnClose != nil {
+			h.OnClose(id)
+		}
+		h.mu.Lock()
 		if cur, ok := h.conns[id]; ok && cur == c {
 			delete(h.conns, id)
 			close(c.send)
 		}
 		h.mu.Unlock()
-		if h.OnClose != nil {
-			h.OnClose(id)
-		}
 	}
 }
 
