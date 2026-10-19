@@ -42,13 +42,20 @@ type Page struct {
 	// SimW/SimH > 0 renders the grid at that size and scales it to fit the real
 	// viewport. Used by the simulator, whose headless surface is fixed at 800x600.
 	SimW, SimH int
+	// SimScale is the CSS scale factor that fits SimW x SimH into the real surface.
+	SimScale float64
 }
 
 // Render produces the whole page for a frame.
-func Render(f store.Frame) ([]byte, error) { return RenderSim(f, 0, 0) }
+func Render(f store.Frame) ([]byte, error) { return RenderSim(f, 0, 0, 0, 0) }
 
-// RenderSim renders with an optional simulated panel size (see Page.SimW).
-func RenderSim(f store.Frame, simW, simH int) ([]byte, error) {
+// RenderSim renders with an optional simulated panel size (simW x simH) scaled to
+// fit a surface of fitW x fitH (see Page.SimW). fit 0 means scale 1.
+func RenderSim(f store.Frame, simW, simH, fitW, fitH int) ([]byte, error) {
+	scale := 1.0
+	if simW > 0 && fitW > 0 && fitH > 0 {
+		scale = min(float64(fitW)/float64(simW), float64(fitH)/float64(simH))
+	}
 	css, _ := files.ReadFile("templates/page.css")
 	js, _ := files.ReadFile("templates/page.js")
 	lay := f.Layout
@@ -67,7 +74,7 @@ func RenderSim(f store.Frame, simW, simH int) ([]byte, error) {
 	err := tmpl.ExecuteTemplate(&out, "page.html", Page{
 		FrameID: f.ID, Layout: lay, Config: f.Config, PageVersion: f.Config.PageVersion,
 		CSS: template.CSS(css), JS: template.JS(js), Widgets: ws, //nolint:gosec // embedded assets
-		SimW: simW, SimH: simH,
+		SimW: simW, SimH: simH, SimScale: scale,
 	})
 	return out.Bytes(), err
 }

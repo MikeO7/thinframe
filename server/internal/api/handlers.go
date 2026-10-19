@@ -29,14 +29,10 @@ func (s *Server) handleFramePage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var simW, simH int
-	if sim := r.URL.Query().Get("sim"); sim != "" {
-		_, _ = fmt.Sscanf(sim, "%dx%d", &simW, &simH)
-		if simW < 100 || simH < 100 || simW > 4096 || simH > 4096 {
-			simW, simH = 0, 0
-		}
-	}
-	b, err := widgets.RenderSim(f, simW, simH)
+	// Simulator: ?sim=WxH renders at the panel size; &fit=WxH scales it into the surface.
+	simW, simH := parseSize(r.URL.Query().Get("sim"))
+	fitW, fitH := parseSize(r.URL.Query().Get("fit"))
+	b, err := widgets.RenderSim(f, simW, simH, fitW, fitH)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -296,4 +292,16 @@ func (s *Server) pushWeather(id string) {
 			"temp": strconv.Itoa(int(wx.TempC + 0.5)), "desc": strings.ToLower(wx.Desc),
 		}})
 	}
+}
+
+func parseSize(s string) (int, int) {
+	var w, h int
+	if s == "" {
+		return 0, 0
+	}
+	_, _ = fmt.Sscanf(s, "%dx%d", &w, &h)
+	if w < 100 || h < 100 || w > 4096 || h > 4096 {
+		return 0, 0
+	}
+	return w, h
 }

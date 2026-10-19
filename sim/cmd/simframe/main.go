@@ -84,7 +84,7 @@ func main() {
 			if strings.Contains(url, "?") {
 				sep = "&"
 			}
-			url = fmt.Sprintf("%s%ssim=%dx%d", url, sep, pw, ph)
+			url = fmt.Sprintf("%s%ssim=%dx%d&fit=800x600", url, sep, pw, ph)
 		}
 		if sess == "" {
 			sess = newSession()
