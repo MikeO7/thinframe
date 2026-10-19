@@ -177,9 +177,14 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 ## M. Simulator (second container, dev only)
 - [ ] M1 `sim/` `SIM_MODE=wpe`: headless WPE + native tfctl agent as frame `sim`, screenshots to
       `sim/out/frame.png`. Gate: change rotation in /admin, next screenshot is rotated.
-- [ ] M2 `SIM_MODE=qemu`: boots `image/out/thinframe-sd.img` under qemu-system-arm with the orangepi-pc
-      board and a DTB that has no panel; serial on the container log; user-mode net forwards 22.
-      Gate: `ssh -p 2222 frame@localhost` into the emulated frame, heartbeat visible in /admin.
+- [ ] M2 `sim/qemu/`: the REAL Buildroot image under `qemu-system-arm -M virt` (same rootfs.ext4,
+      same tfctl, same cog on DRM): a `pf1007l_qemu_defconfig` that reuses the main defconfig with
+      the virt kernel fragment (virtio-gpu for /dev/dri/card0, virtio-input touchscreen, virtio-net,
+      virtio-blk) and mesa swrast for GLES; `sim/qemu/run.sh` boots the A/B SD image with user-mode
+      net (`hostfwd` 22 and the frameserver reachable), screenshots via the QEMU monitor `screendump`
+      every N s into `sim/out/frame.png`, touch via QEMU `input-send-event`.
+      Gate: frame `sim-qemu` appears in /admin from the real image; screendump shows the dashboard;
+      an A/B system update + rollback runs end-to-end inside QEMU. Slow (TCG), for correctness only.
 - [ ] M3 `docker compose --profile sim up` from the repo root starts both containers; README one-liner.
 - [ ] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
 

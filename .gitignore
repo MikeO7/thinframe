@@ -8,3 +8,5 @@ image/vendor/
 .DS_Store
 tfctl/target/
 .claude/
+sim/out/*
+!sim/out/.gitkeep

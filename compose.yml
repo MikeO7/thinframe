@@ -10,13 +10,13 @@ services:
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
   simframe:
     profiles: [sim]
-    build: ./sim
+    build:
+      context: .
+      dockerfile: sim/Dockerfile
     environment:
       - SERVER_URL=http://frameserver:8080
       - FRAME_ID=sim
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
-      - SIM_MODE=${SIM_MODE:-wpe}      # wpe | qemu
       - SHOT_INTERVAL_S=5
-    ports: ["2222:22"]                 # qemu mode: ssh into the emulated frame
-    volumes: ["./sim/out:/out", "./image/out:/image:ro"]
+    volumes: ["./sim/out:/out"]
     depends_on: [frameserver]
