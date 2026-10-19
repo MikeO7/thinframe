@@ -123,6 +123,19 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] 14b Linux variant of flash.sh (lsblk instead of diskutil).
 - Gate: a person who has not read the repo flashes a frame from docs/flashing.md alone, timed, no questions asked.
 
+## 15. Boot experience (ours from the first lit pixel)
+- [ ] Kernel cmdline: `quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0 fbcon=map:9`
+      so no console text ever appears on the panel; serial console stays on ttyGS0 for debugging.
+- [ ] `tfctl splash`: open /dev/dri/card0 (dumb buffer, no GLES), fill background colour, blit a PNG
+      from `/etc/thinframe/splash.png` (tiny PNG decoder, no crates) centred, draw one text line with
+      an embedded bitmap font. Runs from OpenRC `boot` runlevel right after udev, before networking.
+      Hands the DRM device over when cog starts.
+- [ ] Local status page (`/var/lib/thinframe/www/status.html`) shows the same logo and live text:
+      "joining <ssid>", "reaching <server>", IP, then hands over to the dashboard.
+- [ ] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
+      the logo; tfctl writes them to the data partition.
+- Gate: power on → dark ≤10 s → logo → status text → dashboard, no kernel or console text visible; photo in docs/img/.
+
 ## 11. Auto-update from the container (frame side)
 - [ ] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
       `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs
