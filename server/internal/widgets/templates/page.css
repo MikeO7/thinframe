@@ -1,0 +1,19 @@
+:root{--bg:#0b0d10;--fg:#e8e6e3;--dim:#7a8088;--card:#14181d;--accent:#f2b84b}
+[data-theme=light]{--bg:#f4f1ea;--fg:#1b1d20;--dim:#6b6f76;--card:#ffffff;--accent:#c47f00}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,"Noto Sans",sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none}
+#grid{display:grid;gap:2vmin;padding:2vmin;height:100vh;width:100vw}
+.w{background:var(--card);border-radius:1.5vmin;padding:2vmin;overflow:hidden;position:relative;will-change:transform,opacity;transition:opacity .25s ease}
+.w.touched{opacity:.7}
+.w-photo{padding:0}
+.w-photo img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .6s ease}
+.clock-time{font-size:min(16vh,20vw);font-weight:200;letter-spacing:-.03em;line-height:1}
+.clock-date{font-size:3.5vh;color:var(--dim);margin-top:1vh}
+.weather-temp{font-size:9vh;font-weight:300}
+.weather-desc{color:var(--dim);font-size:3vh}
+.status{font-size:2.6vh;color:var(--dim);line-height:1.5}
+.text{font-size:4vh;white-space:pre-wrap}
+iframe{border:0;width:100%;height:100%}
+.unknown{color:var(--accent);font-size:3vh}
+#toast{position:fixed;left:50%;bottom:3vh;transform:translate(-50%,120%);background:var(--accent);color:#000;padding:1.5vh 3vh;border-radius:1vh;font-size:3vh;transition:transform .3s ease}
+#toast.show{transform:translate(-50%,0)}
