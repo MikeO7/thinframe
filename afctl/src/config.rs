@@ -77,7 +77,8 @@ pub fn parse(text: &str) -> Config {
         cfg.poll_interval_s = v.parse().unwrap_or(cfg.poll_interval_s);
     }
     if !cfg.server_url.is_empty() && !kv.contains_key("FRAME_URL") {
-        cfg.url = format!("{}/frame/{}", cfg.server_url.trim_end_matches('/'), cfg.frame_id);
+        let base = cfg.server_url.trim_end_matches('/');
+        cfg.url = format!("{base}/frame/{}", cfg.frame_id);
     }
     cfg.extra_args = get("COG_EXTRA_ARGS", "")
         .split_whitespace()
