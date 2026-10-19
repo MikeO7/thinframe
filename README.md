@@ -6,8 +6,8 @@ binary in a Docker container on hardware with real horsepower. The frame's CPU, 
 RAM go to rendering the dashboard and nothing else.
 The frame boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page
 full screen with working touch. The page, its data and the per-frame settings
-come from the container (`server/`). The frame is never deployed to after the
-card is written. The display stack is a single
+come from the container (`server/`). The container also carries the frame's own
+software updates: rebuild it and every frame updates itself. The card is written once. The display stack is a single
 process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
 compositor.
 
@@ -108,7 +108,8 @@ Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The
 | `image/rootfs/` | Overlay copied over the Alpine minirootfs |
 | `www/` | The page the frame shows |
 | `tfctl/` | Rust: the only custom code on the frame |
-| `server/` | Rust + Dockerfile + compose: the brains, runs anywhere |
+| `server/` | The brains (Go recommended, see decisions.md) + Dockerfile + compose |
+| `sim/` | Simulated frame: headless WPE + agent in a container |
 | `scripts/` | Card writer wrapper, deploy over SSH |
 
 License: MIT.

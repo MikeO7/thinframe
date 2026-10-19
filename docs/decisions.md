@@ -85,3 +85,27 @@ and letting the frame's GPU composite it, and it needs a heavier client than cog
 
 Transport is plain HTTP polling on the LAN. WebSocket push is a later refinement, not needed
 at a 15 s poll.
+
+## Server language: Go (recommended; decide and delete the other option)
+Rust on the frame is for the 1 MB static binary. The container has no size pressure. Go gives:
+stdlib HTTP server + embed for static files, `CGO_ENABLED=0 GOARCH=arm64|amd64` static builds in
+one command, fast compiles, and less friction for whoever finishes it. Rust (axum) is a fine
+alternative if one language is preferred across the repo. The HTTP contract in
+`server/src/main.rs` (or `server/main.go`) is the same either way.
+
+## Updates flow from the container
+Three layers, three mechanisms:
+
+| Layer | How it updates | Who does it |
+|---|---|---|
+| Dashboard (HTML/JS/data) | Served live. `page_version` in config; agent reloads cog when it changes | server |
+| Frame software (`tfctl`, `image/rootfs/` overlay) | Container image bundles `tfctl-armv7` and `overlay.tar.gz` with a version + sha256. Config poll says `software_version`; agent downloads from `/api/artifacts/<name>`, verifies, installs, restarts. Overlay excludes `thinframe.conf`, ssh and iwd | agent |
+| Kernel, DTB, U-Boot | Card re-write. Rare. Optional later: A/B root partitions and `extlinux.conf` switching | human |
+
+So "rebuild the container" is the only deploy action. Every frame converges within one poll.
+Safety: agent keeps the previous `tfctl` as `tfctl.prev`; if the new one fails to start twice,
+supervise-daemon runs the old one (TASK 11).
+
+## Simulator
+See `sim/README.md`. Tier 1 (headless WPE + native agent in a container) is the one worth
+building: same engine as the frame, full control loop, no hardware.

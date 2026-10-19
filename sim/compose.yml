@@ -1,0 +1,12 @@
+# TASK M1. Headless WPE renderer + native tfctl agent, pretending to be a frame called "sim".
+services:
+  simframe:
+    build: .
+    environment:
+      - SERVER_URL=http://frameserver:8080
+      - FRAME_ID=sim
+      - SHOT_INTERVAL_S=5
+    volumes: ["./out:/out"]
+    depends_on: [frameserver]
+  frameserver:
+    extends: { file: ../server/compose.yml, service: frameserver }

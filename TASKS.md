@@ -87,16 +87,32 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: change rotation in /admin, frame re-renders within one poll interval; stop the container,
   frame shows the fallback page within 3 polls; start it, frame comes back.
 
+## 11. Auto-update from the container (frame side)
+- [ ] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
+      `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs
+      (`tfctl.prev` kept), applies overlay with the exclusions, writes the version, restarts service.
+- [ ] Rollback: if tfctl exits twice within 60 s after an update, service start_pre swaps `tfctl.prev` back.
+- Gate: bump a version in the container, rebuild, frame updates itself within one poll and heartbeat
+  reports the new version; break the binary on purpose, frame rolls back.
+
 ## S. Server (any box with Docker)
+- [ ] S0 Pick the language (Go recommended, see decisions.md), delete the other stub, update CI.
 - [ ] S1 `server/`: axum skeleton serving static/ at /frame/<id>, config GET/PUT, heartbeat POST,
       JSON files in /data. `cargo test` covers the config merge and one-shot action clearing.
 - [ ] S2 `/admin`: plain HTML table of frames (id, ip, last seen, mem, temp) + edit form.
 - [ ] S3 Dockerfile builds static musl for amd64 and arm64; `docker compose up` works; GH Action
       pushes ghcr.io/mikeo7/thinframe-server on tag.
 - [ ] S4 optional FRAME_TOKEN bearer auth for off-LAN use.
+- [ ] S6 Artifacts: Dockerfile stage cross-builds `tfctl` for armv7 and tars `image/rootfs/`;
+      server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
 - [ ] S5 `/api/data/*` adapters the dashboard needs (first: photos dir, clock, weather). Each one a
       small module; the page never calls third parties directly.
 - Gate: two frames with different ids show different pages from one container.
+
+## M. Simulator
+- [ ] M1 `sim/`: container with headless WPE + native tfctl agent as frame `sim`, screenshots to
+      `sim/out/frame.png`. Gate: change rotation in /admin, next screenshot is rotated.
+- [ ] M2 `make sim` one-liner starts server + sim and opens /admin.
 
 ## 9. Polish (optional, after everything above)
 - [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
