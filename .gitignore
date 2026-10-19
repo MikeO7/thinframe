@@ -7,3 +7,4 @@ image/vendor/
 *.fw
 .DS_Store
 tfctl/target/
+.claude/

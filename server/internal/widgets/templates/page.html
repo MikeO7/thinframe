@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en" data-theme="{{.Layout.Theme}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="thinframe-page-version" content="{{.PageVersion}}">
+<title>thinframe {{.FrameID}}</title>
+<style>{{.CSS}}</style>
+</head>
+<body>
+<main id="grid" style="grid-template-columns:repeat({{.Layout.Cols}},1fr);grid-template-rows:repeat({{.Layout.Rows}},1fr)">
+{{range .Widgets}}{{.}}{{end}}
+</main>
+<div id="toast"></div>
+<script>window.TF = {frame: {{.FrameID}}, pageVersion: {{.PageVersion}}};</script>
+<script>{{.JS}}</script>
+</body>
+</html>

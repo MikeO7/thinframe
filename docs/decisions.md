@@ -264,3 +264,17 @@ evaluated on the frame in local time, so it works through a server outage. Off m
 via `/sys/class/backlight/*/brightness` and cog paused (SIGSTOP) so the CPU idles; on restores
 both and reloads the page. The server can override with the `screen` action (`on|off`) and
 a frame reports `screen_state` in heartbeats. Touch during off turns the screen on for 60 s.
+
+## Boot experience
+Android never runs: the boot ROM takes our U-Boot from the SD card before the eMMC. U-Boot cannot
+light the DSI panel, so the first 5 to 10 s are dark on every possible software; the vendor has
+the same limit. From the moment the kernel binds the panel the screen is ours: `tfctl splash`
+draws the logo and one line of text directly to a DRM dumb buffer (no GLES, no compositor, no
+extra process), the local status page continues the same look while Wi-Fi and the server come up,
+then the dashboard takes over. Console output is routed away from the panel entirely.
+
+## SD first, eMMC later
+Running from SD is the only configuration where recovery is "remove the card". It stays the
+default until A/B updates have proven themselves. Installing to the eMMC (TASKS section E) removes
+the card and the vendor software entirely; recovery then needs a rescue card or FEL over USB, and
+a verified eMMC backup is a hard prerequisite so the frame can be returned to stock.
