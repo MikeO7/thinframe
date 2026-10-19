@@ -4,7 +4,7 @@ jobs:
   shell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: |
           shellcheck -x -e SC1091,SC2034,SC2317 image/build.sh scripts/*.sh image/rootfs/etc/local.d/*
       - run: grep -q '<title>thinframe</title>' www/index.html
@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: tfctl } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: armv7-unknown-linux-musleabihf }
       - run: cargo fmt --check
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: server } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with: { go-version-file: server/go.mod }
       - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: sim } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with: { go-version-file: sim/go.mod }
       - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
