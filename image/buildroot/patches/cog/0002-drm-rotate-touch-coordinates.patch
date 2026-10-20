@@ -1,0 +1,63 @@
+From: thinframe
+Subject: [PATCH] drm: rotate touch coordinates with the picture
+
+With rotation=N the gles renderer turns the picture, but touch points were only scaled to the
+rotated size, not turned, so on a rotated panel a tap landed somewhere else. libinput's own
+rotation setting is not offered for touchscreens. Map the panel's physical point into the
+rotated page the same way the renderer maps the page onto the panel. Found under QEMU with a
+virtio multitouch screen (thinframe docs/log.md 2026-10-20).
+
+Upstream: not sent yet (cog 0.18.4).
+---
+diff -ruN a/platform/drm/cog-platform-drm.c b/platform/drm/cog-platform-drm.c
+--- a/platform/drm/cog-platform-drm.c	2026-10-20 17:35:35
++++ b/platform/drm/cog-platform-drm.c	2026-10-20 17:35:35
+@@ -200,6 +200,7 @@
+ 
+     uint32_t input_width;
+     uint32_t input_height;
++    CogGLRendererRotation rotation;
+ 
+     struct keyboard_event repeating_key;
+ 
+@@ -851,10 +852,28 @@
+ 
+     if (touch_type == LIBINPUT_EVENT_TOUCH_DOWN
+         || touch_type == LIBINPUT_EVENT_TOUCH_MOTION) {
+-        touch_point->x = libinput_event_touch_get_x_transformed (touch_event,
+-                                                                 input_data.input_width);
+-        touch_point->y = libinput_event_touch_get_y_transformed (touch_event,
+-                                                                 input_data.input_height);
++        /* The panel reports physical coordinates; turn them the way the renderer turned the
++         * picture, so a touch lands on what is drawn under the finger. */
++        double w = drm_data.mode->hdisplay, h = drm_data.mode->vdisplay;
++        double px = libinput_event_touch_get_x_transformed (touch_event, w);
++        double py = libinput_event_touch_get_y_transformed (touch_event, h);
++        switch (input_data.rotation) {
++        case COG_GL_RENDERER_ROTATION_90:
++            touch_point->x = h - 1 - py;
++            touch_point->y = px;
++            break;
++        case COG_GL_RENDERER_ROTATION_180:
++            touch_point->x = w - 1 - px;
++            touch_point->y = h - 1 - py;
++            break;
++        case COG_GL_RENDERER_ROTATION_270:
++            touch_point->x = py;
++            touch_point->y = w - 1 - px;
++            break;
++        default:
++            touch_point->x = px;
++            touch_point->y = py;
++        }
+     }
+ }
+ 
+@@ -1224,6 +1243,7 @@
+ static void
+ update_logical_input_size(CogGLRendererRotation rotation)
+ {
++    input_data.rotation = rotation;
+     switch (rotation) {
+     case COG_GL_RENDERER_ROTATION_0:
+     case COG_GL_RENDERER_ROTATION_180:

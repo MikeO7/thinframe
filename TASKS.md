@@ -165,9 +165,10 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (server/internal/api/pair.go, tests pair_test.go.)
 - [x] tfctl: without FRAME_TOKEN the agent pairs first and shows the PAIR page; a 401 clears the token.
       (tfctl/src/pair.rs.) flash.sh: the token prompt may be left empty.
-- Gate: in QEMU, a frame flashed without a token shows PAIR, one tap pairs it, the dashboard loads,
+- [x] Gate: in QEMU, a frame flashed without a token shows PAIR, one tap pairs it, the dashboard loads,
   a reboot goes straight to the dashboard, a second pairing request is refused, "forget pairing"
-  brings the button back. Evidence in docs/log.md.
+  brings the button back. Evidence in docs/log.md (2026-10-20, docs/img/pair-qemu-*.png).
+- [ ] On the frame: the same with a finger on the real panel (touch axes, TASK 6).
 
 ## 11. Auto-update from the container (frame side)
 - [x] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads

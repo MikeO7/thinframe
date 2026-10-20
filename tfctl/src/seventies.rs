@@ -162,10 +162,6 @@ impl Scene {
         let (mut solid, mut alpha, mut color) = (vec![0; n], vec![0; n], vec![[0u8; 3]; n]);
         let (mut ang, mut rad, mut grain) = (vec![0; n], vec![0; n], vec![0; n]);
         for i in 0..n {
-            let (x, y) = ((i % w) as f32 + 0.5, (i / w) as f32 + 0.5);
-            let th = (y - cy).atan2(x - cx).rem_euclid(2.0 * PI);
-            ang[i] = (th / (2.0 * PI) * 65536.0) as u32 as u16;
-            rad[i] = ((x - cx).hypot(y - cy)).min(65535.0) as u16;
             // 7% film grain, multiplied in (as in the mockup).
             grain[i] = 255 - (hash(i as u32) % 19) as u8;
             let a = l.a[i];
@@ -174,7 +170,12 @@ impl Scene {
             color[i] = [c[0] as u8, c[1] as u8, c[2] as u8];
             if alpha[i] == 255 {
                 solid[i] = apply_grain(pack(c), grain[i]);
+                continue;
             }
+            let (x, y) = ((i % w) as f32 + 0.5 - cx, (i / w) as f32 + 0.5 - cy);
+            let th = fast_atan2(y, x).rem_euclid(2.0 * PI);
+            ang[i] = (th / (2.0 * PI) * 65536.0) as u32 as u16;
+            rad[i] = (x * x + y * y).sqrt().min(65535.0) as u16;
         }
         Scene {
             w,
@@ -245,6 +246,29 @@ impl Scene {
     }
 }
 
+/// atan2 within about 0.005 rad, several times cheaper than libm's on the A33's Cortex-A7;
+/// plenty for the edges of 15° rays.
+fn fast_atan2(y: f32, x: f32) -> f32 {
+    if x == 0.0 && y == 0.0 {
+        return 0.0;
+    }
+    let (ax, ay) = (x.abs(), y.abs());
+    let a = ax.min(ay) / ax.max(ay);
+    let s = a * a;
+    let mut r = ((-0.046_496_47 * s + 0.159_314_22) * s - 0.327_622_76) * s * a + a;
+    if ay > ax {
+        r = PI / 2.0 - r;
+    }
+    if x < 0.0 {
+        r = PI - r;
+    }
+    if y < 0.0 {
+        -r
+    } else {
+        r
+    }
+}
+
 fn apply_grain(c: u32, g: u8) -> u32 {
     let g = g as u32;
     ((c >> 16 & 255) * g / 255) << 16 | ((c >> 8 & 255) * g / 255) << 8 | ((c & 255) * g / 255)
@@ -306,6 +330,16 @@ mod tests {
     }
 
     #[test]
+    fn fast_atan2_is_close() {
+        for i in 0..360 {
+            let t = (i as f32).to_radians() + 0.01;
+            let (y, x) = (t.sin() * 3.0, t.cos() * 3.0);
+            assert!((fast_atan2(y, x) - y.atan2(x)).abs() < 0.01, "{i}");
+        }
+        assert_eq!(fast_atan2(0.0, 0.0), 0.0);
+    }
+
+    #[test]
     fn small_and_portrait_sizes_do_not_panic() {
         for (w, h) in [(1, 1), (16, 9), (800, 1280), (100, 30)] {
             let s = Scene::new(
@@ -318,5 +352,22 @@ mod tests {
             let mut px = vec![0; w * h];
             s.frame(12345, &mut px);
         }
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    #[test]
+    #[ignore]
+    fn timings() {
+        let t = std::time::Instant::now();
+        let s = super::Scene::new(1280, 800, "thinframe", "warming up", Some("192.168.1.20"));
+        let built = t.elapsed();
+        let mut px = vec![0; 1280 * 800];
+        let t = std::time::Instant::now();
+        for i in 0..10 {
+            s.frame(i * 100, &mut px);
+        }
+        eprintln!("new {:?}, frame {:?}", built, t.elapsed() / 10);
     }
 }

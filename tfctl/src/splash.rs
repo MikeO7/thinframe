@@ -383,10 +383,10 @@ fn animate(
         }
         busy += t0.elapsed();
         frames += 1;
-        if frames == 50 {
+        if frames == 20 {
             eprintln!(
-                "tfctl: splash: 50 frames, {} ms each on average",
-                busy.as_millis() / 50
+                "tfctl: splash: 20 frames, {} ms each on average",
+                busy.as_millis() / 20
             );
         }
         thread::sleep(FRAME.saturating_sub(t0.elapsed()));

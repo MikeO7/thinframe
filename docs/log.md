@@ -197,3 +197,35 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   of "Display output is not active" while the kiosk restarts cog (T+136 s): the splash can only take the
   CRTC back after the old cog has exited.
 - `SHOW=1 sim/qemu/run.sh` opens the guest in a window on the Mac (cocoa); a click is a touch.
+
+## 2026-10-20 TASK 16 one-press pairing and the seventies splash, end to end in QEMU
+- Setup: frameserver with `FRAME_TOKEN=admin-secret` (auth on), fresh store; guest flashed with
+  `FRAME_TOKEN=` (empty) by `sim/qemu/run.sh`. Taps go through a virtio multitouch screen (new in the
+  harness) at the panel pixel where the button is drawn.
+- Boot: provision wrote SERVER_URL and FRAME_ID only; the agent sent `POST /api/pair` 24 s after the
+  kernel started and cog showed the PAIR page (docs/img/pair-qemu-1-button.jpg) [V].
+- One tap at panel (256,252): server log `POST /pair/sim-qemu/accept`, then the agent's poll took the
+  token, stored FRAME_TOKEN in /data/etc/thinframe.conf, connected the control socket with it and opened
+  the dashboard (splash "tuning in to the dashboard ... at 10.0.2.15" in between):
+  docs/img/pair-qemu-2-splash.jpg, docs/img/pair-qemu-3-dashboard.png [V].
+- Reboot (`reboot` on the serial console): back on the dashboard with no new `POST /api/pair`; the
+  socket reconnected with the stored token (frame events: ws connected 23:47:32) [V].
+- A second `POST /api/pair` for sim-qemu answers 409 [V].
+- "forget pairing" (`POST /admin/sim-qemu/unpair`): the server closed the socket, the reconnect got 401,
+  the agent cleared its token and the PAIR page was back 3 s later; one more tap paired it again and
+  the dashboard returned. Events: paired, forgotten, paired [V].
+- Found on the way, both fixed:
+  - cog ignores mouse clicks unless it draws a cursor, so the harness's virtio tablet could never press
+    anything. The harness now has a virtio multitouch device; `run.sh tap` sends one finger (QMP `mtt`,
+    release with tracking id -1). Touch is also what the frame's panel is.
+  - cog scaled touch points to the rotated size but did not turn them: with rotation 3 a tap landed
+    elsewhere. image/buildroot/patches/cog/0002 maps the physical point into the page the same way the
+    renderer turns the picture. Verified by the tap on the drawn button above [V in QEMU]; the frame's
+    touch controller may need its own axis check in TASK 6 [U].
+  - `SHOW=1` with a cocoa window resized the guest's screen to the window (296x480). It now opens
+    Screen Sharing on a localhost VNC server, which leaves the guest at 800x1280; the kernel command
+    line also pins `video=Virtual-1:800x1280`.
+- Seventies splash cost: `tfctl splash --png` (scene build, one frame, rotate, PNG encode) took 8.2 s
+  under TCG; the same on the Mac takes 41 ms to build the scene and 5.7 ms per animation frame (release
+  profile). The A33 figures are not measured yet [U]; the kiosk logs "20 frames, N ms each" once a
+  splash has animated that long.
