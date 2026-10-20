@@ -2,3 +2,10 @@
 # draws on virtio-gpu through Mesa's software rasteriser. Own output tree; never shipped.
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_SWRAST=y
 BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/linux.fragment $(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/linux-qemu.fragment"
+# Debugging aids for the sim only: gdb, unstripped binaries (needs a bigger rootfs; the slot is 1G),
+# and a passwordless root login on the serial console (sim/qemu/run.sh exposes it as a socket).
+BR2_PACKAGE_GDB=y
+BR2_PACKAGE_GDB_DEBUGGER=y
+# BR2_STRIP_strip is not set
+BR2_TARGET_ROOTFS_EXT2_SIZE="400M"
+BR2_TARGET_ENABLE_ROOT_LOGIN=y

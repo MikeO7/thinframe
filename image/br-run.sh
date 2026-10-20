@@ -49,7 +49,7 @@ docker run --rm -i \
 		echo "buildroot: $JOBS jobs"
 		start=$(date +%s)
 		set +o pipefail
-		make -C "$BR" O=$O ${JOBS:+BR2_JLEVEL=$JOBS} $BRTARGET 2>&1 | tee $O/build.log | grep --line-buffered "^>>> "
+		make -C "$BR" O=$O ${JOBS:+BR2_JLEVEL=$JOBS} $BRTARGET 2>&1 | tee $O/build.log | { grep --line-buffered "^>>> " || true; }
 		rc=${PIPESTATUS[0]}; set -o pipefail
 		[ "$rc" = 0 ] || { tail -60 $O/build.log; exit 1; }
 		echo "buildroot: $(( ($(date +%s) - start) / 60 )) min"
