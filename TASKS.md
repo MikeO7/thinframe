@@ -8,8 +8,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       the panel patch; verify on the frame. Then track stable in the weekly rebuild.
 
 ## 0. Repo hygiene
-- [ ] `shellcheck` passes on every `.sh` in CI (`.github/workflows/ci.yml`).
-- [ ] Pin `BUILDROOT_VERSION` in `image/build.sh` to the current LTS release and record the date.
+- [x] `shellcheck` passes on every `.sh` in CI (`.github/workflows/ci.yml`).
+- [x] Pin `BUILDROOT_VERSION` in `image/build.sh` to the current LTS release and record the date.
       Record WPE/cog/kernel versions from the defconfig in `docs/log.md`.
 
 ## 0b. tfctl builds
@@ -19,10 +19,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: CI green, binary size logged.
 
 ## 1. Build the boot inputs (Mac, no frame)
-- [ ] `image/build.sh inputs` clones ormarch at `ORMARCH_COMMIT`, runs its `kernel/build.sh`
-      and `wifi/build.sh`, and copies out: `u-boot-pf1007l-L.bin`, `boot.scr`, the 7.2.10
-      kernel package, `sun8i-a33-pf1007l-full.dtb`, panel `.ko`, aic8800 `.ko` files and the
-      `aic8800DC` firmware dir. Hashes written to `image/out/inputs.sha256`.
+- [x] `image/build.sh inputs` clones ormarch at `ORMARCH_COMMIT`, runs its `image/build.sh uboot`
+      and copies out what Buildroot does not build itself: `u-boot-pf1007l-L.bin` (+ `.config`),
+      `u-boot-qemu-opipc.bin` (QEMU test only), ormarch's `boot.cmd`, the board DTS and its
+      min/pmic/full variants, and the v7.2.10 panel patch. Kernel, panel driver, DTBs and the
+      aic8800 modules are built by Buildroot in TASK 2 from these sources (the Alpine-era plan
+      of reusing the Arch kernel package and its `.ko` files no longer applies). Hashes written to
+      `image/out/inputs.sha256`.
 - Gate: `ls image/work/inputs` shows every file in the list above; hashes match a second run.
 
 ## 2. Buildroot image (Docker, cross-compile; no armv7 emulation needed)
