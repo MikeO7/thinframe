@@ -58,5 +58,10 @@
   addEventListener('pointerup', clear, { passive: true });
   addEventListener('pointercancel', clear, { passive: true });
 
+  // Liveness for the server's hung-page check (api/watchdog.go): stops if this WebProcess hangs.
+  const alive = () => navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/alive', '');
+  alive();
+  setInterval(alive, 30000);
+
   window.toast = t => { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2500); };
 })();

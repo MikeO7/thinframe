@@ -33,6 +33,7 @@ type Options struct {
 	Weather   WeatherSource  // may be nil
 	Calendar  CalendarSource // may be nil
 	Version   string
+	PageStale time.Duration // hung-page timeout; 0 = 3 minutes
 }
 
 // Server holds the dependencies and implements every operation once.
@@ -46,11 +47,19 @@ type Server struct {
 	offlineAfter time.Duration
 	// dataEvery is how often an open SSE stream gets fresh weather and calendar data.
 	dataEvery time.Duration
+	// page: last dashboard ping per frame; pageStale without one restarts cog, checked every pageCheck.
+	page      pageWatch
+	pageStale time.Duration
+	pageCheck time.Duration
 }
 
 // New wires a Server.
 func New(st *store.Store, opts Options) *Server {
-	s := &Server{Store: st, Hub: hub.New(), opts: opts, sse: newBroker(), offlineAfter: 3 * time.Minute, dataEvery: 10 * time.Minute}
+	s := &Server{Store: st, Hub: hub.New(), opts: opts, sse: newBroker(), offlineAfter: 3 * time.Minute, dataEvery: 10 * time.Minute,
+		page: pageWatch{last: map[string]time.Time{}}, pageStale: 3 * time.Minute, pageCheck: 30 * time.Second}
+	if opts.PageStale > 0 {
+		s.pageStale = opts.PageStale
+	}
 	s.Hub.OnClose = func(id string) {
 		_, _ = st.Update(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
 	}
@@ -68,6 +77,7 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("GET /api/data/weather", s.handleDataWeather)
 	m.HandleFunc("GET /api/data/calendar", s.handleDataCalendar)
 	m.HandleFunc("POST /api/frames/{id}/beacon", s.handleBeacon)
+	m.HandleFunc("POST /api/frames/{id}/alive", s.handleAlive)
 	// Protected by token when set.
 	m.Handle("GET /api/frames", s.auth(http.HandlerFunc(s.handleList)))
 	m.Handle("GET /api/frames/{id}", s.auth(http.HandlerFunc(s.handleGetFrame)))
