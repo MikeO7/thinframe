@@ -149,3 +149,28 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   onto `uses: actions/checkout@v7` (a YAML continuation line). actionlint does not flag that. Fixed,
   and CI's shell job now fails on any text continuing a `uses:` line (tested against the broken file).
   The tag stays at 8d949b1; the next run reuses it, since that commit differs only in workflows.
+
+## 2026-10-20 M2: dashboard on virtio-gpu (two real bugs fixed)
+- Debug aids in qemu.fragment (sim only, never shipped): gdb, unstripped binaries, 400M rootfs and
+  a passwordless root login on the serial console (`nc -U sim/qemu/work/console.sock`).
+- Bug 1, cog [V]: under gdb, cog's SIGSEGV is `pc 0x0` called via libffi from libwayland-server.
+  `WAYLAND_DEBUG=server` shows the last requests as wl_shm `create_buffer` 1280x800, `attach`, `commit`:
+  the web process renders in software and sends wl_shm buffers. cog 0.18.4's gles renderer sets
+  only `export_fdo_egl_image`, so wpebackend-fdo 1.14.3 calls the NULL `export_shm_buffer`.
+  Fix: image/buildroot/patches/cog/0001 (BR2_GLOBAL_PATCH_DIR, main image too). It uploads the shm
+  pixels to the renderer's texture and draws them with the same rotation, and checks
+  gbm_surface_lock_front_buffer() for NULL. On the frame this path is only taken if WebKit falls
+  back to software [U]; without the patch that fallback would be a crash loop.
+- Bug 2, tfctl [V]: cog then ran but logged "Cannot set mode (Permission denied)". DRM debugfs
+  `clients` showed cog with master=n. cog, WPEWebProcess and WPENetworkProcess were all in tfctl's
+  process group, so after a restart the old web process outlived cog while holding a dup of cog's
+  DRM file (and with it master). The new cog opened the device without master. Fix: cog
+  gets its own process group; on restart or exit the kiosk SIGKILLs the group and waits (max 5 s)
+  until it is empty. Test `reap_group_kills_helpers_that_outlive_the_child`. The same race applies
+  on the frame after every URL or rotation change [U].
+- Result: screendump shows the dashboard (clock, date, weather and status "sim-qemu · 10.0.2.15"),
+  rotated 270° as on the mounted frame: docs/img/m2-qemu-virt-dashboard.png [V].
+- Also fixed: br-run.sh's `>>>` filter returned 1 for quiet targets (BRTARGET=cog-dirclean) and
+  `set -e` ended the build silently.
+- Still open for M2: the A/B update + rollback inside `-M virt`. This harness boots the kernel
+  directly (no U-Boot, so no boot.scr slot logic). The same test passes on `-M orangepi-pc` (TASK 12).

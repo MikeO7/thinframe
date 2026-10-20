@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::update::{self, Paths, StartCheck};
 use crate::{agent, screen, splash, sys};
 use std::io;
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -28,6 +29,18 @@ pub enum KioskCmd {
     Schedule(String, String),
     /// Stop cog and return from `supervise`: a new tfctl was installed, init respawns us.
     Exit,
+}
+
+/// Kill what is left of cog's process group (WPEWebProcess, WPENetworkProcess) and wait up to
+/// 5 s for it to empty. A web process that outlives cog keeps a dup of cog's DRM file, which
+/// holds DRM master; the next cog would open the device without master and fail every mode set
+/// with EACCES (seen under QEMU, 2026-10-20).
+fn reap_group(pgid: u32) {
+    let _ = sys::send_group(pgid, sys::SIGKILL);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while sys::send_group(pgid, 0).is_ok() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 const RESTART_DELAY: Duration = Duration::from_secs(3);
@@ -146,6 +159,8 @@ impl Kiosk {
         c.env("XDG_RUNTIME_DIR", runtime_dir)
             .env("LIBSEAT_BACKEND", "seatd")
             .stdin(Stdio::null());
+        // Own process group: WebKit's helper processes join it, so a restart can kill them all.
+        c.process_group(0);
         c
     }
 
@@ -194,6 +209,7 @@ impl Kiosk {
             }
             let _ = c.kill();
             let _ = c.wait();
+            reap_group(c.id());
         }
         self.stopped = false;
     }
@@ -297,6 +313,7 @@ impl Kiosk {
             if let Some(c) = &mut self.child {
                 if let Ok(Some(status)) = c.try_wait() {
                     eprintln!("tfctl: kiosk: cog exited: {status}");
+                    reap_group(c.id());
                     self.exited();
                 }
             }
@@ -366,6 +383,26 @@ mod tests {
             c.get_args().nth(1).unwrap(),
             "--platform-params=renderer=modeset,rotation=1"
         );
+    }
+
+    #[test]
+    fn reap_group_kills_helpers_that_outlive_the_child() {
+        // Like cog: the child exits (killed) while a grandchild in its group keeps running.
+        let mut c = Command::new("sh")
+            .args(["-c", "sleep 30 & wait"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pgid = c.id();
+        thread::sleep(Duration::from_millis(200));
+        c.kill().unwrap();
+        c.wait().unwrap();
+        assert!(
+            sys::send_group(pgid, 0).is_ok(),
+            "sleep should still be alive"
+        );
+        reap_group(pgid);
+        assert!(sys::send_group(pgid, 0).is_err(), "group should be empty");
     }
 
     #[test]

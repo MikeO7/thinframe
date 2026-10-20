@@ -1,0 +1,220 @@
+From: thinframe
+Subject: [PATCH] drm/gles: paint wl_shm buffers instead of calling a NULL callback
+
+When the web process renders in software it sends wl_shm buffers. The gles renderer only set
+export_fdo_egl_image, so wpebackend-fdo called the NULL export_shm_buffer and cog died with
+SIGSEGV right after the first page load. Seen under QEMU (virtio-gpu without virgl, Mesa swrast);
+it would hit a real board too whenever WebKit falls back to software.
+
+Add export_shm_buffer: upload the pixels to the renderer's texture (BGRA when
+GL_EXT_texture_format_BGRA8888 is there, otherwise converted to RGBA) and draw with the same
+rotation as EGL images. Also check gbm_surface_lock_front_buffer() for NULL.
+
+Upstream: not sent yet (cog 0.18.4).
+---
+diff -ruN a/platform/common/cog-gl-utils.c b/platform/common/cog-gl-utils.c
+--- a/platform/common/cog-gl-utils.c	2024-04-12 03:16:04
++++ b/platform/common/cog-gl-utils.c	2026-10-20 15:05:55
+@@ -221,19 +221,74 @@
+     self->uniform_texture = 0;
+ }
+ 
++static void cog_gl_renderer_draw(CogGLRenderer *self, CogGLRendererRotation rotation);
++
+ void
+ cog_gl_renderer_paint(CogGLRenderer *self, EGLImage *image, CogGLRendererRotation rotation)
+ {
+     g_assert(self);
+     g_assert(image != EGL_NO_IMAGE);
+     g_assert(eglGetCurrentContext() != EGL_NO_CONTEXT);
+-    g_assert(rotation == COG_GL_RENDERER_ROTATION_0 || rotation == COG_GL_RENDERER_ROTATION_90 ||
+-             rotation == COG_GL_RENDERER_ROTATION_180 || rotation <= COG_GL_RENDERER_ROTATION_270);
+ 
+     glUseProgram(self->program);
+     glActiveTexture(GL_TEXTURE0);
+     glBindTexture(GL_TEXTURE_2D, self->texture);
+     glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
++    cog_gl_renderer_draw(self, rotation);
++}
++
++/*
++ * Same as cog_gl_renderer_paint(), from pixels in memory: wl_shm ARGB8888/XRGB8888, which is
++ * B,G,R,A in memory. The web process sends these when it renders in software.
++ */
++void
++cog_gl_renderer_paint_pixels(CogGLRenderer        *self,
++                             const void           *argb8888,
++                             int                   width,
++                             int                   height,
++                             int                   stride,
++                             CogGLRendererRotation rotation)
++{
++    g_assert(self);
++    g_assert(argb8888);
++    g_assert(eglGetCurrentContext() != EGL_NO_CONTEXT);
++
++    static int has_bgra = -1;
++    if (has_bgra < 0)
++        has_bgra = epoxy_has_gl_extension("GL_EXT_texture_format_BGRA8888");
++
++    glUseProgram(self->program);
++    glActiveTexture(GL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, self->texture);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
++
++    if (has_bgra && stride == width * 4) {
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA_EXT, width, height, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, argb8888);
++    } else {
++        /* No BGRA upload, or padded rows: convert to tightly packed RGBA. */
++        g_autofree uint8_t *rgba = g_malloc((size_t) width * height * 4);
++        for (int y = 0; y < height; y++) {
++            const uint8_t *src = (const uint8_t *) argb8888 + (size_t) y * stride;
++            uint8_t       *dst = rgba + (size_t) y * width * 4;
++            for (int x = 0; x < width; x++, src += 4, dst += 4) {
++                dst[0] = src[2];
++                dst[1] = src[1];
++                dst[2] = src[0];
++                dst[3] = src[3];
++            }
++        }
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
++    }
++    cog_gl_renderer_draw(self, rotation);
++}
++
++/* Draws self->texture (bound to unit 0, program in use) over the viewport. */
++static void
++cog_gl_renderer_draw(CogGLRenderer *self, CogGLRendererRotation rotation)
++{
++    g_assert(rotation == COG_GL_RENDERER_ROTATION_0 || rotation == COG_GL_RENDERER_ROTATION_90 ||
++             rotation == COG_GL_RENDERER_ROTATION_180 || rotation <= COG_GL_RENDERER_ROTATION_270);
++
+     glUniform1i(self->uniform_texture, 0);
+ 
+     if (self->vao > 0)
+diff -ruN a/platform/common/cog-gl-utils.h b/platform/common/cog-gl-utils.h
+--- a/platform/common/cog-gl-utils.h	2024-04-12 03:16:04
++++ b/platform/common/cog-gl-utils.h	2026-10-20 15:05:22
+@@ -83,5 +83,11 @@
+ bool cog_gl_renderer_initialize(CogGLRenderer *self, GError **error);
+ void cog_gl_renderer_finalize(CogGLRenderer *self);
+ void cog_gl_renderer_paint(CogGLRenderer *self, EGLImage *image, CogGLRendererRotation rotation);
++void cog_gl_renderer_paint_pixels(CogGLRenderer        *self,
++                                  const void           *argb8888,
++                                  int                   width,
++                                  int                   height,
++                                  int                   stride,
++                                  CogGLRendererRotation rotation);
+ 
+ G_END_DECLS
+diff -ruN a/platform/drm/cog-drm-gles-renderer.c b/platform/drm/cog-drm-gles-renderer.c
+--- a/platform/drm/cog-drm-gles-renderer.c	2024-04-12 03:16:04
++++ b/platform/drm/cog-drm-gles-renderer.c	2026-10-20 15:06:21
+@@ -14,6 +14,7 @@
+ #include <errno.h>
+ #include <gbm.h>
+ #include <glib-unix.h>
++#include <wayland-server.h>
+ #include <wayland-util.h>
+ #include <wpe/fdo-egl.h>
+ #include <wpe/fdo.h>
+@@ -65,20 +66,30 @@
+     } connector_props, crtc_props, plane_props;
+ } CogDrmGlesRenderer;
+ 
+-static void
+-cog_drm_gles_renderer_handle_egl_image(void *data, struct wpe_fdo_egl_exported_image *image)
++static bool
++cog_drm_gles_renderer_begin_frame(CogDrmGlesRenderer *self)
+ {
+-    CogDrmGlesRenderer *self = data;
+-
+     if (!eglMakeCurrent(self->egl_display, self->egl_surface, self->egl_surface, self->egl_context)) {
+         g_critical("%s: Cannot activate EGL context for rendering (%#04x)", __func__, eglGetError());
+-        return;
++        return false;
+     }
+ 
+     glViewport(0, 0, self->mode.hdisplay, self->mode.vdisplay);
+     glClearColor(0, 0, 0, 0);
+     glClear(GL_COLOR_BUFFER_BIT);
++    return true;
++}
+ 
++static void cog_drm_gles_renderer_present(CogDrmGlesRenderer *self);
++
++static void
++cog_drm_gles_renderer_handle_egl_image(void *data, struct wpe_fdo_egl_exported_image *image)
++{
++    CogDrmGlesRenderer *self = data;
++
++    if (!cog_drm_gles_renderer_begin_frame(self))
++        return;
++
+     cog_gl_renderer_paint(&self->gl_render, wpe_fdo_egl_exported_image_get_egl_image(image), self->rotation);
+ 
+     if (G_UNLIKELY(!eglSwapBuffers(self->egl_display, self->egl_surface))) {
+@@ -87,10 +98,55 @@
+     }
+ 
+     wpe_view_backend_exportable_fdo_egl_dispatch_release_exported_image(self->exportable, image);
++    cog_drm_gles_renderer_present(self);
++}
+ 
++/*
++ * The web process sends wl_shm buffers instead of EGL images when it renders in software (no
++ * usable GPU in the web process). cog 0.18.4 left this callback NULL, so the first such frame
++ * crashed the UI process with a call through a NULL pointer.
++ */
++static void
++cog_drm_gles_renderer_handle_shm_buffer(void *data, struct wpe_fdo_shm_exported_buffer *buffer)
++{
++    CogDrmGlesRenderer   *self = data;
++    struct wl_shm_buffer *shm = wpe_fdo_shm_exported_buffer_get_shm_buffer(buffer);
++    uint32_t              format = wl_shm_buffer_get_format(shm);
++
++    if (format != WL_SHM_FORMAT_ARGB8888 && format != WL_SHM_FORMAT_XRGB8888) {
++        g_warning("%s: unsupported wl_shm format %#x", __func__, format);
++        wpe_view_backend_exportable_fdo_egl_dispatch_release_shm_exported_buffer(self->exportable, buffer);
++        return;
++    }
++
++    if (!cog_drm_gles_renderer_begin_frame(self)) {
++        wpe_view_backend_exportable_fdo_egl_dispatch_release_shm_exported_buffer(self->exportable, buffer);
++        return;
++    }
++
++    wl_shm_buffer_begin_access(shm);
++    cog_gl_renderer_paint_pixels(&self->gl_render, wl_shm_buffer_get_data(shm), wl_shm_buffer_get_width(shm),
++                                 wl_shm_buffer_get_height(shm), wl_shm_buffer_get_stride(shm), self->rotation);
++    wl_shm_buffer_end_access(shm);
++    wpe_view_backend_exportable_fdo_egl_dispatch_release_shm_exported_buffer(self->exportable, buffer);
++
++    if (G_UNLIKELY(!eglSwapBuffers(self->egl_display, self->egl_surface))) {
++        g_critical("%s: eglSwapBuffers failed (%#04x)", __func__, eglGetError());
++        return;
++    }
++    cog_drm_gles_renderer_present(self);
++}
++
++static void
++cog_drm_gles_renderer_present(CogDrmGlesRenderer *self)
++{
+     int drm_fd = gbm_device_get_fd(self->gbm_device);
+ 
+     struct gbm_bo *bo = gbm_surface_lock_front_buffer(self->gbm_surface);
++    if (G_UNLIKELY(!bo)) {
++        g_warning("%s: Cannot lock front buffer", __func__);
++        return;
++    }
+ 
+     uint32_t handles[4], strides[4], offsets[4];
+     uint64_t modifiers[4];
+@@ -387,6 +443,7 @@
+ 
+     static const struct wpe_view_backend_exportable_fdo_egl_client client = {
+         .export_fdo_egl_image = cog_drm_gles_renderer_handle_egl_image,
++        .export_shm_buffer = cog_drm_gles_renderer_handle_shm_buffer,
+     };
+     return (self->exportable = wpe_view_backend_exportable_fdo_egl_create(&client, renderer, width, height));
+ }

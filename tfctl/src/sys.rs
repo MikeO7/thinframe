@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub static TERM: AtomicBool = AtomicBool::new(false);
 
 pub const SIGINT: i32 = 2;
+pub const SIGKILL: i32 = 9;
 pub const SIGTERM: i32 = 15;
 pub const SIGSTOP: i32 = if cfg!(target_os = "linux") { 19 } else { 17 };
 pub const SIGCONT: i32 = if cfg!(target_os = "linux") { 18 } else { 19 };
@@ -35,6 +36,17 @@ pub fn term_requested() -> bool {
 pub fn send(pid: u32, sig: i32) -> io::Result<()> {
     // SAFETY: kill(2) has no memory-safety preconditions.
     let rc = unsafe { kill(pid as i32, sig) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// Signal every process in group `pgid` (`kill(-pgid, sig)`). Signal 0 checks whether any is left.
+pub fn send_group(pgid: u32, sig: i32) -> io::Result<()> {
+    // SAFETY: kill(2) has no memory-safety preconditions.
+    let rc = unsafe { kill(-(pgid as i32), sig) };
     if rc == 0 {
         Ok(())
     } else {

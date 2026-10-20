@@ -50,10 +50,11 @@ qemu-system-arm -M virt -cpu cortex-a15 -m 1G -smp 4 -display none \
 	-netdev "user,id=net,hostfwd=tcp:127.0.0.1:$SSHP-:22" -device virtio-net-device,netdev=net \
 	-device "virtio-gpu-device,xres=$PW,yres=$PH" -device virtio-tablet-device -device virtio-keyboard-device \
 	-monitor "unix:$W/mon.sock,server,nowait" -qmp "unix:$W/qmp.sock,server,nowait" \
-	-serial "file:$W/serial.log" > "$W/qemu.out" 2>&1 &
+	-chardev "socket,id=con,path=$W/console.sock,server=on,wait=off,logfile=$W/serial.log" -serial chardev:con \
+	> "$W/qemu.out" 2>&1 &
 QPID=$!
 trap 'kill $QPID 2>/dev/null || true' EXIT INT TERM
-echo "== booting (pid $QPID); serial: sim/qemu/work/serial.log; ssh -p $SSHP frame@127.0.0.1"
+echo "== booting (pid $QPID); serial: sim/qemu/work/serial.log (console: nc -U sim/qemu/work/console.sock); ssh -p $SSHP frame@127.0.0.1"
 start=$(date +%s)
 while kill -0 "$QPID" 2>/dev/null; do
 	sleep "$SHOT_INTERVAL_S"

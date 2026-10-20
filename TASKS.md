@@ -218,8 +218,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       every N s into `sim/out/frame.png`, touch via QEMU `input-send-event`.
       Gate: frame `sim-qemu` appears in /admin from the real image; screendump shows the dashboard;
       an A/B system update + rollback runs end-to-end inside QEMU. Slow (TCG), for correctness only.
-      2026-10-20: boot, provision, register and dashboard load pass; cog SIGSEGVs on swrast so the
-      screendump is blank (docs/log.md). Open.
+      2026-10-20: frame registers and the screendump shows the dashboard (two bugs fixed, docs/log.md);
+      A/B inside -M virt still open (direct kernel boot, no U-Boot).
 - [x] M3 `docker compose --profile sim up --build` from the repo root starts both containers (README).
 - [x] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
       (`tests/e2e.sh` with compose.yml; CI job `e2e-sim`. `tests/e2e-native.sh` covers the no-Docker path.)
