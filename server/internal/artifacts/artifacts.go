@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -49,7 +50,7 @@ func (d *Dir) Sum(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	key := name + "|" + st.ModTime().String() + "|" + string(rune(st.Size()))
+	key := name + "|" + st.ModTime().String() + "|" + strconv.FormatInt(st.Size(), 10)
 	d.mu.Lock()
 	if s, ok := d.sums[key]; ok {
 		d.mu.Unlock()

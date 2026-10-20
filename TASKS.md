@@ -97,9 +97,11 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       GET /config + 60 s poll fallback when the socket is down; fallback URL when the server is gone
       for 3 attempts. Runs as a thread inside `tfctl kiosk` when SERVER_URL is set.
 - [x] Unit tests for the frame codec (mask/unmask, fragment, close) and the message types.
-- [ ] Set system clock and TZ from the `hello` reply on every connect (no NTP on the frame).
-- [ ] `brightness` and `schedule` in config: backlight via sysfs, cog SIGSTOP/SIGCONT, touch wakes
+- [x] Set system clock and TZ from the `hello` reply on every connect (no NTP on the frame).
+      (agent.rs `on_hello`: `date -s @N` when off by >2 s, TZ copied from zoneinfo. Hardware unverified.)
+- [x] `brightness` and `schedule` in config: backlight via sysfs, cog SIGSTOP/SIGCONT, touch wakes
       for 60 s, `screen` action, `screen_state` in heartbeat. Evaluated locally so it survives outages.
+      (screen.rs + kiosk.rs `tick_schedule`; unit-tested windows, e2e acks `screen`. Backlight unverified.)
 - [x] `tfctl set KEY VALUE` rewrites one key in /etc/thinframe.conf (used for first pairing).
 - Gate: change rotation in /admin, frame re-renders within 1 s; stop the container, frame shows the
   fallback page within 3 reconnect attempts; start it, frame comes back and acks queued actions.
@@ -124,7 +126,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       image bind-mounts /data/ssh over /etc/dropbear. Init must mount PFBOOT rw around the call.)
 - [ ] On-screen status page (local file, shown by cog until the server answers): "connecting to Wi-Fi",
       "cannot reach http://…", with the IP once it has one. This is the only local page besides fallback.
-- [ ] 14b Linux variant of flash.sh (lsblk instead of diskutil).
+- [x] 14b Linux variant of flash.sh (lsblk instead of diskutil). (`tests/flash-test.sh` covers discovery with a fake lsblk; the write path is untested.)
 - Gate: a person who has not read the repo flashes a frame from docs/flashing.md alone, timed, no questions asked.
 
 ## 15. Boot experience (ours from the first lit pixel)
@@ -172,8 +174,10 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] S9 Frames auto-register on first heartbeat with a valid token (no pre-creation in admin).
 - [ ] S10 `release.yml` publishes `thinframe-sd.img.zst` + `.sha256` as a GitHub release asset on tag,
       so flash.sh never needs a local build.
-- [ ] S6 Artifacts: Dockerfile stage cross-builds `tfctl` for armv7 and tars `image/rootfs/`;
-      server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
+- [x] S6 Artifacts: `scripts/make-artifacts.sh` (run by release.yml after cross-building tfctl) stages
+      `tfctl-armv7`, `overlay.tar.gz`, `versions.json` into `server/artifacts/`, which the Dockerfile copies to
+      `/artifacts`; server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
+      (tests/e2e-native.sh checks the sidecar hash and the config field; the tag build itself is untested.)
 - [x] S5 Widgets + layout: `layout.json` per frame, `html/template` renderer, widget library
       (clock, photo, weather, calendar, text, iframe) in `internal/widgets/`, `/admin` layout form,
       MCP `set_layout`/`list_widgets`. Gate: two frames, two layouts, one container.
@@ -197,6 +201,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       an A/B system update + rollback runs end-to-end inside QEMU. Slow (TCG), for correctness only.
 - [x] M3 `docker compose --profile sim up --build` from the repo root starts both containers (README).
 - [ ] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
+      (Half done: `tests/e2e-native.sh` runs frameserver + real tfctl without Docker, in CI. The screenshot half needs the sim container.)
 
 ## 13. Smoothness (measure, then tune)
 - [ ] Confirm GPU compositing in WPE on lima (`WEBKIT_SHOW_FPS=1`); fix before anything else.

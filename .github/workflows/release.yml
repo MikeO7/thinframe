@@ -8,6 +8,13 @@ jobs:
     permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: armv7-unknown-linux-musleabihf }
+      - name: stage frame software (tfctl-armv7, overlay, versions.json) into the image
+        run: |
+          pip install cargo-zigbuild
+          (cd tfctl && cargo zigbuild --release --target armv7-unknown-linux-musleabihf)
+          scripts/make-artifacts.sh "${{ github.ref_name }}" tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v4
@@ -24,5 +31,18 @@ jobs:
           tags: |
             ghcr.io/mikeo7/thinframe-server:${{ github.ref_name }}
             ghcr.io/mikeo7/thinframe-server:latest
-  # TASK S10/S8: build the Buildroot image here on a tag and weekly, attach thinframe-sd.img.zst
-  # and system-<ver>.tar to the release, and bake the artifacts into the server image.
+  # TASK S10/S8 (disabled until TASK 2/3 produce an image): build the Buildroot image, QEMU boot
+  # test, attach thinframe-sd.img.zst(+.sha256) and system-<ver>.tar to the release, and pass the
+  # system tar to scripts/make-artifacts.sh above so the server image carries it.
+  image:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v7
+      - run: image/build.sh all
+      - run: image/build.sh test
+      - run: |
+          cd image/out && zstd -19 thinframe-sd.img && sha256sum thinframe-sd.img.zst > thinframe-sd.img.zst.sha256
+      - run: gh release upload "${{ github.ref_name }}" image/out/thinframe-sd.img.zst image/out/thinframe-sd.img.zst.sha256 image/out/system-*.tar
+        env: { GH_TOKEN: "${{ github.token }}" }

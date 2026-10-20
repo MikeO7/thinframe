@@ -10,3 +10,5 @@ tfctl/target/
 .claude/
 sim/out/*
 !sim/out/.gitkeep
+server/artifacts/*
+!server/artifacts/.gitkeep
