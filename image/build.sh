@@ -13,10 +13,11 @@
 # Writes only to image/{cache,work,out,secrets}. No sudo. No devices touched.
 set -euo pipefail
 
-# ---- pinned inputs (TASK 0/1: fill the TODOs) ------------------------------
+# ---- pinned inputs (TASK 0/1, pinned 2026-10-20) ---------------------------
 ORMARCH_REPO="https://github.com/pangoleen/ormarch-picture-frame.git"
-ORMARCH_COMMIT="TODO-pin-to-the-commit-that-matches-your-frame"
-BUILDROOT_VERSION="2026.08"      # TODO verify LTS, record date in docs/log.md
+ORMARCH_COMMIT="4207b5c2f6d6615bf6a18fb725cc7a77dd532065"   # 2026-10-12 tree that booted the frame
+BUILDROOT_VERSION="2025.02.18"   # current LTS (buildroot.org/download.html, 2026-10-20)
+BUILDROOT_SHA256="e38ad1df6ea0479fff6419a87a64535d02131674d463be154a763ef725b55321"
 KVER="7.2.10"
 
 # card layout (same as ormarch so the same U-Boot boot.scr works)
@@ -34,16 +35,20 @@ sha()  { shasum -a 256 "$1" | cut -d' ' -f1; }
 need() { command -v "$1" >/dev/null || stop "missing tool: $1"; }
 
 step_inputs() {
-	say "inputs: ormarch artifacts"
+	say "inputs: ormarch $ORMARCH_COMMIT (U-Boot build L, DTS, panel patch)"
 	need git; need docker
-	[ -d "$CACHE/ormarch/.git" ] || git clone "$ORMARCH_REPO" "$CACHE/ormarch"
-	git -C "$CACHE/ormarch" fetch -q && git -C "$CACHE/ormarch" checkout -q "$ORMARCH_COMMIT"
-	# TODO(TASK 1): run $CACHE/ormarch/kernel/build.sh and wifi/build.sh, and the uboot/dtbs
-	# steps of its image/build.sh, then copy into $WORK/inputs/:
-	#   u-boot-pf1007l-L.bin boot.scr linux-armv7-7.2.10-1-armv7h.pkg.tar.xz
-	#   sun8i-a33-pf1007l-{min,pmic,full}.dtb  panel-*.ko  aic8800_*.ko  aic8800DC/ (firmware)
-	# Write $OUT/inputs.sha256.
-	stop "TASK 1 not done: see TASKS.md"
+	local om="$CACHE/ormarch" in="$WORK/inputs"
+	[ -d "$om/.git" ] || git clone -q "$ORMARCH_REPO" "$om"
+	git -C "$om" cat-file -e "$ORMARCH_COMMIT^{commit}" 2>/dev/null || git -C "$om" fetch -q origin
+	git -C "$om" checkout -q --detach "$ORMARCH_COMMIT"
+	[ -z "$(git -C "$om" status --porcelain --untracked-files=no)" ] || stop "ormarch checkout is modified"
+	bash "$om/image/build.sh" uboot
+	rm -rf "$in"; mkdir -p "$in/dts/allwinner" "$in/linux-patches"
+	cp "$om"/image/work/uboot/{u-boot-pf1007l-L.bin,u-boot-pf1007l-L.config,u-boot-qemu-opipc.bin,boot.cmd} "$in/"
+	cp "$om/kernel/dts/sun8i-a33-pf1007l.dts" "$om"/image/dts/sun8i-a33-pf1007l-{min,pmic,full}.dts "$in/dts/allwinner/"
+	cp "$om/kernel/patches/v$KVER/"*.patch "$in/linux-patches/"
+	(cd "$in" && find . -type f | LC_ALL=C sort | xargs shasum -a 256) > "$OUT/inputs.sha256"
+	cat "$OUT/inputs.sha256"
 }
 
 step_secrets() {
