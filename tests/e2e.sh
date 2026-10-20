@@ -10,7 +10,7 @@ TMP="$(mktemp -d)"; export DATA_DIR="$TMP/data" SIM_OUT="$TMP/out"
 mkdir -p "$DATA_DIR" "$SIM_OUT"
 DC=(docker compose -p thinframe-e2e -f "$ROOT/compose.yml" --profile sim)
 BASE="http://127.0.0.1:$PORT"; SHOT="$SIM_OUT/frame.png"
-cleanup() { "${DC[@]}" down -v >/dev/null 2>&1 || true; rm -rf "$TMP"; }
+cleanup() { "${DC[@]}" down -v >/dev/null 2>&1 || true; rm -rf "$TMP" 2>/dev/null || true; }	# data/ is root-owned under rootful Docker
 trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; "${DC[@]}" logs --tail 30 >&2 || true; exit 1; }
 api() { curl -fsS -H "Authorization: Bearer $FRAME_TOKEN" "$@"; }
