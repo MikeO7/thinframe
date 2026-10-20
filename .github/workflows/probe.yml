@@ -1,0 +1,13 @@
+name: probe
+on: pull_request
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - env: { GH_TOKEN: "${{ github.token }}", R: "${{ github.repository }}", S: "${{ github.event.pull_request.base.sha }}" }
+        run: |
+          set -x
+          gh release create probe-a -R $R --draft --title probe-a --notes x && gh release delete probe-a -R $R -y || true
+          gh api -X POST repos/$R/git/refs -f ref=refs/tags/probe-d -f sha="$S" && gh api -X DELETE repos/$R/git/refs/tags/probe-d || true
+          gh release create probe-c -R $R --target "$S" --title probe-c --notes x --prerelease && gh release delete probe-c -R $R -y --cleanup-tag || true
