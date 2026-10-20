@@ -11,6 +11,9 @@ jobs:
       - run: image/build.sh check
       - run: shellcheck -x -e SC1091,SC2034 tests/*.sh
       - run: tests/flash-test.sh
+      # Text continuing a `uses:` line is a mangled step; it broke the release run on 2026-10-20.
+      - run: |
+          awk '/^ *- uses: /{u=1; next} u && /^ +[a-z_-]+:/{u=0} u && /^ +[^ -]/{print FILENAME": "FNR": "$0; bad=1} {u=0} END{exit bad}' .github/workflows/*.yml
   tfctl:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: tfctl } }

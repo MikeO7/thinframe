@@ -144,3 +144,8 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   differ from main (no `workflows` permission). Fix: a `tag` job creates the tag first, while
   GITHUB_SHA is still the tip of main; publish only creates the release on the existing tag.
   A tag made with GITHUB_TOKEN does not trigger the `push: tags` workflow, so no second run starts.
+- 2026-10-20, later: release run 39493723923 on the #40 workflow. The `tag` job created v2026.10.20
+  at 8d949b1 [V]. `image` then failed at once: the #40 edit had left the old version script glued
+  onto `uses: actions/checkout@v7` (a YAML continuation line). actionlint does not flag that. Fixed,
+  and CI's shell job now fails on any text continuing a `uses:` line (tested against the broken file).
+  The tag stays at 8d949b1; the next run reuses it, since that commit differs only in workflows.
