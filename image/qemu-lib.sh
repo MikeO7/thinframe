@@ -40,7 +40,7 @@ prepare_image() {
 		mcopy -o -i $i$o /w/sun8i-h3-orangepi-pc.dtb /w/provision.txt ::/
 		for s in a b; do
 			mcopy -n -i $i$o ::/extlinux/slot-$s.conf /w/slot-$s.conf
-			sed -i "s|/sun8i-a33-pf1007l-full.dtb|/sun8i-h3-orangepi-pc.dtb|; s|console=ttyGS0,115200|console=ttyS0,115200|" /w/slot-$s.conf
+			sed -i "s|/sun8i-a33-pf1007l-full.dtb|/sun8i-h3-orangepi-pc.dtb|; s|console=ttyGS0,115200|console=ttyS0,115200|; s| quiet loglevel=0||" /w/slot-$s.conf
 			mcopy -o -i $i$o /w/slot-$s.conf ::/extlinux/slot-$s.conf
 		done'
 	(cd "$ROOT/server" && go build -o "$W/frameserver" ./cmd/frameserver)

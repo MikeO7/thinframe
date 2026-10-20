@@ -42,7 +42,7 @@ on() {	# version slot: the last heartbeat reports both
 	frame | tr -d ' \n' | grep -q "\"last_heartbeat\":{[^}]*\"system_version\":\"$1\"" &&
 		frame | tr -d ' \n' | grep -q "\"last_heartbeat\":{[^}]*\"slot\":\"$2\""
 }
-event() { frame | grep -q "\"$1\""; }
+event() { frame | grep -q "\"frame:$1\""; }	# the server prefixes frame events
 
 prepare_image
 start_server
