@@ -142,6 +142,7 @@ impl Kiosk {
             title: &self.splash_text,
             status,
             rotation: self.rotation,
+            ip: splash::lan_ip(),
         };
         match splash::show(&look) {
             Ok(s) => self.splash = Some(s),
@@ -184,7 +185,7 @@ impl Kiosk {
         // open; the loop frees the buffer once cog's frame replaced it. If master cannot be
         // dropped, release the device entirely as before.
         if self.splash.is_none() {
-            self.show_splash("loading");
+            self.show_splash("tuning in to the dashboard");
         }
         if !self.splash.as_mut().is_some_and(|s| s.hand_over()) {
             self.splash = None;
@@ -323,7 +324,7 @@ impl Kiosk {
 
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
         let _ = screen::set_brightness(self.brightness);
-        self.show_splash("starting");
+        self.show_splash("warming up");
         loop {
             if sys::term_requested() || self.exit {
                 eprintln!("tfctl: kiosk: stopping cog");

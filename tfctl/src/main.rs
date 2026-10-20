@@ -36,6 +36,8 @@ mod png;
 mod provision;
 mod retro;
 mod screen;
+mod sdf;
+mod seventies;
 mod sha1;
 mod sha256;
 mod slot;

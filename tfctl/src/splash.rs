@@ -1,14 +1,18 @@
 //! Boot splash (TASK 15), drawn in software into a DRM dumb
-//! buffer (drm.rs). `SPLASH_STYLE=retro` (default) is the scene in retro.rs; `plain` is a flat
+//! buffer (drm.rs). `SPLASH_STYLE=seventies` (default) is the animated scene in seventies.rs,
+//! `retro` the synthwave scene in retro.rs; `plain` is a flat
 //! colour, the logo PNG and one text line in the embedded 8x16 font. `COG_ROTATION` is applied
 //! exactly as cog applies it, so splash, status page and dashboard share one orientation.
 //!
 //! `tfctl splash [--png FILE] [STATUS]` draws and holds until SIGTERM (or writes a preview);
 //! the kiosk draws it in process and keeps it up while cog starts (see `Splash::hand_over`).
 use crate::config::Config;
-use crate::{drm, font, png, retro, sys};
+use crate::{drm, font, png, retro, seventies, sys};
 use std::io;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub const DEVICE: &str = "/dev/dri/card0";
 pub const SCALE: usize = 4;
@@ -149,19 +153,23 @@ fn load_logo() -> Option<png::Image> {
     }
 }
 
-/// A live splash: dropping it frees the buffer (and DRM master if it still holds it).
+/// A live splash: dropping it stops the animation and frees the buffer (and DRM master if it
+/// still holds it).
 pub struct Splash {
-    display: drm::Display,
-    handed_over: bool,
+    display: Arc<Mutex<drm::Display>>,
+    handed_over: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    anim: Option<thread::JoinHandle<()>>,
 }
 
 impl Splash {
     /// Let cog take the display: drop DRM master, keep the picture up. False if that failed
     /// (then the caller must drop the splash, or cog cannot become master).
     pub fn hand_over(&mut self) -> bool {
-        match self.display.drop_master() {
+        let mut d = self.display.lock().unwrap_or_else(|e| e.into_inner());
+        match d.drop_master() {
             Ok(()) => {
-                self.handed_over = true;
+                self.handed_over.store(true, Ordering::SeqCst);
                 true
             }
             Err(e) => {
@@ -173,18 +181,33 @@ impl Splash {
 
     /// Handed over and no longer on screen: cog has shown its first frame.
     pub fn replaced(&self) -> bool {
-        self.handed_over && !self.display.shown()
+        self.handed_over.load(Ordering::SeqCst)
+            && !self
+                .display
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .shown()
     }
 }
 
-/// What the splash shows: `SPLASH_STYLE` (retro or plain), colours, the title (`SPLASH_TEXT`)
-/// and the boot status line under it.
+impl Drop for Splash {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.anim.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// What the splash shows: `SPLASH_STYLE` (seventies, retro or plain), colours, the title
+/// (`SPLASH_TEXT`), the boot status line under it and the frame's address once it has one.
 pub struct Look<'a> {
     pub style: &'a str,
     pub bg: u32,
     pub title: &'a str,
     pub status: &'a str,
     pub rotation: u8,
+    pub ip: Option<String>,
 }
 
 impl<'a> Look<'a> {
@@ -195,14 +218,40 @@ impl<'a> Look<'a> {
             title: &cfg.splash_text,
             status,
             rotation: cfg.rotation,
+            ip: lan_ip(),
         }
     }
 }
 
-/// The splash as panel pixels (physical `w` x `h`).
+/// The frame's first LAN address (not the USB-C link's), if it has one yet.
+pub fn lan_ip() -> Option<String> {
+    crate::status::collect()
+        .ips
+        .into_iter()
+        .find(|ip| ip != crate::statuspage::USB_IP)
+}
+
+/// Upright picture `l` (logical) turned into the panel canvas `c`.
+fn turn_into(c: &mut Canvas, rotation: u8, l: &[u32], lw: usize, lh: usize) {
+    for ly in 0..lh {
+        for lx in 0..lw {
+            let (x, y) = c.rotate(rotation, lx, ly);
+            c.px[y * c.w + x] = l[ly * lw + lx];
+        }
+    }
+}
+
+/// The splash as panel pixels (physical `w` x `h`), at the start of its animation.
 pub fn render(look: &Look, w: usize, h: usize) -> Canvas {
-    let logo = load_logo();
     let mut c = Canvas::new(w, h, look.bg);
+    let (lw, lh) = c.logical(look.rotation);
+    if look.style == "seventies" {
+        let mut l = vec![0; lw * lh];
+        seventies::Scene::new(lw, lh, look.title, look.status, look.ip.as_deref()).frame(0, &mut l);
+        turn_into(&mut c, look.rotation, &l, lw, lh);
+        return c;
+    }
+    let logo = load_logo();
     if look.style == "plain" {
         let text = if look.status.is_empty() {
             look.title
@@ -219,20 +268,14 @@ pub fn render(look: &Look, w: usize, h: usize) -> Canvas {
         }
         return c;
     }
-    let (lw, lh) = c.logical(look.rotation);
     let mut l = Canvas::new(lw, lh, 0);
     retro::draw(&mut l, look.title, look.status, logo.as_ref());
-    for ly in 0..lh {
-        for lx in 0..lw {
-            let (x, y) = c.rotate(look.rotation, lx, ly);
-            c.px[y * w + x] = l.px[ly * lw + lx];
-        }
-    }
+    turn_into(&mut c, look.rotation, &l.px, lw, lh);
     c
 }
 
-/// The retro scene without a status line, upright, as a PNG for the status page's background
-/// (TASK 15: the same picture from splash to status page). Panel 800x1280 turned by
+/// The scene without a status line, upright, as a PNG for the status and pairing pages'
+/// background (TASK 15: the same picture from splash to status page). Panel 800x1280 turned by
 /// COG_ROTATION. None for `SPLASH_STYLE=plain`. Written once per boot (tmpfs).
 pub fn write_backdrop(cfg: &Config, path: &str) -> io::Result<Option<String>> {
     if cfg.splash_style == "plain" {
@@ -240,14 +283,24 @@ pub fn write_backdrop(cfg: &Config, path: &str) -> io::Result<Option<String>> {
     }
     if !std::path::Path::new(path).exists() {
         let (lw, lh) = Canvas::new(800, 1280, 0).logical(cfg.rotation);
-        let mut l = Canvas::new(lw, lh, 0);
-        retro::draw(&mut l, &cfg.splash_text, "", load_logo().as_ref());
+        let px = if cfg.splash_style == "seventies" {
+            let mut l = vec![0; lw * lh];
+            seventies::Scene::new(lw, lh, &cfg.splash_text, "", None).frame(0, &mut l);
+            l
+        } else {
+            let mut l = Canvas::new(lw, lh, 0);
+            retro::draw(&mut l, &cfg.splash_text, "", load_logo().as_ref());
+            l.px
+        };
         let tmp = format!("{path}.tmp");
-        std::fs::write(&tmp, png::encode_rgb(lw, lh, &l.px))?;
+        std::fs::write(&tmp, png::encode_rgb(lw, lh, &px))?;
         std::fs::rename(&tmp, path)?;
     }
     Ok(Some(path.to_string()))
 }
+
+/// Frames per second of the seventies animation; the A33 draws one in well under this budget [U].
+const FRAME: Duration = Duration::from_millis(100);
 
 pub fn show(look: &Look) -> io::Result<Splash> {
     let mut d = drm::Display::open(DEVICE)?;
@@ -256,13 +309,88 @@ pub fn show(look: &Look) -> io::Result<Splash> {
     d.write(&c.px);
     d.commit()?;
     eprintln!(
-        "tfctl: splash: {w}x{h} rotation {} {}: {:?} / {:?}",
-        look.rotation, look.style, look.title, look.status
+        "tfctl: splash: {w}x{h} rotation {} {}: {:?} / {:?} / {:?}",
+        look.rotation, look.style, look.title, look.status, look.ip
     );
+    let display = Arc::new(Mutex::new(d));
+    let (handed_over, stop) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let anim = (look.style == "seventies").then(|| {
+        let (disp, handed, stop) = (display.clone(), handed_over.clone(), stop.clone());
+        let (title, status, ip, rot) = (
+            look.title.to_string(),
+            look.status.to_string(),
+            look.ip.clone(),
+            look.rotation,
+        );
+        thread::spawn(move || animate(&disp, &handed, &stop, (w, h), rot, &title, &status, ip))
+    });
     Ok(Splash {
-        display: d,
-        handed_over: false,
+        display,
+        handed_over,
+        stop,
+        anim,
     })
+}
+
+/// Redraw the seventies scene every FRAME until stopped or until cog's picture replaced ours.
+/// The address is looked up every 2 s and the scene rebuilt when it appears or changes.
+#[allow(clippy::too_many_arguments)]
+fn animate(
+    disp: &Mutex<drm::Display>,
+    handed: &AtomicBool,
+    stop: &AtomicBool,
+    (w, h): (usize, usize),
+    rot: u8,
+    title: &str,
+    status: &str,
+    mut ip: Option<String>,
+) {
+    let mut c = Canvas::new(w, h, 0);
+    let (lw, lh) = c.logical(rot);
+    let mut scene = seventies::Scene::new(lw, lh, title, status, ip.as_deref());
+    let mut l = vec![0; lw * lh];
+    let map: Vec<u32> = (0..lw * lh)
+        .map(|i| {
+            let (x, y) = c.rotate(rot, i % lw, i / lw);
+            (y * w + x) as u32
+        })
+        .collect();
+    let start = Instant::now();
+    let (mut frames, mut busy, mut last_ip) = (0u32, Duration::ZERO, Instant::now());
+    while !stop.load(Ordering::SeqCst) {
+        let t0 = Instant::now();
+        if last_ip.elapsed() >= Duration::from_secs(2) {
+            last_ip = Instant::now();
+            let now = lan_ip();
+            if now != ip {
+                ip = now;
+                scene = seventies::Scene::new(lw, lh, title, status, ip.as_deref());
+            }
+        }
+        scene.frame(start.elapsed().as_millis() as u64, &mut l);
+        for (i, &p) in l.iter().enumerate() {
+            c.px[map[i] as usize] = p;
+        }
+        {
+            let mut d = disp.lock().unwrap_or_else(|e| e.into_inner());
+            if handed.load(Ordering::SeqCst) && !d.shown() {
+                break;
+            }
+            d.write(&c.px);
+        }
+        busy += t0.elapsed();
+        frames += 1;
+        if frames == 50 {
+            eprintln!(
+                "tfctl: splash: 50 frames, {} ms each on average",
+                busy.as_millis() / 50
+            );
+        }
+        thread::sleep(FRAME.saturating_sub(t0.elapsed()));
+    }
 }
 
 /// `tfctl splash [--png FILE] [STATUS]`: draw on the panel and hold until SIGTERM/SIGINT, or

@@ -246,7 +246,13 @@ impl Agent {
                 eprintln!("tfctl: agent: status backdrop: {e}");
                 None
             });
-        if let Err(e) = crate::statuspage::write(&path, &headline, &details, backdrop.as_deref()) {
+        if let Err(e) = crate::statuspage::write(
+            &path,
+            &headline,
+            &details,
+            backdrop.as_deref(),
+            &self.cfg.splash_style,
+        ) {
             eprintln!("tfctl: agent: status page: {e}");
         }
     }

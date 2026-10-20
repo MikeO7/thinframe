@@ -23,7 +23,7 @@ fn esc(s: &str) -> String {
 /// already carries the logo; plain shows the logo itself (TASK 15: same logo from splash on).
 pub fn render_shell(logo: Option<&str>, backdrop: Option<&str>) -> String {
     let bg = match backdrop {
-        Some(b) => format!("#07051a url(\"file://{}\") center/cover no-repeat", esc(b)),
+        Some(b) => format!("#f4dcaa url(\"file://{}\") center/cover no-repeat", esc(b)),
         None => "#0b0d10".into(),
     };
     let img = match (backdrop, logo) {
@@ -52,14 +52,26 @@ const RETRO_CSS: &str = "html,body{margin:0;height:100%;overflow:hidden;backgrou
     @keyframes b{50%{opacity:0}}\
     p{margin:.4em 0 0;color:#7ef0ff;font-size:22px;text-shadow:2px 2px #1d0b3d}";
 
+/// Shrikhand on the cream scene, where the splash puts its status line (seventies.rs).
+const SEVENTIES_CSS: &str = "@font-face{font-family:Shrikhand;\
+    src:url(\"file:///usr/share/fonts/thinframe/Shrikhand-Regular.ttf\")}\
+    html,body{margin:0;height:100%;overflow:hidden;background:transparent;\
+    color:#5b3a1e;font:3.6vh Shrikhand,Georgia,serif}\
+    main{position:absolute;left:5.8vw;right:4vw;top:80.5vh}\
+    h1{margin:0;font-size:5.25vh;font-weight:400;color:#b8452a;white-space:nowrap}\
+    h1::after{content:\"\";display:inline-block;width:.25em;height:.25em;margin-left:.35em;\
+    border-radius:50%;background:#5b3a1e;animation:p 1.2s ease-in-out infinite}\
+    @keyframes p{50%{opacity:.25}}p{margin:.1em 0 0;display:inline-block;margin-right:1.2em}";
+
 const PLAIN_CSS: &str = "html,body{margin:0;height:100%;overflow:hidden;background:transparent;\
     color:#dfe3e8;font:32px sans-serif}\
     main{position:absolute;left:0;right:0;top:58%;display:flex;flex-direction:column;\
     align-items:center;text-align:center}\
     h1{margin:0 0 .3em;font-size:44px;font-weight:600}p{margin:.2em 0;color:#9aa4af}";
 
-/// The line: headline ("cannot reach http://nas:8080") plus detail lines (frame id, IP, retry).
-pub fn render_line(headline: &str, details: &[String], retro: bool) -> String {
+/// The line: headline ("cannot reach http://nas:8080") plus detail lines (frame id, IP, retry),
+/// styled after `SPLASH_STYLE`.
+pub fn render_line(headline: &str, details: &[String], style: &str) -> String {
     let lines: String = details
         .iter()
         .map(|d| format!("<p>{}</p>", esc(d)))
@@ -68,7 +80,11 @@ pub fn render_line(headline: &str, details: &[String], retro: bool) -> String {
         "<!doctype html><html><head><meta charset=\"utf-8\">\
          <meta http-equiv=\"refresh\" content=\"15\"><style>{}</style></head>\
          <body><main><h1>{}</h1>{}</main></body></html>",
-        if retro { RETRO_CSS } else { PLAIN_CSS },
+        match style {
+            "seventies" => SEVENTIES_CSS,
+            "retro" => RETRO_CSS,
+            _ => PLAIN_CSS,
+        },
         esc(headline),
         lines
     )
@@ -102,6 +118,7 @@ pub fn write(
     headline: &str,
     details: &[String],
     backdrop: Option<&str>,
+    style: &str,
 ) -> io::Result<()> {
     let p = Path::new(path);
     if let Some(dir) = p.parent() {
@@ -120,7 +137,11 @@ pub fn write(
     };
     put(
         &p.with_file_name(LINE_FILE),
-        render_line(headline, details, backdrop.is_some()),
+        render_line(
+            headline,
+            details,
+            if backdrop.is_some() { style } else { "plain" },
+        ),
     )?;
     put(p, render_shell(logo, backdrop))
 }
@@ -134,7 +155,7 @@ mod tests {
         let h = render_line(
             "cannot reach <srv>",
             &["IP 192.168.1.5".into(), "a&b".into()],
-            false,
+            "plain",
         );
         assert!(h.contains("<h1>cannot reach &lt;srv&gt;</h1>"));
         assert!(h.contains("<p>IP 192.168.1.5</p>"));
@@ -145,8 +166,12 @@ mod tests {
             "the line reloads itself"
         );
         assert!(
-            render_line("x", &[], true).contains("#ffb000"),
+            render_line("x", &[], "retro").contains("#ffb000"),
             "retro is amber"
+        );
+        assert!(
+            render_line("x", &[], "seventies").contains("Shrikhand-Regular.ttf"),
+            "seventies uses the shipped font"
         );
     }
 
@@ -208,7 +233,7 @@ mod tests {
     fn writes_atomically_into_new_dirs() {
         let d = std::env::temp_dir().join(format!("tf-status-{}", std::process::id()));
         let f = d.join("www/status.html");
-        write(f.to_str().unwrap(), "joining HomeWifi", &[], None).unwrap();
+        write(f.to_str().unwrap(), "joining HomeWifi", &[], None, "plain").unwrap();
         let line = d.join("www/status-line.html");
         assert!(fs::read_to_string(&line)
             .unwrap()
@@ -216,7 +241,14 @@ mod tests {
         assert!(fs::read_to_string(&f).unwrap().contains("status-line.html"));
         assert!(!d.join("www/status.html.tmp").exists());
         assert!(!d.join("www/status-line.html.tmp").exists());
-        write(f.to_str().unwrap(), "reaching http://nas", &[], None).unwrap();
+        write(
+            f.to_str().unwrap(),
+            "reaching http://nas",
+            &[],
+            None,
+            "plain",
+        )
+        .unwrap();
         assert!(fs::read_to_string(&line)
             .unwrap()
             .contains("reaching http://nas"));

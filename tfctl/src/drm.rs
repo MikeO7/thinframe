@@ -185,6 +185,10 @@ mod linux {
         pub mode_size: Mode,
     }
 
+    // SAFETY: the mapping and the fd belong to the process; the splash moves the Display
+    // behind a Mutex into its animation thread and never shares it unguarded.
+    unsafe impl Send for Display {}
+
     impl Display {
         pub fn open(path: &str) -> io::Result<Display> {
             let file = OpenOptions::new().read(true).write(true).open(path)?;

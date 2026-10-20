@@ -75,13 +75,14 @@ pub fn render(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>thinframe</title><style>\
          @font-face{{font-family:Shrikhand;src:url(\"file:///usr/share/fonts/thinframe/Shrikhand-Regular.ttf\")}}\
          html,body{{margin:0;height:100%;overflow:hidden;background:{bg}}}\
-         body{{color:#5b3a1e;font:30px Shrikhand,Georgia,serif}}\
-         main{{position:absolute;left:6%;top:47%;right:40%}}\
-         h1{{margin:0;font-size:64px;font-weight:400;color:#b8452a}}p{{margin:.2em 0 .8em}}\
-         button{{font:56px Shrikhand,Georgia,serif;color:#f4dcaa;background:#d9662b;border:0;\
-         border-radius:999px;padding:.25em 1.6em;box-shadow:0 8px 0 #5b3a1e}}\
-         button:active{{transform:translateY(6px);box-shadow:0 2px 0 #5b3a1e}}\
-         small{{position:absolute;left:6%;bottom:5%;font-size:26px}}</style></head>\
+         body{{color:#5b3a1e;font:3.6vh Shrikhand,Georgia,serif}}\
+         main{{position:absolute;left:5vw;top:40vh;width:54vw;padding:2.5vh 3vw 3.5vh;\
+         background:#f4dcaa;border:.6vh solid #5b3a1e;border-radius:3vh;box-shadow:1.2vh 1.2vh 0 #b8452a}}\
+         h1{{margin:0;font-size:7vh;font-weight:400;color:#b8452a}}p{{margin:.2em 0 .7em}}\
+         button{{font:7vh Shrikhand,Georgia,serif;color:#f4dcaa;background:#d9662b;border:0;\
+         border-radius:999px;padding:.15em 1.4em;box-shadow:0 1vh 0 #5b3a1e}}\
+         button:active{{transform:translateY(.8vh);box-shadow:0 .2vh 0 #5b3a1e}}\
+         small{{position:absolute;left:5.8vw;bottom:4vh;font-size:3.4vh}}</style></head>\
          <body><main>{body}</main><small>{who}</small></body></html>"
     )
 }
