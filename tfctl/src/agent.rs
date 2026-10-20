@@ -185,7 +185,27 @@ impl Agent {
                 "tfctl: agent: {} failures, showing fallback page",
                 self.failures
             );
+            self.write_status_page();
             let _ = self.send(KioskCmd::SetUrl(self.cfg.fallback_url.clone()));
+        }
+    }
+
+    /// Refresh the local status page with the reason and our IP (TASKS 14/15).
+    fn write_status_page(&self) {
+        let st = crate::status::collect();
+        let mut details = vec![format!("frame {}", self.cfg.frame_id)];
+        if let Some(ip) = st.ips.first() {
+            details.push(format!("IP {ip}"));
+        }
+        details.push("retrying every few seconds".into());
+        let path = std::env::var("TFCTL_STATUS_PAGE")
+            .unwrap_or_else(|_| crate::statuspage::DEFAULT_PATH.into());
+        if let Err(e) = crate::statuspage::write(
+            &path,
+            &format!("cannot reach {}", self.cfg.server_url),
+            &details,
+        ) {
+            eprintln!("tfctl: agent: status page: {e}");
         }
     }
 

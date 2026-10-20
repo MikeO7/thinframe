@@ -35,6 +35,7 @@ mod sha256;
 mod slot;
 mod splash;
 mod status;
+mod statuspage;
 mod sys;
 mod sysupdate;
 mod update;

@@ -126,6 +126,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       image bind-mounts /data/ssh over /etc/dropbear. Init must mount PFBOOT rw around the call.)
 - [ ] On-screen status page (local file, shown by cog until the server answers): "connecting to Wi-Fi",
       "cannot reach http://…", with the IP once it has one. This is the only local page besides fallback.
+      (Done for "cannot reach": tfctl/src/statuspage.rs, written when the agent enters fallback, default
+      FALLBACK_URL is status.html. Pending: "connecting to Wi-Fi" state before the agent starts, hardware check.)
 - [x] 14b Linux variant of flash.sh (lsblk instead of diskutil). (`tests/flash-test.sh` covers discovery with a fake lsblk; the write path is untested.)
 - Gate: a person who has not read the repo flashes a frame from docs/flashing.md alone, timed, no questions asked.
 
