@@ -137,3 +137,10 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   although the job log shows `Contents: write`. A re-run gave the same 403, and the repo has no rulesets [V].
   The cause is not known: a repo or account setting, or the token creating the tag [U]. Owner to check.
   Until then, S8/S10 stay unchecked. Artifacts are on the run (`image`, 90 days).
+- Cause of the 403 [V by contrast]: a probe workflow (draft PR #39, closed unmerged, cleaned up)
+  created a draft release, a raw tag and a full release on the current main commit with the same
+  token, and all three worked. The failing run built 3b35ae1, and by publish time main had changed
+  ci.yml and release.yml (#35). GITHUB_TOKEN cannot create a ref on a commit whose workflow files
+  differ from main (no `workflows` permission). Fix: a `tag` job creates the tag first, while
+  GITHUB_SHA is still the tip of main; publish only creates the release on the existing tag.
+  A tag made with GITHUB_TOKEN does not trigger the `push: tags` workflow, so no second run starts.
