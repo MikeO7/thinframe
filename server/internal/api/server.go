@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -51,12 +52,14 @@ type Server struct {
 	page      pageWatch
 	pageStale time.Duration
 	pageCheck time.Duration
+	// pair: open one-press pairing requests (pair.go), guarded by mu.
+	pair pairings
 }
 
 // New wires a Server.
 func New(st *store.Store, opts Options) *Server {
 	s := &Server{Store: st, Hub: hub.New(), opts: opts, sse: newBroker(), offlineAfter: 3 * time.Minute, dataEvery: 10 * time.Minute,
-		page: pageWatch{last: map[string]time.Time{}}, pageStale: 3 * time.Minute, pageCheck: 30 * time.Second}
+		page: pageWatch{last: map[string]time.Time{}}, pair: pairings{open: map[string]*pairReq{}}, pageStale: 3 * time.Minute, pageCheck: 30 * time.Second}
 	if opts.PageStale > 0 {
 		s.pageStale = opts.PageStale
 	}
@@ -78,32 +81,51 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("GET /api/data/calendar", s.handleDataCalendar)
 	m.HandleFunc("POST /api/frames/{id}/beacon", s.handleBeacon)
 	m.HandleFunc("POST /api/frames/{id}/alive", s.handleAlive)
-	// Protected by token when set.
+	m.HandleFunc("POST /api/pair", s.handlePairRequest)
+	m.HandleFunc("GET /api/pair/{id}", s.handlePairPoll)
+	m.HandleFunc("POST /pair/{id}/accept", s.handlePairAccept)
+	// Protected by token when set. "frame" routes also take that frame's paired token,
+	// "anyFrame" routes any paired frame's token; the rest need FRAME_TOKEN.
 	m.Handle("GET /api/frames", s.auth(http.HandlerFunc(s.handleList)))
-	m.Handle("GET /api/frames/{id}", s.auth(http.HandlerFunc(s.handleGetFrame)))
+	m.Handle("GET /api/frames/{id}", s.authFrame(http.HandlerFunc(s.handleGetFrame)))
 	m.Handle("DELETE /api/frames/{id}", s.auth(http.HandlerFunc(s.handleDeleteFrame)))
-	m.Handle("GET /api/frames/{id}/config", s.auth(http.HandlerFunc(s.handleGetConfig)))
+	m.Handle("GET /api/frames/{id}/config", s.authFrame(http.HandlerFunc(s.handleGetConfig)))
 	m.Handle("PUT /api/frames/{id}/config", s.auth(http.HandlerFunc(s.handlePutConfig)))
 	m.Handle("PUT /api/frames/{id}/layout", s.auth(http.HandlerFunc(s.handlePutLayout)))
-	m.Handle("POST /api/frames/{id}/heartbeat", s.auth(http.HandlerFunc(s.handleHeartbeat)))
+	m.Handle("POST /api/frames/{id}/heartbeat", s.authFrame(http.HandlerFunc(s.handleHeartbeat)))
 	m.Handle("POST /api/frames/{id}/actions", s.auth(http.HandlerFunc(s.handlePostAction)))
-	m.Handle("GET /api/frames/{id}/ws", s.auth(http.HandlerFunc(s.handleWS)))
-	m.Handle("GET /api/release", s.auth(http.HandlerFunc(s.handleRelease)))
+	m.Handle("GET /api/frames/{id}/ws", s.authFrame(http.HandlerFunc(s.handleWS)))
+	m.Handle("GET /api/release", s.authAnyFrame(http.HandlerFunc(s.handleRelease)))
 	if s.opts.Artifacts != nil {
-		m.Handle("GET /api/artifacts/{name}", s.auth(s.opts.Artifacts.Handler()))
+		m.Handle("GET /api/artifacts/{name}", s.authAnyFrame(s.opts.Artifacts.Handler()))
 	}
 	m.HandleFunc("GET /admin", s.handleAdmin)
 	m.HandleFunc("POST /admin/{id}/config", s.handleAdminConfig)
 	m.HandleFunc("POST /admin/{id}/layout", s.handleAdminLayout)
 	m.HandleFunc("POST /admin/{id}/action", s.handleAdminAction)
+	m.HandleFunc("POST /admin/{id}/unpair", s.handleAdminUnpair)
 	return logRequests(m)
 }
 
 // ---- auth -----------------------------------------------------------------
 
 func (s *Server) auth(next http.Handler) http.Handler {
+	return s.authWith(next, func(*http.Request) bool { return false })
+}
+
+// authFrame also accepts the paired token of the frame named in the path.
+func (s *Server) authFrame(next http.Handler) http.Handler {
+	return s.authWith(next, func(r *http.Request) bool { return s.frameTokenOK(r, r.PathValue("id")) })
+}
+
+// authAnyFrame also accepts any paired frame's token (release info, update artifacts).
+func (s *Server) authAnyFrame(next http.Handler) http.Handler {
+	return s.authWith(next, func(r *http.Request) bool { return s.frameTokenOK(r, "") })
+}
+
+func (s *Server) authWith(next http.Handler, frameOK func(*http.Request) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.opts.Token == "" || tokenOK(r, s.opts.Token) {
+		if s.opts.Token == "" || tokenOK(r, s.opts.Token) || frameOK(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -112,13 +134,19 @@ func (s *Server) auth(next http.Handler) http.Handler {
 	})
 }
 
-func tokenOK(r *http.Request, want string) bool {
-	h := r.Header.Get("Authorization")
-	if t, ok := strings.CutPrefix(h, "Bearer "); ok && t == want {
-		return true
+// bearer returns the request's token: the Authorization header, else ?token= (WebSocket
+// clients that cannot set headers; tfctl sets the header).
+func bearer(r *http.Request) (string, bool) {
+	if t, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && t != "" {
+		return t, true
 	}
-	// WebSocket clients that cannot set headers may pass ?token=; tfctl sets the header.
-	return r.URL.Query().Get("token") == want
+	t := r.URL.Query().Get("token")
+	return t, t != ""
+}
+
+func tokenOK(r *http.Request, want string) bool {
+	t, ok := bearer(r)
+	return ok && subtle.ConstantTimeCompare([]byte(t), []byte(want)) == 1
 }
 
 // TokenOK exposes the check for other packages (MCP).

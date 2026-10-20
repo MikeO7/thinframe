@@ -41,6 +41,7 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
 <td>{{ago .LastSeen}}</td></tr>{{end}}</table>
 
 {{range .Frames}}<h2 id="f-{{.ID}}">{{.ID}} <a class="hint" href="/frame/{{.ID}}" target="_blank">open page ↗</a></h2>
+{{if .TokenHash}}<form method="post" action="/admin/{{.ID}}/unpair" class="row"><span class="on">paired on its screen</span> <button>forget pairing</button> <span class="hint">the frame then shows its PAIR button again</span></form>{{end}}
 <form method="post" action="/admin/{{.ID}}/config" class="row">
  <label>name <input name="name" value="{{.Name}}"></label>
  <label>rotation <select name="rotation">{{$rot := .Config.Rotation}}{{range $r := list 0 1 2 3}}<option {{if eq $r $rot}}selected{{end}}>{{$r}}</option>{{end}}</select></label>

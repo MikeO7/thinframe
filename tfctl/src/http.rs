@@ -91,16 +91,38 @@ pub fn parse_head(buf: &[u8]) -> Option<Head> {
 
 /// GET with a bearer token, Connection: close. Body read by Content-Length or to EOF.
 pub fn get(url: &Url, token: &str, timeout: Duration) -> io::Result<Response> {
+    request("GET", url, token, None, timeout)
+}
+
+/// POST a JSON body (pairing, TASK 16).
+pub fn post_json(url: &Url, token: &str, body: &str, timeout: Duration) -> io::Result<Response> {
+    request("POST", url, token, Some(body), timeout)
+}
+
+fn request(
+    method: &str,
+    url: &Url,
+    token: &str,
+    body: Option<&str>,
+    timeout: Duration,
+) -> io::Result<Response> {
     let mut s = connect(url, timeout)?;
     let mut req = format!(
-        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: tfctl\r\n",
+        "{method} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: tfctl\r\n",
         url.path,
         url.host_header()
     );
     if !token.is_empty() {
         req.push_str(&format!("Authorization: Bearer {token}\r\n"));
     }
+    if let Some(b) = body {
+        req.push_str(&format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            b.len()
+        ));
+    }
     req.push_str("\r\n");
+    req.push_str(body.unwrap_or(""));
     s.write_all(req.as_bytes())?;
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];

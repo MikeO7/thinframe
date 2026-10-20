@@ -5,7 +5,8 @@
 #   sim/qemu/run.sh            boot and keep shooting until Ctrl-C (or RUN_FOR_S seconds)
 #   sim/qemu/run.sh tap X Y    touch the running guest at panel pixel X,Y (0..799, 0..1279)
 # Env: SERVER_URL (as the guest sees it; default http://10.0.2.2:8080 = this Mac's :8080),
-#      FRAME_ID (sim-qemu), FRAME_TOKEN, SHOT_INTERVAL_S (10), SSHP (2222), RUN_FOR_S,
+#      FRAME_ID (sim-qemu), FRAME_TOKEN (set it empty to pair with the PAIR button),
+#      SHOT_INTERVAL_S (10), SSHP (2222), RUN_FOR_S,
 #      KEEP_SHOTS=1 (also keep each shot as sim/out/seq/<seconds since start>.png),
 #      SHOW=1 (live window on the Mac; a click is a touch).
 # Build first: image/build.sh inputs && QEMU=1 image/build.sh rootfs. Slow (TCG), for correctness.
@@ -13,7 +14,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 Q="$ROOT/image/out/qemu"; W="$ROOT/sim/qemu/work"; OUT="$ROOT/sim/out"
 SERVER_URL="${SERVER_URL:-http://10.0.2.2:8080}"; FRAME_ID="${FRAME_ID:-sim-qemu}"
-FRAME_TOKEN="${FRAME_TOKEN:-dev-token-change-me}"; SHOT_INTERVAL_S="${SHOT_INTERVAL_S:-10}"
+FRAME_TOKEN="${FRAME_TOKEN-dev-token-change-me}"; SHOT_INTERVAL_S="${SHOT_INTERVAL_S:-10}"
 SSHP="${SSHP:-2222}"; KEY="$ROOT/image/secrets/frame_id_ed25519"
 PW=800; PH=1280
 

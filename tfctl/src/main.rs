@@ -31,6 +31,7 @@ mod font;
 mod http;
 mod json;
 mod kiosk;
+mod pair;
 mod png;
 mod provision;
 mod retro;
