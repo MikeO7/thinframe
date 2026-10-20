@@ -8,8 +8,8 @@ docker compose up -d --build        # from the repo root
 # on the frame (once): doas tfctl set SERVER_URL http://nas.local:8080 FRAME_ID livingroom
 ```
 
-`/frame/<id>` is rendered from the frame's `layout.json` with the templates in `internal/widgets/templates/`
-(`server/static/index.html` is an old prototype that no route serves). A layout change bumps `page_version`
+`/frame/<id>` is rendered from the frame's `layout.json` with the templates in `internal/widgets/templates/`.
+A layout change bumps `page_version`
 and the page reloads itself. Nothing is deployed to the frame.
 
 Tasks: `TASKS.md` section S.
