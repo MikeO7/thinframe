@@ -33,8 +33,6 @@ jobs:
     outputs: { version: "${{ needs.tag.outputs.version }}" }
     steps:
       - uses: actions/checkout@v7
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME}"; else v="v$(date -u +%Y.%m.%d)"; fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: free disk for Buildroot (WebKit needs ~20 GB)
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
