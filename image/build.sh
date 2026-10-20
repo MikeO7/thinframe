@@ -3,8 +3,9 @@
 #
 #   image/build.sh            all: inputs rootfs assemble sums
 #   image/build.sh inputs     fetch/build U-Boot, kernel, DTB, panel + Wi-Fi modules via ormarch
-#   image/build.sh rootfs     Alpine armv7 root in Docker (linux/arm/v7)
-#   image/build.sh assemble   MBR + FAT32 + ext4 image file
+#   image/build.sh rootfs     Buildroot (BR2_EXTERNAL image/buildroot) in Docker (image/Dockerfile.br)
+#   image/build.sh assemble   genimage: MBR + FAT32 + 3x ext4 -> image/out/thinframe-sd.img
+#   image/build.sh check      lint the Buildroot tree (no Docker, no network)
 #   image/build.sh test       boot the image in QEMU (orangepi-pc board, same trick as ormarch)
 #   image/build.sh clean
 #
@@ -12,19 +13,14 @@
 # Writes only to image/{cache,work,out,secrets}. No sudo. No devices touched.
 set -euo pipefail
 
-# ---- pinned inputs (TASK 0: fill the TODOs) --------------------------------
+# ---- pinned inputs (TASK 0/1: fill the TODOs) ------------------------------
 ORMARCH_REPO="https://github.com/pangoleen/ormarch-picture-frame.git"
 ORMARCH_COMMIT="TODO-pin-to-the-commit-that-matches-your-frame"
-ALPINE_VERSION="3.24"            # TODO verify current stable
-ALPINE_MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/armv7/alpine-minirootfs-${ALPINE_VERSION}.0-armv7.tar.gz"
-ALPINE_MINIROOTFS_SHA256="TODO"
-KVER="7.2.10-1-armv7-ARCH"
+BUILDROOT_VERSION="2026.08"      # TODO verify LTS, record date in docs/log.md
+KVER="7.2.10"
 
 # card layout (same as ormarch so the same U-Boot boot.scr works)
-SIG="50463037"                   # PARTUUID=50463037-01 / -02
-IMG_MIB=3072                     # p1 256M boot, p2+p3 1G root slots, p4 data (grows)
-P1_START_MIB=4
-P1_MIB=256
+SIG="50463037"                   # PARTUUID=50463037-01 .. -04
 TOUCH_FW="${PF1007L_TOUCH_FIRMWARE:-}"
 TOUCH_FW_SHA256="e11ffa8a33a56b78f8d2f57925fef1b67ea9a58c264bb5f3a8553ea52b14a9e6"
 
@@ -62,32 +58,34 @@ step_secrets() {
 }
 
 step_rootfs() {
-	say "rootfs: Alpine $ALPINE_VERSION armv7"
-	need docker; need curl
-	local tgz
-	tgz="$CACHE/$(basename "$ALPINE_MINIROOTFS_URL")"
-	[ -f "$tgz" ] || curl -fL -o "$tgz" "$ALPINE_MINIROOTFS_URL"
-	[ "$(sha "$tgz")" = "$ALPINE_MINIROOTFS_SHA256" ] || stop "minirootfs hash mismatch (pin it in TASK 0)"
-	# TODO(TASK 2): docker run --platform linux/arm/v7 alpine:$ALPINE_VERSION with bind mounts:
-	#   $HERE/rootfs -> /overlay, $HERE/packages.txt, $WORK/inputs -> /in, $SECRETS -> /secrets,
-	#   $WORK/rootfs -> /target. Run image/rootfs-build/inside.sh (write it) which:
-	#   unpack minirootfs; apk add $(grep -v '^#' packages.txt); cp -a /overlay/. /target/;
-	#   unpack kernel pkg: usr/lib/modules/$KVER -> /target/lib/modules/$KVER, boot/zImage -> $WORK/boot/;
-	#   extra .ko -> /target/lib/modules/$KVER/updates/; depmod -b /target $KVER;
-	#   firmware -> /target/lib/firmware/{aic8800_fw/SDIO/aic8800DC,silead}; user frame; doas;
-	#   authorized_keys + host key; rc-update add for every service listed in TASKS.md step 2;
-	#   chmod +x /target/usr/local/bin/*; tar the result to $WORK/rootfs.tar.
+	say "rootfs: Buildroot $BUILDROOT_VERSION (pf1007l_defconfig)"
+	need docker
+	# TODO(TASK 2): docker build -f Dockerfile.br; run with $CACHE/dl, $CACHE/ccache, $WORK/br-out
+	#   bind-mounted: make BR2_EXTERNAL=/src/image/buildroot pf1007l_defconfig && make.
+	#   Gate: output/images/rootfs.ext4 < 200 MB.
 	stop "TASK 2 not done: see TASKS.md"
 }
 
 step_assemble() {
-	say "assemble: MBR sig $SIG, U-Boot @8KiB, FAT32 @${P1_START_MIB}MiB, ext4"
-	# TODO(TASK 3): copy ormarch image/tools/assemble-in-container.sh approach:
-	#   truncate img; sfdisk with label-id 0x$SIG; dd u-boot at seek=8 bs=1k conv=notrunc;
-	#   mkfs.vfat -n PFBOOT (mtools mcopy: zImage, *.dtb, extlinux/extlinux.conf, boot.scr, uEnv.txt);
-	#   mkfs.ext4 -L afroot -d rootfs-dir (e2fsprogs -d needs no root);
-	#   self-check: read back MBR, U-Boot bytes, partition starts.
+	say "assemble: genimage, MBR sig $SIG, U-Boot @8KiB"
+	# TODO(TASK 3): board/pf1007l/post-image.sh runs genimage; self-check reads back the MBR
+	#   signature, U-Boot bytes at 8 KiB and partition starts; bundle emits system-<ver>.tar.
 	stop "TASK 3 not done: see TASKS.md"
+}
+
+step_check() {
+	say "check: Buildroot external tree"
+	local br="$HERE/buildroot" f
+	for f in external.desc external.mk Config.in configs/pf1007l_defconfig \
+		board/pf1007l/{genimage.cfg,post-image.sh,boot.cmd,linux.config,linux.fragment} \
+		package/tfctl/{Config.in,tfctl.mk} package/aic8800/{Config.in,aic8800.mk}; do
+		[ -f "$br/$f" ] || stop "missing buildroot/$f"
+	done
+	grep -q "disk-signature = 0x$SIG" "$br/board/pf1007l/genimage.cfg" || stop "genimage signature != $SIG"
+	grep -q "PARTUUID=$SIG-02" "$HERE/boot/extlinux.conf" || stop "extlinux root != PARTUUID=$SIG-02"
+	grep -q "PARTUUID=$SIG-03" "$HERE/boot/extlinux.conf" || stop "extlinux slot b != PARTUUID=$SIG-03"
+	grep -q "$KVER" "$br/configs/pf1007l_defconfig" || stop "defconfig kernel pin != $KVER"
+	echo "ok"
 }
 
 step_sums() { say "sums"; (cd "$OUT" && shasum -a 256 ./*.img > thinframe-sd.img.sha256 && cat thinframe-sd.img.sha256); }
@@ -96,6 +94,6 @@ step_clean() { rm -rf "$WORK" "$OUT"; echo "cleaned work/ and out/ (cache/ and s
 
 case "${1:-all}" in
 	all) step_inputs; step_secrets; step_rootfs; step_assemble; step_sums ;;
-	inputs|secrets|rootfs|assemble|sums|test|clean) "step_$1" ;;
+	inputs|secrets|rootfs|assemble|sums|test|check|clean) "step_$1" ;;
 	*) stop "unknown step $1" ;;
 esac

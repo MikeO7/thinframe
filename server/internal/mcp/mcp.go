@@ -162,7 +162,7 @@ func register(m *sdk.Server, s *api.Server) {
 				"types": widgets.Types,
 				"props": map[string]string{
 					"photo": "interval_s (seconds between photos, default 600)", "text": "text", "iframe": "src (URL)",
-					"weather": "place (label)", "clock": "", "status": "",
+					"weather": "place (label)", "calendar": "", "clock": "", "status": "",
 				},
 				"grid":    "cols x rows (1..12 each); widgets have x,y,w,h in cells and must not overlap",
 				"example": store.DefaultLayout(),

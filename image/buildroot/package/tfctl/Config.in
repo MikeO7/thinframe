@@ -1,0 +1,4 @@
+config BR2_PACKAGE_TFCTL
+	bool "tfctl"
+	help
+	  thinframe control binary (prebuilt static armv7 musl from tfctl/).

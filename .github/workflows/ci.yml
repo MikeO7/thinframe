@@ -8,6 +8,9 @@ jobs:
       - run: |
           shellcheck -x -e SC1091,SC2034,SC2317 image/build.sh scripts/*.sh image/rootfs/etc/local.d/*
       - run: grep -q '<title>thinframe</title>' www/index.html
+      - run: image/build.sh check
+      - run: shellcheck -x -e SC1091,SC2034 tests/*.sh
+      - run: tests/flash-test.sh
   tfctl:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: tfctl } }
@@ -30,7 +33,7 @@ jobs:
     defaults: { run: { working-directory: server } }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version-file: server/go.mod }
       - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
       - run: go vet ./...
@@ -41,7 +44,15 @@ jobs:
     defaults: { run: { working-directory: sim } }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version-file: sim/go.mod }
       - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
       - run: go vet ./... && go build ./...
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: server/go.mod }
+      - uses: dtolnay/rust-toolchain@stable
+      - run: tests/e2e-native.sh

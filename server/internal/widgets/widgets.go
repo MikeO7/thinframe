@@ -18,7 +18,7 @@ import (
 var files embed.FS
 
 // Known widget types. Adding one = a template file named <type>.html.
-var Types = []string{"clock", "photo", "weather", "status", "text", "iframe"}
+var Types = []string{"clock", "photo", "weather", "calendar", "status", "text", "iframe"}
 
 var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
 	"json": func(v any) template.JS { b, _ := json.Marshal(v); return template.JS(b) }, //nolint:gosec // props are server-owned

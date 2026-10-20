@@ -1,0 +1,5 @@
+config BR2_PACKAGE_AIC8800
+	bool "aic8800"
+	depends on BR2_LINUX_KERNEL
+	help
+	  AIC8800 SDIO Wi-Fi modules (radxa source pinned by ormarch).
