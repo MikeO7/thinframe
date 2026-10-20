@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # Run Buildroot for image/build.sh (TASK 2/3). Called with the pins exported by build.sh.
 # Volumes: thinframe-br (Buildroot tree + output; a Linux file system, fast and case-sensitive)
-# and thinframe-ccache. Downloads go to image/cache/dl so they survive `docker volume rm`.
+# and thinframe-ccache (THINFRAME_CCACHE=<abs dir> bind-mounts a host dir instead; CI caches it).
+# Downloads go to image/cache/dl so they survive `docker volume rm`.
 # Writes only image/out/ on the Mac. No sudo, no devices.
 set -euo pipefail
 : "${BUILDROOT_VERSION:?}" "${BUILDROOT_SHA256:?}" "${THINFRAME_VERSION:?}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 export TGZ="buildroot-$BUILDROOT_VERSION.tar.xz"
-mkdir -p "$HERE/cache/dl" "$HERE/out"
+mkdir -p "$HERE/cache/dl" "$HERE/out"; [ -z "${THINFRAME_CCACHE:-}" ] || mkdir -p "$THINFRAME_CCACHE"
 [ -f "$HERE/cache/$TGZ" ] || curl -fL -o "$HERE/cache/$TGZ" "https://buildroot.org/downloads/$TGZ"
 [ "$(shasum -a 256 "$HERE/cache/$TGZ" | cut -d' ' -f1)" = "$BUILDROOT_SHA256" ] || { echo "STOP: $TGZ hash" >&2; exit 1; }
 
 docker build -q -t thinframe-br -f "$HERE/Dockerfile.br" "$HERE" >/dev/null
 # shellcheck disable=SC2016
 docker run --rm -i \
-	-v thinframe-br:/br -v thinframe-ccache:/ccache -v "$HERE/cache/dl":/dl -v "$ROOT":/src \
+	-v thinframe-br:/br -v "${THINFRAME_CCACHE:-thinframe-ccache}":/ccache -v "$HERE/cache/dl":/dl -v "$ROOT":/src \
 	-e THINFRAME_VERSION -e BUILDROOT_VERSION -e TGZ -e JOBS="${JOBS:-}" \
 	-e THINFRAME_WORK=/src/image/work -e BRTARGET="${BRTARGET:-}" -e DEBUG="${DEBUG:-0}" \
 	thinframe-br bash -euo pipefail -c '

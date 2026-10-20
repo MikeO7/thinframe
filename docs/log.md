@@ -104,3 +104,10 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   `page` event; another needs a fresh ping. `TestHungPageRestartsCogOnce` (-race, 5 runs) and
   tests/e2e.sh with PAGE_STALE=20s: no restart over 30 s of a live page, then `kill -STOP` on the
   sim's WPEWebProcess → "no ping for 2xs, restarting cog" [V in the sim container].
+
+## 2026-10-20 release CI: ccache survives a timed-out build
+- Release run 39392591191 (workflow_dispatch) was still in "build" after 4 h 20 min, against a
+  340 min job limit. A cold WebKit build on the 4-core runner does not fit [V, run log].
+- The release job now restores and saves `image/cache/ccache` (THINFRAME_CCACHE, bind-mounted as
+  /ccache) with `if: always()`. The build step has a 320 min limit so the save still runs inside the
+  355 min job. A timed-out run therefore leaves a warm cache for the next dispatch [U until a second run passes].
