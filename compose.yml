@@ -4,8 +4,8 @@ services:
     build: ./server
     image: ghcr.io/mikeo7/thinframe-server:latest
     restart: unless-stopped
-    ports: ["8080:8080"]
-    volumes: ["./server/data:/data"]
+    ports: ["${PORT:-8080}:8080"]
+    volumes: ["${DATA_DIR:-./server/data}:/data"]
     environment:
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
   simframe:
@@ -18,5 +18,5 @@ services:
       - FRAME_ID=sim
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
       - SHOT_INTERVAL_S=5
-    volumes: ["./sim/out:/out"]
+    volumes: ["${SIM_OUT:-./sim/out}:/out"]
     depends_on: [frameserver]
