@@ -15,18 +15,46 @@ pub fn profile(psk: &str) -> String {
     format!("[Security]\nPassphrase={psk}\n\n[Settings]\nAutoConnect=true\n")
 }
 
-/// iwd escapes SSID bytes that are not [A-Za-z0-9_-] as =XX in the file name.
+/// iwd 3.0 `storage_get_network_file_path`: an SSID of only [A-Za-z0-9 _-] is the file name as
+/// is; anything else becomes "=" + lowercase hex of the whole SSID.
 pub fn profile_name(ssid: &str) -> String {
-    let mut out = String::new();
-    for b in ssid.bytes() {
-        if b.is_ascii_alphanumeric() || b == b'_' || b == b'-' {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("={b:02x}"));
-        }
+    let plain = ssid
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"-_ ".contains(&b));
+    if plain {
+        format!("{ssid}.psk")
+    } else {
+        let hex: String = ssid.bytes().map(|b| format!("{b:02x}")).collect();
+        format!("={hex}.psk")
     }
-    out.push_str(".psk");
-    out
+}
+
+/// The SSID of an iwd profile file name (`Home.psk`, `=4d79....psk`, `Cafe.open`).
+pub fn ssid_of(file_name: &str) -> Option<String> {
+    let stem = file_name
+        .strip_suffix(".psk")
+        .or_else(|| file_name.strip_suffix(".open"))?;
+    let Some(hex) = stem.strip_prefix('=') else {
+        return Some(stem.to_string());
+    };
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+        .collect();
+    Some(String::from_utf8_lossy(&bytes?).into_owned())
+}
+
+/// The first configured network in `dir`, for the status page ("joining <ssid>").
+pub fn configured_ssid(dir: &Path) -> Option<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    names.iter().find_map(|n| ssid_of(n))
 }
 
 pub fn write_profile(dir: &Path, ssid: &str, psk: &str) -> io::Result<()> {
@@ -73,7 +101,19 @@ mod tests {
             "[Security]\nPassphrase=secret123\n\n[Settings]\nAutoConnect=true\n"
         );
         assert_eq!(profile_name("Home_5G-x"), "Home_5G-x.psk");
-        assert_eq!(profile_name("My Net"), "My=20Net.psk");
+        assert_eq!(profile_name("My Net"), "My Net.psk");
+        assert_eq!(profile_name("Café"), "=436166c3a9.psk");
+        assert_eq!(profile_name("a.b"), "=612e62.psk");
+    }
+
+    #[test]
+    fn ssid_round_trips_through_file_names() {
+        for s in ["Home_5G-x", "My Net", "Café", "a.b", "x=y"] {
+            assert_eq!(ssid_of(&profile_name(s)).as_deref(), Some(s));
+        }
+        assert_eq!(ssid_of("Cafe.open").as_deref(), Some("Cafe"));
+        assert_eq!(ssid_of("notes.txt"), None);
+        assert_eq!(ssid_of("=4.psk"), None);
     }
 
     #[test]

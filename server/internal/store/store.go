@@ -26,6 +26,9 @@ type Config struct {
 	SoftwareVersion string   `json:"software_version,omitempty"`
 	SystemVersion   string   `json:"system_version,omitempty"`
 	Tags            []string `json:"tags,omitempty"`
+	SplashText      string   `json:"splash_text,omitempty"` // boot splash line (TASK 15)
+	SplashBG        string   `json:"splash_bg,omitempty"`   // "#rrggbb"
+	SplashPNG       string   `json:"splash_png,omitempty"`  // base64 PNG, at most MaxSplashPNG bytes decoded
 }
 
 // Heartbeat is what a frame reports.

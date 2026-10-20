@@ -2,9 +2,11 @@
 //! Pure functions of (agent state, JSON) plus KioskCmd sends, so they are tested here with a
 //! channel and a temp conf file. The socket loop lives in agent.rs.
 use crate::agent::Agent;
+use crate::b64;
 use crate::config;
 use crate::json::Value;
 use crate::kiosk::KioskCmd;
+use crate::png;
 use crate::sysupdate;
 use crate::update::{self, Artifacts};
 use std::io;
@@ -82,6 +84,27 @@ impl Agent {
             }
             self.cfg.page_version = p;
         }
+        // Splash (TASK 15): stored now, drawn from the next start of the kiosk. Empty = keep.
+        if let Some(t) = v
+            .field_string("splash_text")
+            .filter(|t| !t.is_empty() && *t != self.cfg.splash_text)
+        {
+            over.push(("SPLASH_TEXT", t.clone()));
+            self.cfg.splash_text = t;
+        }
+        if let Some(bg) = v
+            .field_string("splash_bg")
+            .and_then(|s| config::parse_rgb(&s))
+            .filter(|bg| *bg != self.cfg.splash_bg)
+        {
+            over.push(("SPLASH_BG", format!("#{bg:06x}")));
+            self.cfg.splash_bg = bg;
+        }
+        if let Some(b) = v.field_string("splash_png").filter(|b| !b.is_empty()) {
+            if let Err(e) = self.store_logo(&b) {
+                eprintln!("tfctl: agent: splash_png: {e}");
+            }
+        }
         if let Some(ver) = v.field_string("software_version") {
             self.software_version = ver;
         }
@@ -96,6 +119,22 @@ impl Agent {
             let refs: Vec<(&str, &str)> = over.iter().map(|(k, v)| (*k, v.as_str())).collect();
             self.persist(&refs);
         }
+    }
+
+    /// Decode, check it is a PNG we can draw, and write `<data>/splash.png` if it changed.
+    fn store_logo(&self, b64: &str) -> io::Result<()> {
+        let bytes = b64::decode(b64).ok_or_else(|| io::Error::other("not base64"))?;
+        png::decode(&bytes).map_err(|e| io::Error::other(format!("not a usable PNG: {e}")))?;
+        let path = self.paths.data.join("splash.png");
+        if std::fs::read(&path).ok().as_deref() == Some(&bytes[..]) {
+            return Ok(());
+        }
+        std::fs::create_dir_all(&self.paths.data)?;
+        let tmp = path.with_extension("png.tmp");
+        std::fs::write(&tmp, &bytes)?;
+        std::fs::rename(&tmp, &path)?;
+        self.event("splash", &format!("logo stored, {} bytes", bytes.len()));
+        Ok(())
     }
 
     pub fn action(&mut self, name: &str, v: &Value) -> io::Result<()> {
@@ -269,6 +308,52 @@ mod tests {
         a.apply_config(&v);
         assert!(rx.try_iter().next().is_none());
         std::fs::remove_file(&p).unwrap();
+    }
+
+    #[test]
+    fn splash_fields_persist_and_logo_is_stored_once() {
+        let (mut a, rx, p) = agent("splash");
+        let base = std::env::temp_dir().join(format!("tfctl-splash-{}", std::process::id()));
+        a.paths = crate::update::Paths::under(&base);
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAYAAAC09K7GAAAAPElEQVR42mN0UWiy2Xksvy3Pi8MnZi3HNSaX0E1pQqoyThF29xlWMf+ZzKLBaOPZyrBQf45manllY9xzAM7wEmsd43BoAAAAAElFTkSuQmCC";
+        let cfg =
+            format!(r##"{{"splash_text":"Kitchen","splash_bg":"#203040","splash_png":"{png}"}}"##);
+        a.apply_config(&json::parse(&cfg).unwrap());
+        let c = config::load(&p).unwrap();
+        assert_eq!((c.splash_text.as_str(), c.splash_bg), ("Kitchen", 0x203040));
+        let logo = std::fs::read(base.join("data/splash.png")).unwrap();
+        assert_eq!(&logo[1..4], b"PNG");
+        assert_eq!(a.events.lock().unwrap().len(), 1, "one splash event");
+        a.apply_config(&json::parse(&cfg).unwrap());
+        assert_eq!(
+            a.events.lock().unwrap().len(),
+            1,
+            "unchanged logo not rewritten"
+        );
+        a.apply_config(&json::parse(r#"{"splash_png":"bm90IGEgcG5n","splash_text":""}"#).unwrap());
+        assert_eq!(std::fs::read(base.join("data/splash.png")).unwrap(), logo);
+        assert_eq!(config::load(&p).unwrap().splash_text, "Kitchen");
+        assert!(
+            rx.try_iter().next().is_none(),
+            "splash changes wait for the next start"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn boot_opens_on_status_page_until_the_server_answers() {
+        let (mut a, rx, _) = agent("boot");
+        a.start_on_status_page();
+        assert_eq!(a.page_url(), "file:///fb.html");
+        a.server_failed();
+        assert!(rx.try_iter().next().is_none(), "stays on the status page");
+        a.server_ok();
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            KioskCmd::SetUrl("http://nas:8080/frame/k".into())
+        );
+        let _ = std::fs::remove_file(&a.conf_path);
     }
 
     #[test]

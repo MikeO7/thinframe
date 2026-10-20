@@ -14,7 +14,8 @@ use std::os::unix::fs::{DirBuilderExt, FileExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RUN_DIRS: [&str; 2] = ["/run/user/1000", "/run/thinframe"];
+/// cog's runtime dir is private; the status page is readable by anyone who logs in.
+const RUN_DIRS: [(&str, u32); 2] = [("/run/user/1000", 0o700), ("/run/thinframe", 0o755)];
 /// Partition table entry 4 of the MBR.
 const P4: usize = 446 + 3 * 16;
 /// Grow only when it gains at least 1 MiB.
@@ -41,8 +42,8 @@ fn step(name: &str, r: io::Result<()>) {
 }
 
 pub fn run(conf: &str) -> io::Result<()> {
-    for d in RUN_DIRS {
-        let _ = fs::DirBuilder::new().recursive(true).mode(0o700).create(d);
+    for (d, mode) in RUN_DIRS {
+        let _ = fs::DirBuilder::new().recursive(true).mode(mode).create(d);
     }
     if Path::new("/boot").join(provision::FILE).exists() {
         step("provision", provision_rw());

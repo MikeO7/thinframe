@@ -26,6 +26,14 @@ check "hostname is the frame id" r 'test "$(hostname)" = '"$ID"
 check "tfctl kiosk runs under init" r 'ps -o args | grep -q "^/usr/bin/tfctl kiosk"'  # BusyBox here has no pgrep
 check "cog and WPE WebKit are installed" r 'command -v cog && ls /usr/lib/libWPEWebKit-*.so*'
 check "frame registered with frameserver over the network" wait_for 180 registered
+check "status page was written before the dashboard (a boot state + frame id)" \
+	r 'grep -qE "<h1>(joining |no Wi-Fi configured|reaching http)" /run/thinframe/status.html && grep -q "frame '"$ID"'" /run/thinframe/status.html'
+r 'sed -n "s/.*<h1>\(.*\)<\/h1>.*/status page: \1/p" /run/thinframe/status.html; echo' | tee -a "$RES" || true
+LOGO=iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAYAAAC09K7GAAAAPElEQVR42mN0UWiy2Xksvy3Pi8MnZi3HNSaX0E1pQqoyThF29xlWMf+ZzKLBaOPZyrBQf45manllY9xzAM7wEmsd43BoAAAAAElFTkSuQmCC
+curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+	-d '{"splash_text":"QEMU frame","splash_png":"'"$LOGO"'"}' "http://127.0.0.1:$PORT/api/frames/$ID/config" >/dev/null
+check "splash text and logo pushed by the server land on /data" \
+	wait_for 60 r 'grep -q "SPLASH_TEXT=\"QEMU frame\"" /etc/thinframe.conf && test -s /data/thinframe/splash.png'
 check "no syslogd/klogd/crond running" r '! ps -o comm | grep -qxE "syslogd|klogd|crond"'
 r 'ps -o pid,user,vsz,comm | grep -v "\[" ; free -m; df -h / /data /boot' > "$W/guest-state.txt" 2>&1 || true
 echo "rootfs.ext4: $(wc -c < "$HERE/out/rootfs.ext4") bytes" | tee -a "$RES"

@@ -130,8 +130,10 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       image bind-mounts /data/ssh over /etc/dropbear. Init must mount PFBOOT rw around the call.)
 - [ ] On-screen status page (local file, shown by cog until the server answers): "connecting to Wi-Fi",
       "cannot reach http://…", with the IP once it has one. This is the only local page besides fallback.
-      (Done for "cannot reach": tfctl/src/statuspage.rs, written when the agent enters fallback, default
-      FALLBACK_URL is status.html. Pending: "connecting to Wi-Fi" state before the agent starts, hardware check.)
+      (tfctl/src/statuspage.rs: the kiosk opens cog on it before the agent starts, "joining <ssid>" /
+      "no Wi-Fi configured" / "reaching <server>" / "cannot reach <server>" + IP, refreshed on every
+      failed attempt; the first server answer switches to the dashboard. QEMU: written as "reaching".
+      Pending: seen on the panel.)
 - [x] 14b Linux variant of flash.sh (lsblk instead of diskutil). (`tests/flash-test.sh` covers discovery with a fake lsblk; the write path is untested.)
 - Gate: a person who has not read the repo flashes a frame from docs/flashing.md alone, timed, no questions asked.
 
@@ -147,8 +149,12 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       `/etc/thinframe/splash.png` above the text; tfctl/src/{drm,splash,font,png}.rs. Pending: ship a logo, hardware check.)
 - [ ] Local status page (`/run/thinframe/status.html`) shows the same logo and live text:
       "joining <ssid>", "reaching <server>", IP, then hands over to the dashboard.
-- [ ] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
+      (Software done with the item in 14; the page shows the splash logo. Pending: seen on the panel.)
+- [x] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
       the logo; tfctl writes them to the data partition.
+      (Plus `splash_bg`. Server validates #rrggbb and a PNG of at most 48 KiB; REST and MCP
+      `set_frame_config`; tfctl stores `/data/thinframe/splash.png` and SPLASH_* in the conf, drawn
+      from the next kiosk start. QEMU: pushed through the server and found on /data.)
 - Gate: power on → dark ≤10 s → logo → status text → dashboard, no kernel or console text visible; photo in docs/img/.
 
 ## 11. Auto-update from the container (frame side)

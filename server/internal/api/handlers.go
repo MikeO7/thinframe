@@ -91,7 +91,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	var patch map[string]any
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&patch); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<17)).Decode(&patch); err != nil { // 128 KiB: splash_png
 		writeErr(w, fmt.Errorf("%w: %v", ErrInvalid, err))
 		return
 	}

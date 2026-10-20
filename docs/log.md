@@ -68,3 +68,16 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   registers; screenshot at rotation 0 is 375x600; MCP `tools/call set_frame_config {"rotation":3}`
   returns rotation 3; the next screenshot is 800x500 with a different sha256. `e2e: ok` on the Mac
   (Podman) [V]. compose.yml takes `PORT`, `DATA_DIR`, `SIM_OUT` (defaults unchanged).
+- TASK 14/15 status page and splash fields: the kiosk writes `/run/thinframe/status.html` before cog
+  starts and opens cog on it; headline "joining <ssid>" / "no Wi-Fi configured" / "reaching <server>"
+  / "cannot reach <server>" plus IP, refreshed on every failed attempt; the first server answer
+  switches to the dashboard. Server: `splash_text`, `splash_bg` (#rrggbb), `splash_png` (base64 PNG
+  up to 48 KiB) over REST and MCP `set_frame_config`; tfctl stores the logo at
+  `/data/thinframe/splash.png` (wins over `/etc/thinframe/splash.png`) and SPLASH_* in the conf; the
+  status page shows the logo. QEMU boot test now 16/16: status page "no Wi-Fi configured" (no
+  profile, before DHCP) with the frame id; a PUT of splash_text + splash_png reached
+  `/etc/thinframe.conf` and `/data/thinframe/splash.png` [V in QEMU]. On the panel: not seen [U].
+- Found on the way: `/run/thinframe` was 0700 root (now 0755; status page is not secret). iwd profile
+  names were escaped per byte (`My=20Net.psk`); iwd 3.0 `storage_get_network_file_path` keeps
+  `[A-Za-z0-9 _-]` names as they are and hex-encodes the whole SSID otherwise (`=436166c3a9.psk`) [V,
+  read in build/iwd-3.0/src/storage.c]. Fixed with round-trip tests. tfctl armv7 666,500 B.
