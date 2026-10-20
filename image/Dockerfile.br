@@ -1,0 +1,7 @@
+# STUB (TASK 2): Buildroot build container. dl/ and ccache are bind-mounted by build.sh.
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git wget cpio unzip rsync bc file python3 libncurses-dev \
+    ca-certificates xz-utils bzip2 genimage zstd u-boot-tools \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /work

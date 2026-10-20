@@ -1,0 +1,4 @@
+# STUB (TASK 2): options layered over linux.config (panel, silead touch, AIC8800 SDIO, DRM lima).
+CONFIG_DRM_LIMA=y
+CONFIG_TOUCHSCREEN_SILEAD=m
+CONFIG_SWAP=n

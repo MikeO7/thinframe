@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_THINFRAME_PATH/package/tfctl/Config.in"
+source "$BR2_EXTERNAL_THINFRAME_PATH/package/aic8800/Config.in"
