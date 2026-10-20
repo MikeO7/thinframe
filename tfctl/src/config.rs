@@ -10,6 +10,8 @@ pub struct Config {
     pub url: String,
     /// "drm" or "wl"
     pub platform: String,
+    /// cog DRM renderer: "gles" (rotates) or "modeset" (no rotation; plain KMS planes)
+    pub renderer: String,
     /// quarter turns 0..3
     pub rotation: u8,
     pub extra_args: Vec<String>,
@@ -46,6 +48,7 @@ impl Default for Config {
         Self {
             url: "file:///var/lib/thinframe/www/index.html".into(),
             platform: "drm".into(),
+            renderer: "gles".into(),
             rotation: 3,
             extra_args: vec![],
             user: "frame".into(),
@@ -100,6 +103,7 @@ pub fn parse(text: &str) -> Config {
     let get = |k: &str, d: &str| kv.get(k).map(|v| v.to_string()).unwrap_or(d.into());
     cfg.url = get("FRAME_URL", &cfg.url);
     cfg.platform = get("COG_PLATFORM", &cfg.platform);
+    cfg.renderer = get("COG_RENDERER", &cfg.renderer);
     cfg.user = get("FRAME_USER", &cfg.user);
     cfg.repo_tarball = get("REPO_TARBALL", &cfg.repo_tarball);
     cfg.server_url = get("SERVER_URL", &cfg.server_url);

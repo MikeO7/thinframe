@@ -14,6 +14,7 @@
 # Needs: git curl shasum python3 docker, cargo-zigbuild. Buildroot cross-compiles: no emulation.
 # RELEASE=1 leaves image/secrets out of the image (public release builds).
 # DEBUG=1 adds board/pf1007l/debug.fragment (evtest, strace); version gets -debug.
+# QEMU=1 builds the -M virt variant (qemu.fragment) into image/out/qemu/ for sim/qemu/run.sh.
 # Writes only to image/{cache,work,out,secrets}. No sudo. No devices touched.
 set -euo pipefail
 
@@ -32,9 +33,13 @@ TOUCH_FW_SHA256="e11ffa8a33a56b78f8d2f57925fef1b67ea9a58c264bb5f3a8553ea52b14a9e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 VERSION="${THINFRAME_VERSION:-$(date -u +%Y.%m.%d)-$(git -C "$ROOT" rev-parse --short=8 HEAD)}"
-if [ "${DEBUG:-0}" = 1 ]; then
-	[ "${RELEASE:-0}" != 1 ] || { echo "STOP: DEBUG=1 and RELEASE=1 together" >&2; exit 1; }
-	VERSION="$VERSION-debug"
+VARIANT=""
+[ "${DEBUG:-0}" != 1 ] || VARIANT=debug
+[ "${QEMU:-0}" != 1 ] || VARIANT="${VARIANT:+x}qemu"
+case "$VARIANT" in x*) echo "STOP: DEBUG=1 and QEMU=1 together" >&2; exit 1 ;; esac
+if [ -n "$VARIANT" ]; then
+	[ "${RELEASE:-0}" != 1 ] || { echo "STOP: RELEASE=1 with a $VARIANT build" >&2; exit 1; }
+	VERSION="$VERSION-$VARIANT"
 fi
 CACHE="$HERE/cache"; WORK="$HERE/work"; OUT="$HERE/out"; SECRETS="$HERE/secrets"
 mkdir -p "$CACHE" "$WORK" "$OUT" "$SECRETS"; chmod 700 "$SECRETS"
@@ -85,8 +90,9 @@ step_rootfs() {
 		[ ! -f "$SECRETS/frame_id_ed25519.pub" ] || cp "$SECRETS/frame_id_ed25519.pub" "$WORK/secrets/authorized_keys"
 	fi
 	if [ -n "$TOUCH_FW" ]; then mkdir -p "$WORK/touch" && cp "$TOUCH_FW" "$WORK/touch/gsl_m86_hd.fw"; fi
-	export BUILDROOT_VERSION BUILDROOT_SHA256 THINFRAME_VERSION="$VERSION"
+	export BUILDROOT_VERSION BUILDROOT_SHA256 THINFRAME_VERSION="$VERSION" VARIANT
 	bash "$HERE/br-run.sh"
+	[ "$VARIANT" != qemu ] || return 0	# not a card for the frame: no budget, no system-version
 	echo "$VERSION" > "$OUT/system-version"
 	local sz; sz=$(wc -c < "$OUT/rootfs.ext4" | tr -d ' ')
 	echo "rootfs.ext4: $sz bytes (gate: under 200 MB)"; [ "$sz" -lt 200000000 ] || stop "rootfs over budget"
@@ -101,7 +107,7 @@ step_check() {
 	say "check: Buildroot external tree"
 	local br="$HERE/buildroot" f
 	for f in external.desc external.mk Config.in configs/pf1007l_defconfig \
-		board/pf1007l/{genimage.cfg,post-build.sh,post-image.sh,boot.cmd.patch,linux.fragment,busybox.fragment,debug.fragment,users.txt} \
+		board/pf1007l/{genimage.cfg,post-build.sh,post-image.sh,boot.cmd.patch,linux.fragment,busybox.fragment,debug.fragment,qemu.fragment,linux-qemu.fragment,users.txt} \
 		package/tfctl/{Config.in,tfctl.mk} package/aic8800/{Config.in,aic8800.mk}; do
 		[ -f "$br/$f" ] || stop "missing buildroot/$f"
 	done
