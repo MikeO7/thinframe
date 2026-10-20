@@ -30,7 +30,7 @@ jobs:
     defaults: { run: { working-directory: server } }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version-file: server/go.mod }
       - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
       - run: go vet ./...
@@ -41,7 +41,7 @@ jobs:
     defaults: { run: { working-directory: sim } }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version-file: sim/go.mod }
       - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
       - run: go vet ./... && go build ./...
