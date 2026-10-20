@@ -211,8 +211,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       Gate: frame `sim-qemu` appears in /admin from the real image; screendump shows the dashboard;
       an A/B system update + rollback runs end-to-end inside QEMU. Slow (TCG), for correctness only.
 - [x] M3 `docker compose --profile sim up --build` from the repo root starts both containers (README).
-- [ ] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
-      (Half done: `tests/e2e-native.sh` runs frameserver + real tfctl without Docker, in CI. The screenshot half needs the sim container.)
+- [x] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
+      (`tests/e2e.sh` with compose.yml; CI job `e2e-sim`. `tests/e2e-native.sh` covers the no-Docker path.)
 
 ## 13. Smoothness (measure, then tune)
 - [ ] Confirm GPU compositing in WPE on lima (`WEBKIT_SHOW_FPS=1`); fix before anything else.

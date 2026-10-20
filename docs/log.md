@@ -64,3 +64,7 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   tries left 0`), B reports from b again, agent emits `frame:system-update-skipped` and does not
   re-flash BAD → C written to slot a and reports from a. 10/10 PASS [V in QEMU]. Output:
   image/out/qemu-ab-test.txt.
+- M4: `tests/e2e.sh` (compose project `thinframe-e2e`, port 18088, temp data/out dirs): sim frame
+  registers; screenshot at rotation 0 is 375x600; MCP `tools/call set_frame_config {"rotation":3}`
+  returns rotation 3; the next screenshot is 800x500 with a different sha256. `e2e: ok` on the Mac
+  (Podman) [V]. compose.yml takes `PORT`, `DATA_DIR`, `SIM_OUT` (defaults unchanged).
