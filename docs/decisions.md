@@ -292,3 +292,26 @@ Running from SD is the only configuration where recovery is "remove the card". I
 default until A/B updates have proven themselves. Installing to the eMMC (TASKS section E) removes
 the card and the vendor software entirely; recovery then needs a rescue card or FEL over USB, and
 a verified eMMC backup is a hard prerequisite so the frame can be returned to stock.
+
+## One-press pairing
+Typing a server token into the flash script was the hardest step of onboarding. Now the token is
+optional: a frame without one asks the server to pair (`POST /api/pair` with a random nonce only it
+knows) and shows a PAIR button on its screen. The button posts that nonce from cog straight to the
+server, which proves someone is at the frame; the server then mints a 256-bit per-frame token,
+stores only its SHA-256, and hands the token once to the frame's next poll. A paired id refuses new
+requests until the admin page forgets it, so pairing happens once per frame. The per-frame token
+opens only that frame's own routes (config GET, heartbeat, control socket) plus release info and
+update artifacts; listing, layout, actions and MCP keep needing `FRAME_TOKEN`. A 401 later clears
+the frame's token and brings the button back. Discovery of the server is not automatic: the LAN
+broadcast or mDNS a container would need does not cross Docker's bridge network or QEMU's user
+network, so `SERVER_URL` still comes from the flash script. [V] in QEMU, see docs/log.md.
+
+## Seventies splash and its font
+Chosen by the owner on 2026-10-20 from browser mockups. The lettering is Shrikhand (SIL Open Font
+License 1.1, license next to the font in image/rootfs/usr/share/fonts/thinframe/). tfctl carries it
+as an 84 KB signed distance field atlas (tfctl/assets/shrikhand.sdf) so one atlas draws every size
+with smooth edges; the status and pairing pages load the TTF from the rootfs. The atlas is made on
+the Mac by tfctl/tools/fontgen, a separate crate with its own workspace. Its crates (fontdue to
+rasterize the TTF, miniz_oxide to deflate) never reach the frame binary, which still has no
+dependencies. The animation redraws only what moves: angle and radius per pixel are computed once,
+and each frame picks a ray colour per background pixel and blends the static layer over it.

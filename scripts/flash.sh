@@ -97,7 +97,7 @@ main() {
 		printf -v "$1" '%s' "${in:-${!1:-}}"; case "${!1}" in *'"'*|*$'\n'*) stop "no quotes or newlines in answers";; esac; }
 	ask WIFI_SSID "Wi-Fi network"; ask WIFI_PSK "Wi-Fi password" secret
 	ask SERVER_URL "Server (e.g. http://nas.local:8080)"; ask FRAME_ID "Frame name (e.g. kitchen)"
-	ask FRAME_TOKEN "Server token" secret
+	ask FRAME_TOKEN "Server token (Enter to pair with the button on the frame)" secret
 	(umask 077; printf 'WIFI_SSID=%q\nSERVER_URL=%q\nFRAME_ID=%q\n' "$WIFI_SSID" "$SERVER_URL" "$FRAME_ID" > "$STATE/answers")
 	[ -f "$STATE/frame_id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -C "thinframe@$(hostname -s)" -f "$STATE/frame_id_ed25519"
 	SSH_PUBKEY=$(cat "$STATE/frame_id_ed25519.pub")
@@ -112,7 +112,7 @@ main() {
 	[ "$ans" = "$dev" ] || stop "confirmation did not match"
 	[ "${1:-}" = "--settings-only" ] || write_card "$dev"
 	put_provision "$dev"
-	say "Done. Card in the frame, power on, wait a minute, then open $SERVER_URL/admin"
+	say "Done. Card in the frame, power on; without a token, press PAIR on its screen. Then open $SERVER_URL/admin"
 }
 
 [ "${FLASH_SOURCE_ONLY:-}" = 1 ] || main "$@"

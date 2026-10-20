@@ -1,0 +1,13 @@
+[package]
+name = "fontgen"
+version = "0.1.0"
+edition = "2021"
+description = "Mac-side generator: TTF -> signed distance field atlas for tfctl (never on the frame)"
+publish = false
+
+# Its own workspace: these crates never reach the frame binary.
+[workspace]
+
+[dependencies]
+fontdue = "0.9"
+miniz_oxide = "0.9"

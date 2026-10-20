@@ -99,6 +99,9 @@ type Frame struct {
 	Pending   []Action   `json:"pending_actions"`
 	History   []Action   `json:"action_history"`
 	Events    []Event    `json:"events"`
+	// TokenHash is sha256(hex) of the token minted by one-press pairing; empty = not paired.
+	TokenHash string     `json:"token_hash,omitempty"`
+	PairedAt  *time.Time `json:"paired_at,omitempty"`
 }
 
 var idRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)

@@ -4,6 +4,7 @@
 //! Down: reconnect with backoff 1..60 s, poll GET /config over HTTP meanwhile; after 3
 //! consecutive failures the kiosk shows FALLBACK_URL until the server answers again.
 //! Runs as a thread inside `tfctl kiosk`; `tfctl agent` runs it alone for debugging.
+//! Without FRAME_TOKEN it pairs first (pair.rs).
 use crate::config::Config;
 use crate::http::{self, Url};
 use crate::json::{self, Value};
@@ -35,6 +36,10 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
     loop {
         if sys::term_requested() {
             return Ok(());
+        }
+        if a.needs_pairing() {
+            thread::sleep(a.pair_step());
+            continue;
         }
         let ws_url = a.api(&format!("/api/frames/{}/ws", a.cfg.frame_id));
         match ws::Client::connect(&ws_url, &a.cfg.token, CONNECT_TIMEOUT) {
@@ -91,6 +96,10 @@ pub struct Agent {
     pub(crate) exit: bool,
     /// Versions an automatic update already failed on; retried only after a new config push.
     pub(crate) tried: Vec<String>,
+    /// Open pairing request (pair.rs): the nonce the PAIR button sends back.
+    pub(crate) pair_nonce: Option<String>,
+    /// The pairing page is on screen.
+    pub(crate) pair_page_up: bool,
 }
 
 impl Agent {
@@ -116,6 +125,8 @@ impl Agent {
             busy: Arc::new(AtomicBool::new(false)),
             exit: false,
             tried: Vec::new(),
+            pair_nonce: None,
+            pair_page_up: false,
         })
     }
 
@@ -153,7 +164,7 @@ impl Agent {
         Ok(())
     }
 
-    fn api(&self, path: &str) -> Url {
+    pub(crate) fn api(&self, path: &str) -> Url {
         self.base.with_path(path)
     }
 
@@ -235,7 +246,13 @@ impl Agent {
                 eprintln!("tfctl: agent: status backdrop: {e}");
                 None
             });
-        if let Err(e) = crate::statuspage::write(&path, &headline, &details, backdrop.as_deref()) {
+        if let Err(e) = crate::statuspage::write(
+            &path,
+            &headline,
+            &details,
+            backdrop.as_deref(),
+            &self.cfg.splash_style,
+        ) {
             eprintln!("tfctl: agent: status page: {e}");
         }
     }
@@ -243,6 +260,9 @@ impl Agent {
     fn http_poll(&mut self) -> io::Result<()> {
         let url = self.api(&format!("/api/frames/{}/config", self.cfg.frame_id));
         let r = http::get(&url, &self.cfg.token, CONNECT_TIMEOUT)?;
+        if r.status == 401 {
+            self.unauthorized();
+        }
         if r.status != 200 {
             return Err(io::Error::other(format!("GET config: HTTP {}", r.status)));
         }

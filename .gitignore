@@ -14,3 +14,4 @@ server/artifacts/*
 !server/artifacts/.gitkeep
 sim/qemu/work/
 server/data/
+/tfctl/tools/fontgen/target/
