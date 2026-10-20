@@ -160,10 +160,14 @@ func (s *Server) handlePairAccept(w http.ResponseWriter, r *http.Request) {
 
 // Unpair forgets a frame's token; the frame shows the PAIR button again on its next connect.
 func (s *Server) Unpair(id string) (store.Frame, error) {
-	return s.Store.Update(id, func(f *store.Frame) {
+	f, err := s.Store.Update(id, func(f *store.Frame) {
 		f.TokenHash, f.PairedAt = "", nil
 		store.AddEvent(f, "pair", "pairing forgotten")
 	})
+	if err == nil {
+		s.Hub.Kick(id, "pairing forgotten")
+	}
+	return f, err
 }
 
 func (s *Server) handleAdminUnpair(w http.ResponseWriter, r *http.Request) {

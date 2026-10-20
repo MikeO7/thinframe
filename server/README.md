@@ -14,6 +14,13 @@ and the page reloads itself. Nothing is deployed to the frame.
 
 Tasks: `TASKS.md` section S.
 
+## Pairing a new frame
+Flash the card without a token and power the frame on: it finds the server at `SERVER_URL` and
+shows a PAIR button. Tap it once; the server gives that frame its own token and the dashboard
+opens. A paired frame cannot be paired again until you press "forget pairing" on `/admin`.
+Endpoints: `POST /api/pair`, `POST /pair/{id}/accept`, `GET /api/pair/{id}?nonce=` (no auth; see
+docs/decisions.md "One-press pairing").
+
 ## Data adapters
 The page never calls a third party. The server fetches, caches for 10 minutes, and the page reads
 `/api/stream/<id>` (SSE, pushed on connect and every 10 minutes) or the JSON endpoints:

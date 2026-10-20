@@ -159,6 +159,16 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       from the next kiosk start. QEMU: pushed through the server and found on /data.)
 - Gate: power on → dark ≤10 s → logo → status text → dashboard, no kernel or console text visible; photo in docs/img/.
 
+## 16. One-press pairing (no token typing)
+- [x] Server: `POST /api/pair`, `POST /pair/{id}/accept` (the button), `GET /api/pair/{id}?nonce=`
+      (token once), per-frame token hash in the store, scoped auth, "forget pairing" on /admin.
+      (server/internal/api/pair.go, tests pair_test.go.)
+- [x] tfctl: without FRAME_TOKEN the agent pairs first and shows the PAIR page; a 401 clears the token.
+      (tfctl/src/pair.rs.) flash.sh: the token prompt may be left empty.
+- Gate: in QEMU, a frame flashed without a token shows PAIR, one tap pairs it, the dashboard loads,
+  a reboot goes straight to the dashboard, a second pairing request is refused, "forget pairing"
+  brings the button back. Evidence in docs/log.md.
+
 ## 11. Auto-update from the container (frame side)
 - [x] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
       `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs

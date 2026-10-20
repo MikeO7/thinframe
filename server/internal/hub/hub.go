@@ -93,6 +93,18 @@ func (h *Hub) Send(id string, m Msg) bool {
 	}
 }
 
+// Kick closes a frame's socket (its pairing was forgotten); the frame reconnects and is
+// asked for credentials again. False when the frame is offline.
+func (h *Hub) Kick(id, reason string) bool {
+	h.mu.RLock()
+	c, ok := h.conns[id]
+	h.mu.RUnlock()
+	if ok {
+		_ = c.ws.Close(websocket.StatusPolicyViolation, reason)
+	}
+	return ok
+}
+
 // Online reports whether a frame has a live socket.
 func (h *Hub) Online(id string) bool {
 	h.mu.RLock()
