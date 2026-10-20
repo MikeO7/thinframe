@@ -129,3 +129,11 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   the panel [U, check at TASK 6].
 - M2 stays open: the screendump does not show the dashboard yet, and the A/B update inside virt is
   not run (it passes on `-M orangepi-pc`, see TASK 12).
+
+## 2026-10-20 first full release run (39392591191, workflow_dispatch on main)
+- `image` passed in about 5 h on ubuntu-latest: Buildroot build plus the QEMU boot test of the release image [V].
+  `server-image` pushed ghcr.io/mikeo7/thinframe-server:v2026.10.20 and :latest [V].
+- `publish` fails at `gh release create` with "HTTP 403: Resource not accessible by integration",
+  although the job log shows `Contents: write`. A re-run gave the same 403, and the repo has no rulesets [V].
+  The cause is not known: a repo or account setting, or the token creating the tag [U]. Owner to check.
+  Until then, S8/S10 stay unchecked. Artifacts are on the run (`image`, 90 days).
