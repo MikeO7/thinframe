@@ -183,14 +183,18 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] S6 Artifacts: `scripts/make-artifacts.sh` (run by release.yml after cross-building tfctl) stages
       `tfctl-armv7`, `overlay.tar.gz`, `versions.json` into `server/artifacts/`, which the Dockerfile copies to
       `/artifacts`; server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
-      (tests/e2e-native.sh checks the sidecar hash and the config field; the tag build itself is untested.)
+      (tests/e2e-native.sh checks the sidecar hash and the config field; Go test `TestConfigCarriesArtifactVersions`
+      checks config versions/sums and token-gated file + sidecar serving. Server side is done; the Dockerfile has no
+      tfctl cross-build stage, release.yml cross-builds before `docker build`, and that tag build is untested.)
 - [x] S5 Widgets + layout: `layout.json` per frame, `html/template` renderer, widget library
       (clock, photo, weather, calendar, text, iframe) in `internal/widgets/`, `/admin` layout form,
       MCP `set_layout`/`list_widgets`. Gate: two frames, two layouts, one container.
 - [x] S5b Photo adapter: `PHOTOS_DIR` scan, resize to 1280x800 and 800x1280, EXIF strip, cache,
       `/api/data/photo/next`. Interface `PhotoSource` so Immich/Google/iCloud can be added later.
 - [x] S5c `hello` reply carries `time_unix` and `tz`; weather and calendar adapters (open-meteo, public .ics via
-      `CALENDAR_ICS_URL`, no recurrence expansion) feed widgets over SSE; the page never calls third parties directly.
+      `CALENDAR_ICS_URL`, no recurrence expansion) feed widgets over SSE (on connect + every 10 min) and
+      `GET /api/data/weather|calendar`; the page never calls third parties directly. Covered by
+      `internal/api/data_test.go` with httptest fakes (log 2026-10-20).
 - Gate: two frames with different ids show different pages from one container.
 
 ## M. Simulator (second container, dev only)
