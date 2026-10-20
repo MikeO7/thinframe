@@ -130,6 +130,7 @@ impl Status {
         Value::obj()
             .set("uptime_s", self.uptime_s)
             .set("mem_used_mb", self.mem_used_mb)
+            .set("mem_total_mb", self.mem_total_mb)
             .set("ip", self.ips.first().cloned())
             .set("wifi_rssi", self.wifi_rssi)
             .set("temp_c", self.temp_c)
@@ -215,5 +216,20 @@ mod tests {
         let j = st.to_json("http://x/", true).to_string();
         assert!(j.contains("\"screen_state\":\"on\""));
         assert!(j.contains(&format!("\"tfctl_version\":\"{VERSION}\"")));
+    }
+
+    #[test]
+    fn json_carries_memory_total() {
+        // The server stores mem_total_mb; without it the status widget showed "423/0 MB".
+        let st = Status {
+            mem_used_mb: Some(423),
+            mem_total_mb: Some(1000),
+            ..Status::default()
+        };
+        let j = st.to_json("http://x/", true).to_string();
+        assert!(
+            j.contains("\"mem_used_mb\":423") && j.contains("\"mem_total_mb\":1000"),
+            "{j}"
+        );
     }
 }
