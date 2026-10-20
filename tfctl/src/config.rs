@@ -39,6 +39,8 @@ pub struct Config {
     /// Splash screen (TASK 15): background "#rrggbb" and the one text line.
     pub splash_bg: u32,
     pub splash_text: String,
+    /// "retro" (default) or "plain"
+    pub splash_style: String,
     /// Where this config was loaded from (and where overrides are written back).
     pub path: String,
 }
@@ -70,6 +72,7 @@ impl Default for Config {
             tz: String::new(),
             splash_bg: 0x0b0d10,
             splash_text: "thinframe".into(),
+            splash_style: "retro".into(),
             path: DEFAULT_PATH.into(),
         }
     }
@@ -115,6 +118,7 @@ pub fn parse(text: &str) -> Config {
     cfg.page_version = get("PAGE_VERSION", &cfg.page_version);
     cfg.tz = get("TZ", &cfg.tz);
     cfg.splash_text = get("SPLASH_TEXT", &cfg.splash_text);
+    cfg.splash_style = get("SPLASH_STYLE", &cfg.splash_style);
     if let Some(bg) = kv.get("SPLASH_BG").and_then(|v| parse_rgb(v)) {
         cfg.splash_bg = bg;
     }

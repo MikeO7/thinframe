@@ -1,13 +1,12 @@
-//! Boot splash (TASK 15, minimal): background colour + one line of text, drawn to a DRM dumb
-//! buffer (drm.rs) with the embedded 8x16 font scaled 4x. `COG_ROTATION` quarter turns are
-//! applied so the text reads upright on the mounted frame ([U] same sign as cog's rotation;
-//! if it comes out upside down on hardware, flip `rotate`). The PNG logo from TASK 15 is a
-//! follow-up: this file has no decoder yet.
+//! Boot splash (TASK 15), drawn in software into a DRM dumb
+//! buffer (drm.rs). `SPLASH_STYLE=retro` (default) is the scene in retro.rs; `plain` is a flat
+//! colour, the logo PNG and one text line in the embedded 8x16 font. `COG_ROTATION` is applied
+//! exactly as cog applies it, so splash, status page and dashboard share one orientation.
 //!
-//! `tfctl splash [TEXT]` draws and then holds the buffer until SIGTERM; the kiosk draws it in
-//! process and drops it the moment cog is spawned.
+//! `tfctl splash [--png FILE] [STATUS]` draws and holds until SIGTERM (or writes a preview);
+//! the kiosk draws it in process and keeps it up while cog starts (see `Splash::hand_over`).
 use crate::config::Config;
-use crate::{drm, font, png, sys};
+use crate::{drm, font, png, retro, sys};
 use std::io;
 use std::time::Duration;
 
@@ -40,13 +39,15 @@ impl Canvas {
         }
     }
 
-    /// Logical point -> physical pixel for `rotation` quarter turns clockwise.
+    /// Logical point -> physical pixel, turned the way cog turns its output for the same
+    /// `rotation`: at 3 the top of the picture is at the panel's right edge (x = w-1), at 1 at
+    /// its left edge. Seen side by side with cog under QEMU, 2026-10-20 [V].
     pub fn rotate(&self, rotation: u8, lx: usize, ly: usize) -> (usize, usize) {
         match rotation % 4 {
             0 => (lx, ly),
-            1 => (self.w - 1 - ly, lx),
+            1 => (ly, self.h - 1 - lx),
             2 => (self.w - 1 - lx, self.h - 1 - ly),
-            _ => (ly, self.h - 1 - lx),
+            _ => (self.w - 1 - ly, lx),
         }
     }
 
@@ -148,42 +149,147 @@ fn load_logo() -> Option<png::Image> {
     }
 }
 
-/// A live splash: dropping it releases the DRM device for cog.
+/// A live splash: dropping it frees the buffer (and DRM master if it still holds it).
 pub struct Splash {
-    _display: drm::Display,
+    display: drm::Display,
+    handed_over: bool,
 }
 
-pub fn show(bg: u32, text: &str, rotation: u8) -> io::Result<Splash> {
+impl Splash {
+    /// Let cog take the display: drop DRM master, keep the picture up. False if that failed
+    /// (then the caller must drop the splash, or cog cannot become master).
+    pub fn hand_over(&mut self) -> bool {
+        match self.display.drop_master() {
+            Ok(()) => {
+                self.handed_over = true;
+                true
+            }
+            Err(e) => {
+                eprintln!("tfctl: splash: {e}");
+                false
+            }
+        }
+    }
+
+    /// Handed over and no longer on screen: cog has shown its first frame.
+    pub fn replaced(&self) -> bool {
+        self.handed_over && !self.display.shown()
+    }
+}
+
+/// What the splash shows: `SPLASH_STYLE` (retro or plain), colours, the title (`SPLASH_TEXT`)
+/// and the boot status line under it.
+pub struct Look<'a> {
+    pub style: &'a str,
+    pub bg: u32,
+    pub title: &'a str,
+    pub status: &'a str,
+    pub rotation: u8,
+}
+
+impl<'a> Look<'a> {
+    pub fn new(cfg: &'a Config, status: &'a str) -> Look<'a> {
+        Look {
+            style: &cfg.splash_style,
+            bg: cfg.splash_bg,
+            title: &cfg.splash_text,
+            status,
+            rotation: cfg.rotation,
+        }
+    }
+}
+
+/// The splash as panel pixels (physical `w` x `h`).
+pub fn render(look: &Look, w: usize, h: usize) -> Canvas {
+    let logo = load_logo();
+    let mut c = Canvas::new(w, h, look.bg);
+    if look.style == "plain" {
+        let text = if look.status.is_empty() {
+            look.title
+        } else {
+            look.status
+        };
+        match logo {
+            Some(logo) => {
+                c.blit_centered(&logo, look.rotation, -((font::HEIGHT * SCALE) as isize));
+                let dy = (logo.h / 2 + font::HEIGHT * SCALE) as isize;
+                c.text_centered_at(text, SCALE, TEXT_COLOR, look.rotation, dy);
+            }
+            None => c.text_centered(text, SCALE, TEXT_COLOR, look.rotation),
+        }
+        return c;
+    }
+    let (lw, lh) = c.logical(look.rotation);
+    let mut l = Canvas::new(lw, lh, 0);
+    retro::draw(&mut l, look.title, look.status, logo.as_ref());
+    for ly in 0..lh {
+        for lx in 0..lw {
+            let (x, y) = c.rotate(look.rotation, lx, ly);
+            c.px[y * w + x] = l.px[ly * lw + lx];
+        }
+    }
+    c
+}
+
+/// The retro scene without a status line, upright, as a PNG for the status page's background
+/// (TASK 15: the same picture from splash to status page). Panel 800x1280 turned by
+/// COG_ROTATION. None for `SPLASH_STYLE=plain`. Written once per boot (tmpfs).
+pub fn write_backdrop(cfg: &Config, path: &str) -> io::Result<Option<String>> {
+    if cfg.splash_style == "plain" {
+        return Ok(None);
+    }
+    if !std::path::Path::new(path).exists() {
+        let (lw, lh) = Canvas::new(800, 1280, 0).logical(cfg.rotation);
+        let mut l = Canvas::new(lw, lh, 0);
+        retro::draw(&mut l, &cfg.splash_text, "", load_logo().as_ref());
+        let tmp = format!("{path}.tmp");
+        std::fs::write(&tmp, png::encode_rgb(lw, lh, &l.px))?;
+        std::fs::rename(&tmp, path)?;
+    }
+    Ok(Some(path.to_string()))
+}
+
+pub fn show(look: &Look) -> io::Result<Splash> {
     let mut d = drm::Display::open(DEVICE)?;
     let (w, h) = (d.mode_size.width as usize, d.mode_size.height as usize);
-    let mut c = Canvas::new(w, h, bg);
-    match load_logo() {
-        Some(logo) => {
-            c.blit_centered(&logo, rotation, -((font::HEIGHT * SCALE) as isize));
-            c.text_centered_at(
-                text,
-                SCALE,
-                TEXT_COLOR,
-                rotation,
-                (logo.h / 2 + font::HEIGHT * SCALE) as isize,
-            );
-        }
-        None => c.text_centered(text, SCALE, TEXT_COLOR, rotation),
-    }
+    let c = render(look, w, h);
     d.write(&c.px);
     d.commit()?;
-    eprintln!("tfctl: splash: {w}x{h} rotation {rotation}: {text:?}");
-    Ok(Splash { _display: d })
+    eprintln!(
+        "tfctl: splash: {w}x{h} rotation {} {}: {:?} / {:?}",
+        look.rotation, look.style, look.title, look.status
+    );
+    Ok(Splash {
+        display: d,
+        handed_over: false,
+    })
 }
 
-/// `tfctl splash [TEXT]`: draw, then hold until SIGTERM/SIGINT.
-pub fn run(cfg: &Config, text: Option<&str>) -> io::Result<()> {
+/// `tfctl splash [--png FILE] [STATUS]`: draw on the panel and hold until SIGTERM/SIGINT, or
+/// write the upright picture (800x1280 panel turned by COG_ROTATION) to FILE to preview it.
+pub fn run(cfg: &Config, args: &[String]) -> io::Result<()> {
+    let (png_out, status) = match args {
+        [f, path, rest @ ..] if f == "--png" => (Some(path.as_str()), rest.first()),
+        rest => (None, rest.first()),
+    };
+    let look = Look::new(cfg, status.map_or("starting", String::as_str));
+    if let Some(path) = png_out {
+        let (w, h) = (800, 1280);
+        let phys = render(&look, w, h);
+        let (lw, lh) = phys.logical(look.rotation);
+        let mut up = vec![0; lw * lh];
+        for ly in 0..lh {
+            for lx in 0..lw {
+                let (x, y) = phys.rotate(look.rotation, lx, ly);
+                up[ly * lw + lx] = phys.px[y * w + x];
+            }
+        }
+        std::fs::write(path, png::encode_rgb(lw, lh, &up))?;
+        eprintln!("tfctl: splash: {lw}x{lh} preview in {path}");
+        return Ok(());
+    }
     sys::trap_term();
-    let _s = show(
-        cfg.splash_bg,
-        text.unwrap_or(&cfg.splash_text),
-        cfg.rotation,
-    )?;
+    let _s = show(&look)?;
     while !sys::term_requested() {
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -279,10 +385,14 @@ mod tests {
         let c = Canvas::new(10, 20, 0);
         assert_eq!(c.logical(1), (20, 10));
         assert_eq!(c.rotate(0, 0, 0), (0, 0));
-        assert_eq!(c.rotate(1, 0, 0), (9, 0));
+        assert_eq!(c.rotate(1, 0, 0), (0, 19));
         assert_eq!(c.rotate(2, 0, 0), (9, 19));
-        assert_eq!(c.rotate(3, 0, 0), (0, 19));
-        assert_eq!(c.rotate(1, 19, 9), (0, 19));
+        assert_eq!(
+            c.rotate(3, 0, 0),
+            (9, 0),
+            "cog rotation 3: top-left lands top-right"
+        );
+        assert_eq!(c.rotate(3, 19, 9), (0, 19));
         let mut c = Canvas::new(4, 4, 0);
         c.set(9, 9, 1);
         assert!(c.px.iter().all(|p| *p == 0));
@@ -300,6 +410,7 @@ mod tests {
         if std::path::Path::new(DEVICE).exists() {
             return;
         }
-        assert!(show(0, "x", 0).is_err());
+        let cfg = Config::default();
+        assert!(show(&Look::new(&cfg, "x")).is_err());
     }
 }

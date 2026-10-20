@@ -8,7 +8,7 @@
 //!   tfctl agent      control socket to the server alone (debugging; kiosk commands are logged)
 //!   tfctl update [--force]  software update from the server's config (the agent does this itself)
 //!   tfctl provision [--boot-dir D]  first boot: apply /boot/provision.txt, delete it (TASK 14)
-//!   tfctl splash [TEXT]  draw the boot splash on /dev/dri/card0, hold it until SIGTERM (TASK 15)
+//!   tfctl splash [--png FILE] [STATUS]  draw the boot splash on /dev/dri/card0, hold it until SIGTERM (TASK 15)
 //!   tfctl wifi SSID PSK   write iwd profile, reconnect
 //!   tfctl status     one screen: uptime, ip, wifi, mem, cog pid, url, temp
 //!   tfctl set KEY VALUE   rewrite one key in /etc/thinframe.conf (first pairing)
@@ -33,6 +33,7 @@ mod json;
 mod kiosk;
 mod png;
 mod provision;
+mod retro;
 mod screen;
 mod sha1;
 mod sha256;
@@ -48,7 +49,7 @@ mod ws;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: tfctl <kiosk|boot|agent|update [--force]|provision [--boot-dir D]|splash [TEXT]|\
+        "usage: tfctl <kiosk|boot|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
          wifi SSID PSK|status|set KEY VALUE>"
     );
     ExitCode::from(2)
@@ -82,7 +83,7 @@ fn main() -> ExitCode {
         Some("agent") => agent_alone(&cfg),
         Some("update") => update::run(&cfg, args.get(1).is_some_and(|a| a == "--force")),
         Some("provision") => provision::run(&args[1..]),
-        Some("splash") => splash::run(&cfg, args.get(1).map(String::as_str)),
+        Some("splash") => splash::run(&cfg, args.get(1..).unwrap_or_default()),
         Some("wifi") if args.len() == 3 => wifi::run(&args[1], &args[2]),
         Some("status") => status::run(&cfg),
         Some("set") if args.len() == 3 => config::save_overrides(&conf, &[(&args[1], &args[2])]),

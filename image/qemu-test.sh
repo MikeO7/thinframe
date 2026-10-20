@@ -27,8 +27,8 @@ check "tfctl kiosk runs under init" r 'ps -o args | grep -q "^/usr/bin/tfctl kio
 check "cog and WPE WebKit are installed" r 'command -v cog && ls /usr/lib/libWPEWebKit-*.so*'
 check "frame registered with frameserver over the network" wait_for 180 registered
 check "status page was written before the dashboard (a boot state + frame id)" \
-	r 'grep -qE "<h1>(joining |no Wi-Fi configured|reaching http)" /run/thinframe/status.html && grep -q "frame '"$ID"'" /run/thinframe/status.html'
-r 'sed -n "s/.*<h1>\(.*\)<\/h1>.*/status page: \1/p" /run/thinframe/status.html; echo' | tee -a "$RES" || true
+	r 'grep -qE "<h1>(joining |no Wi-Fi configured|reaching http)" /run/thinframe/status-line.html && grep -q "frame '"$ID"'" /run/thinframe/status-line.html'
+r 'sed -n "s/.*<h1>\(.*\)<\/h1>.*/status page: \1/p" /run/thinframe/status-line.html; echo' | tee -a "$RES" || true
 LOGO=iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAYAAAC09K7GAAAAPElEQVR42mN0UWiy2Xksvy3Pi8MnZi3HNSaX0E1pQqoyThF29xlWMf+ZzKLBaOPZyrBQf45manllY9xzAM7wEmsd43BoAAAAAElFTkSuQmCC
 curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 	-d '{"splash_text":"QEMU frame","splash_png":"'"$LOGO"'"}' "http://127.0.0.1:$PORT/api/frames/$ID/config" >/dev/null

@@ -319,9 +319,77 @@ pub fn decode(data: &[u8]) -> R<Image> {
     Ok(Image { w, h: ht, px })
 }
 
+/// PNG (8-bit RGB) from 0xRRGGBB pixels, with stored (uncompressed) deflate blocks. For previews
+/// (`tfctl splash --png`): big files, but no compressor in the binary.
+pub fn encode_rgb(w: usize, h: usize, px: &[u32]) -> Vec<u8> {
+    let mut raw = Vec::with_capacity(h * (1 + w * 3));
+    for row in px.chunks(w.max(1)).take(h) {
+        raw.push(0);
+        for &p in row {
+            raw.extend([(p >> 16) as u8, (p >> 8) as u8, p as u8]);
+        }
+    }
+    let mut z = vec![0x78, 0x01];
+    let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
+    for (i, b) in blocks.iter().enumerate() {
+        z.push(u8::from(i + 1 == blocks.len()));
+        let n = b.len() as u16;
+        z.extend(n.to_le_bytes());
+        z.extend((!n).to_le_bytes());
+        z.extend_from_slice(b);
+    }
+    let (mut a, mut s) = (1u32, 0u32);
+    for &x in &raw {
+        a = (a + x as u32) % 65521;
+        s = (s + a) % 65521;
+    }
+    z.extend((s << 16 | a).to_be_bytes());
+    let mut ihdr = Vec::new();
+    ihdr.extend((w as u32).to_be_bytes());
+    ihdr.extend((h as u32).to_be_bytes());
+    ihdr.extend([8, 2, 0, 0, 0]);
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    for (kind, body) in [(b"IHDR", &ihdr[..]), (b"IDAT", &z[..]), (b"IEND", &[][..])] {
+        out.extend((body.len() as u32).to_be_bytes());
+        let start = out.len();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        let crc = crc32(&out[start..]);
+        out.extend(crc.to_be_bytes());
+    }
+    out
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut c = !0u32;
+    for &b in data {
+        c ^= b as u32;
+        for _ in 0..8 {
+            c = if c & 1 != 0 {
+                (c >> 1) ^ 0xedb8_8320
+            } else {
+                c >> 1
+            };
+        }
+    }
+    !c
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encode_round_trips_through_decode() {
+        let px: Vec<u32> = (0..70_000u32)
+            .map(|i| i.wrapping_mul(2_654_435_761) & 0xff_ffff)
+            .collect();
+        let png = encode_rgb(350, 200, &px);
+        assert_eq!(crc32(b"IEND"), 0xae42_6082);
+        let img = decode(&png).unwrap();
+        assert_eq!((img.w, img.h), (350, 200));
+        assert!(img.px.iter().zip(&px).all(|(a, b)| *a == 0xff00_0000 | b));
+    }
 
     fn text() -> Vec<u8> {
         let mut t = "thinframe boots fast; thinframe renders html; "
