@@ -2,9 +2,9 @@
 //! (TASK 15). No libdrm, no crates: the ioctl numbers and structs are from
 //! `include/uapi/drm/drm.h` + `drm_mode.h` (pointers are `__u64` there, so the layouts are the
 //! same on armv7 and x86_64). Linux only; on other hosts `Display::open` returns an error.
-//! Whoever opens the device first is DRM master, so the splash must drop its `Display` before
-//! cog starts; dropping also removes the framebuffer (the panel goes dark until cog's first
-//! frame, [U] a few hundred ms).
+//! Whoever opens the device while no one is master becomes master. The splash drops master
+//! (`drop_master`) before cog starts but keeps its buffer scanned out, so the picture stays
+//! until cog sets its own (`shown` turns false); then the kiosk drops the `Display`.
 #[cfg(not(target_os = "linux"))]
 use std::io;
 
@@ -147,6 +147,9 @@ mod linux {
 
     const GETRESOURCES: c_ulong = iowr(0xA0, size_of::<CardRes>());
     const SETCRTC: c_ulong = iowr(0xA2, size_of::<Crtc>());
+    const GETCRTC: c_ulong = iowr(0xA1, size_of::<Crtc>());
+    /// `_IO('d', 0x1f)`: no payload.
+    const DROP_MASTER: c_ulong = (0x64 << 8) | 0x1f;
     const GETENCODER: c_ulong = iowr(0xA6, size_of::<GetEncoder>());
     const GETCONNECTOR: c_ulong = iowr(0xA7, size_of::<GetConnector>());
     const ADDFB: c_ulong = iowr(0xAE, size_of::<FbCmd>());
@@ -312,6 +315,23 @@ mod linux {
             };
             call(self.file.as_raw_fd(), SETCRTC, &mut crtc, "SETCRTC")
         }
+
+        /// Give up DRM master but keep the buffer scanned out, so the next client (cog) gets
+        /// master on open and replaces the picture with its first frame: no dark gap.
+        pub fn drop_master(&mut self) -> io::Result<()> {
+            let mut none = 0u32;
+            call(self.file.as_raw_fd(), DROP_MASTER, &mut none, "DROP_MASTER")
+        }
+
+        /// Is the CRTC still showing our buffer? False once another client set its own.
+        pub fn shown(&self) -> bool {
+            let mut crtc = Crtc {
+                crtc_id: self.crtc_id,
+                ..Crtc::default()
+            };
+            call(self.file.as_raw_fd(), GETCRTC, &mut crtc, "GETCRTC").is_ok()
+                && crtc.fb_id == self.fb_id
+        }
     }
 
     impl Drop for Display {
@@ -346,6 +366,8 @@ mod linux {
             assert_eq!(GETRESOURCES, 0xC04064A0);
             assert_eq!(CREATE_DUMB, 0xC02064B2);
             assert_eq!(SETCRTC, 0xC06864A2);
+            assert_eq!(GETCRTC, 0xC06864A1);
+            assert_eq!(DROP_MASTER, 0x641F);
         }
     }
 }
@@ -366,5 +388,11 @@ impl Display {
     pub fn write(&mut self, _px: &[u32]) {}
     pub fn commit(&mut self) -> io::Result<()> {
         Ok(())
+    }
+    pub fn drop_master(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+    pub fn shown(&self) -> bool {
+        false
     }
 }

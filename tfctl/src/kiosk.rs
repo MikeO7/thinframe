@@ -43,6 +43,9 @@ fn reap_group(pgid: u32) {
     }
 }
 
+/// The dashboard's dark background (server page.css `--bg`).
+const BG_COLOR: &str = "#0b0d10";
+
 const RESTART_DELAY: Duration = Duration::from_secs(3);
 const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 const FAST_FAIL: Duration = Duration::from_secs(60);
@@ -99,6 +102,7 @@ pub struct Kiosk {
     last_sched: Instant,
     splash_bg: u32,
     splash_text: String,
+    splash_style: String,
     /// Held from start until cog is spawned (TASK 15); shown again when cog is missing.
     splash: Option<splash::Splash>,
     exit: bool,
@@ -125,13 +129,21 @@ impl Kiosk {
             last_sched: Instant::now() - Duration::from_secs(60),
             splash_bg: cfg.splash_bg,
             splash_text: cfg.splash_text.clone(),
+            splash_style: cfg.splash_style.clone(),
             splash: None,
             exit: false,
         }
     }
 
-    fn show_splash(&mut self, text: &str) {
-        match splash::show(self.splash_bg, text, self.rotation) {
+    fn show_splash(&mut self, status: &str) {
+        let look = splash::Look {
+            style: &self.splash_style,
+            bg: self.splash_bg,
+            title: &self.splash_text,
+            status,
+            rotation: self.rotation,
+        };
+        match splash::show(&look) {
             Ok(s) => self.splash = Some(s),
             Err(e) => eprintln!("tfctl: splash: {e}"),
         }
@@ -153,6 +165,8 @@ impl Kiosk {
                 ));
             c
         };
+        // Dark until the page paints: the default is a white flash at every (re)start.
+        c.arg(format!("--bg-color={BG_COLOR}"));
         c.args(&self.extra_args).arg(&self.url);
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
             .unwrap_or_else(|_| format!("/run/user/{}", uid_of(&self.user).unwrap_or(1000)));
@@ -165,8 +179,16 @@ impl Kiosk {
     }
 
     fn spawn(&mut self) {
-        // Release the DRM device (and master) so cog can take it.
-        self.splash = None;
+        // The splash covers every (re)start: cog takes seconds to its first frame, and the panel
+        // would be dark meanwhile. Keep the picture up but give up DRM master so cog gets it on
+        // open; the loop frees the buffer once cog's frame replaced it. If master cannot be
+        // dropped, release the device entirely as before.
+        if self.splash.is_none() {
+            self.show_splash("loading");
+        }
+        if !self.splash.as_mut().is_some_and(|s| s.hand_over()) {
+            self.splash = None;
+        }
         match self.command().spawn() {
             Ok(child) => {
                 eprintln!("tfctl: kiosk: started pid {} -> {}", child.id(), self.url);
@@ -301,8 +323,7 @@ impl Kiosk {
 
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
         let _ = screen::set_brightness(self.brightness);
-        let text = self.splash_text.clone();
-        self.show_splash(&text);
+        self.show_splash("starting");
         loop {
             if sys::term_requested() || self.exit {
                 eprintln!("tfctl: kiosk: stopping cog");
@@ -316,6 +337,10 @@ impl Kiosk {
                     reap_group(c.id());
                     self.exited();
                 }
+            }
+            if self.splash.as_ref().is_some_and(|s| s.replaced()) {
+                eprintln!("tfctl: kiosk: cog is on screen, splash released");
+                self.splash = None;
             }
             if self.child.is_none()
                 && !self.stopped
@@ -367,6 +392,7 @@ mod tests {
             [
                 "--platform=drm",
                 "--platform-params=renderer=gles,rotation=1",
+                "--bg-color=#0b0d10",
                 "--x",
                 "http://s/frame/k"
             ]

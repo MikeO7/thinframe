@@ -174,3 +174,26 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   `set -e` ended the build silently.
 - Still open for M2: the A/B update + rollback inside `-M virt`. This harness boots the kernel
   directly (no U-Boot, so no boot.scr slot logic). The same test passes on `-M orangepi-pc` (TASK 12).
+
+## 2026-10-20 TASK 15 in QEMU: retro splash, status page, hand-off to cog
+- `tfctl splash` gained SPLASH_STYLE=retro (default; `plain` keeps the old look): tfctl/src/retro.rs.
+  `tfctl splash --png FILE [STATUS]` writes the picture without a display.
+- Boot run under `-M virt` with a screendump every 2 s and the server down for the first 2 minutes
+  (`KEEP_SHOTS=1 SHOT_INTERVAL_S=2 sim/qemu/run.sh`, frameserver started at T+126 s). 17 distinct frames:
+  splash "starting" (T+17 s), status page "cannot reach http://10.0.2.2:18090" with frame id and IP on the
+  splash backdrop (T+46..128 s, only the cursor changes across reloads), splash "loading" (T+142 s),
+  dashboard (T+229 s): docs/img/boot-qemu-{1-splash,2-status,3-dashboard}.png [V] (QEMU, not the panel).
+- Fixed on the way, each seen in the previous run's frames [V]:
+  - The status page showed its HTML source: WebKit takes `file://` types from the shared-mime-info
+    globs, which the image lacked. image/rootfs/usr/share/mime/globs2 lists the few types we use.
+  - The splash went black before cog painted: the kiosk now keeps the DRM file open, drops master
+    (DRM_IOCTL_DROP_MASTER) so cog can set its mode, and closes it once the CRTC shows another framebuffer.
+  - A white flash before the first page: cog gets `--bg-color=#0b0d10`.
+  - The splash was 180° off from cog: `Canvas::rotate` cases 1 and 3 swapped (cog rotation 3 puts the
+    picture's top at the panel's right edge).
+  - The status page flashed without its backdrop on every reload: `status.html` is now a still shell
+    (backdrop drawn once to /run/thinframe/backdrop.png) with an iframe `status-line.html` that reloads.
+- Still visible: about 2 s of the dark cog background before the first paint (T+36, T+159 s), and about 6 s
+  of "Display output is not active" while the kiosk restarts cog (T+136 s): the splash can only take the
+  CRTC back after the old cog has exited.
+- `SHOW=1 sim/qemu/run.sh` opens the guest in a window on the Mac (cocoa); a click is a touch.

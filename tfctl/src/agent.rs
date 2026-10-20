@@ -229,7 +229,13 @@ impl Agent {
         }
         let path = std::env::var("TFCTL_STATUS_PAGE")
             .unwrap_or_else(|_| crate::statuspage::DEFAULT_PATH.into());
-        if let Err(e) = crate::statuspage::write(&path, &headline, &details) {
+        let bg_path = std::path::Path::new(&path).with_file_name("backdrop.png");
+        let backdrop = crate::splash::write_backdrop(&self.cfg, &bg_path.to_string_lossy())
+            .unwrap_or_else(|e| {
+                eprintln!("tfctl: agent: status backdrop: {e}");
+                None
+            });
+        if let Err(e) = crate::statuspage::write(&path, &headline, &details, backdrop.as_deref()) {
             eprintln!("tfctl: agent: status page: {e}");
         }
     }
