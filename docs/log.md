@@ -111,3 +111,21 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - The release job now restores and saves `image/cache/ccache` (THINFRAME_CCACHE, bind-mounted as
   /ccache) with `if: always()`. The build step has a 320 min limit so the save still runs inside the
   355 min job. A timed-out run therefore leaves a warm cache for the next dispatch [U until a second run passes].
+## 2026-10-20 M2 partial: the real image under `qemu-system-arm -M virt` (sim/qemu/run.sh)
+- `QEMU=1 image/build.sh rootfs` builds the variant (qemu.fragment: Mesa swrast + linux-qemu.fragment
+  with ARCH_VIRT, virtio-blk/net/gpu/input, PL011, PL031) into image/out/qemu/, own output tree.
+- `SERVER_URL=http://10.0.2.2:18090 FRAME_TOKEN=m2-token sim/qemu/run.sh`: kernel 7.2.10 boots,
+  `[drm] Initialized virtio_gpu 0.1.0 … on minor 0`, `tfctl: provision: 3 keys`, frame `sim-qemu`
+  appears in `/api/frames` (first_seen 12:22:18Z) [V]. Needs `-global virtio-mmio.force-legacy=false`:
+  on the legacy transport virtio-gpu and virtio-input never bind [V].
+- cog loads the dashboard ("Loaded successfully") and then dies with SIGSEGV every time with
+  `renderer=gles`, at rotation 3 and at rotation 0 [V]. With `renderer=modeset` it runs but
+  warns "does not support rotation 3", and page flips fail with "Permission denied" [V]. The screendump
+  stays "Display output is not active". QEMU here (Homebrew) has no virgl, so virtio-gpu only offers
+  kms_swrast on card0. The likely cause is WPE's buffer export with no real render node [U]. This tells
+  us nothing about lima, which has its own render node.
+- Because of this, cog's renderer is now a setting: `COG_RENDERER` in thinframe.conf, default `gles`
+  (the only one that rotates, cog 0.18.4 source [V]). `modeset` is the escape hatch if gles fails on
+  the panel [U, check at TASK 6].
+- M2 stays open: the screendump does not show the dashboard yet, and the A/B update inside virt is
+  not run (it passes on `-M orangepi-pc`, see TASK 12).

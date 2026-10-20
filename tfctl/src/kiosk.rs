@@ -1,6 +1,6 @@
 //! Run the browser and keep it alive. This is the OpenRC service's `command`.
 //!
-//! cog on DRM (`cog --platform=drm --platform-params=rotation=N URL`, or `cage -- cog
+//! cog on DRM (`cog --platform=drm --platform-params=renderer=gles,rotation=N URL`, or `cage -- cog
 //! --platform=wl URL`), restarted 3 s after it exits, 30 s after 5 fast failures. Commands from
 //! the agent thread arrive over an mpsc channel; the night-mode schedule is evaluated here once
 //! a minute so it keeps working through a server outage. SIGTERM is forwarded to cog.
@@ -70,6 +70,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
 pub struct Kiosk {
     url: String,
     platform: String,
+    renderer: String,
     rotation: u8,
     extra_args: Vec<String>,
     user: String,
@@ -95,6 +96,7 @@ impl Kiosk {
         Kiosk {
             url: cfg.url.clone(),
             platform: cfg.platform.clone(),
+            renderer: cfg.renderer.clone(),
             rotation: cfg.rotation,
             extra_args: cfg.extra_args.clone(),
             user: cfg.user.clone(),
@@ -130,7 +132,12 @@ impl Kiosk {
         } else {
             let mut c = Command::new("cog");
             c.arg("--platform=drm")
-                .arg(format!("--platform-params=rotation={}", self.rotation));
+                // Only the GLES renderer rotates; modeset ignores rotation (cog 0.18.4). COG_RENDERER
+                // picks: gles is the default, modeset is the escape hatch if gles fails on a GPU.
+                .arg(format!(
+                    "--platform-params=renderer={},rotation={}",
+                    self.renderer, self.rotation
+                ));
             c
         };
         c.args(&self.extra_args).arg(&self.url);
@@ -342,7 +349,7 @@ mod tests {
             args,
             [
                 "--platform=drm",
-                "--platform-params=rotation=1",
+                "--platform-params=renderer=gles,rotation=1",
                 "--x",
                 "http://s/frame/k"
             ]
@@ -352,6 +359,13 @@ mod tests {
         let c = Kiosk::new(&cfg).command();
         assert_eq!(c.get_program(), "cage");
         assert_eq!(c.get_args().next().unwrap(), "--");
+        cfg.platform = "drm".into();
+        cfg.renderer = "modeset".into();
+        let c = Kiosk::new(&cfg).command();
+        assert_eq!(
+            c.get_args().nth(1).unwrap(),
+            "--platform-params=renderer=modeset,rotation=1"
+        );
     }
 
     #[test]
