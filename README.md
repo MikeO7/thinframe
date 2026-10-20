@@ -13,10 +13,12 @@ The container speaks MCP, so Claude can manage frames in plain language. The dis
 process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
 compositor.
 
-Status: **stub.** The design is fixed and every file has its job written at the
-top. Nothing here has booted yet. `TASKS.md` is the ordered list of what is
-left, with a gate after each step. `CLAUDE.md` has the rules for whoever (or
-whatever) finishes it.
+Status: **built and tested off the frame, not yet on it.** The server, `tfctl` and the
+Buildroot card image are done. The image boots in QEMU (`-M orangepi-pc`: provisioning, A/B
+update and rollback), and the sim container renders the dashboard. Nothing has run on the
+PF1007L panel yet. `TASKS.md` lists what is left (sections 4 to 8 and 13 need the frame),
+with a gate after each step. `docs/log.md` has the evidence for every checked gate.
+`CLAUDE.md` has the rules for whoever (or whatever) finishes it.
 
 ## Why this exists
 
