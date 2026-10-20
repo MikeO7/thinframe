@@ -81,3 +81,10 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   names were escaped per byte (`My=20Net.psk`); iwd 3.0 `storage_get_network_file_path` keeps
   `[A-Za-z0-9 _-]` names as they are and hex-encodes the whole SSID otherwise (`=436166c3a9.psk`) [V,
   read in build/iwd-3.0/src/storage.c]. Fixed with round-trip tests. tfctl armv7 666,500 B.
+- TASK 2 DEBUG: `DEBUG=1 image/build.sh rootfs` builds `board/pf1007l/debug.fragment` in
+  `/br/output-debug` (Buildroot never uninstalls, so release builds stay clean) with version
+  `…-debug`. Image `2026.10.20-e4518e92-debug`: evtest 33,928 B, strace 6.13; QEMU boot test 16/16;
+  rootfs.ext4 still 199,229,440 B [V in QEMU]. i2c-tools was dropped by olddefconfig (needs
+  BUSYBOX_SHOW_OTHERS); BusyBox's i2c* applets cover it, and br-run.sh now stops when a fragment
+  option is dropped (tested by re-adding it). WebKit OOM-killed cc1plus again at 5 jobs
+  (GeneratedSerializers.cpp); the job budget is now 4.5 GB each, 3 jobs on 16 GB.

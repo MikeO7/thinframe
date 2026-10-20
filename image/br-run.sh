@@ -17,7 +17,7 @@ docker build -q -t thinframe-br -f "$HERE/Dockerfile.br" "$HERE" >/dev/null
 docker run --rm -i \
 	-v thinframe-br:/br -v thinframe-ccache:/ccache -v "$HERE/cache/dl":/dl -v "$ROOT":/src \
 	-e THINFRAME_VERSION -e BUILDROOT_VERSION -e TGZ -e JOBS="${JOBS:-}" \
-	-e THINFRAME_WORK=/src/image/work -e BRTARGET="${BRTARGET:-}" \
+	-e THINFRAME_WORK=/src/image/work -e BRTARGET="${BRTARGET:-}" -e DEBUG="${DEBUG:-0}" \
 	thinframe-br bash -euo pipefail -c '
 		BR=/br/buildroot-$BUILDROOT_VERSION
 		[ -f "$BR/Makefile" ] || tar -xJf "/src/image/cache/$TGZ" -C /br
@@ -25,12 +25,21 @@ docker run --rm -i \
 		if [ -f "$S/ssh_host_ed25519_key" ] && [ -d "$W" ]; then
 			dropbearconvert openssh dropbear "$S/ssh_host_ed25519_key" "$W/dropbear_ed25519_host_key" 2>/dev/null
 		fi
-		O=/br/output
+		O=/br/output; [ "$DEBUG" = 1 ] && O=/br/output-debug	# Buildroot never removes a package
 		make -s -C "$BR" O=$O BR2_EXTERNAL=/src/image/buildroot pf1007l_defconfig
+		if [ "$DEBUG" = 1 ]; then
+			cat /src/image/buildroot/board/pf1007l/debug.fragment >> $O/.config
+			make -s -C "$BR" O=$O olddefconfig
+			# olddefconfig drops options whose dependencies are unmet; refuse that silently shrinking.
+			for o in $(grep "^BR2_" /src/image/buildroot/board/pf1007l/debug.fragment); do
+				grep -qx "$o" $O/.config || { echo "STOP: debug.fragment: $o dropped by olddefconfig" >&2; exit 1; }
+			done
+		fi
 		make -s -C "$BR" O=$O tfctl-dirclean	# local package: always take the freshly staged binary
-		# WebKit needs ~2.8 GB per compile job; more jobs than that gets cc1plus OOM-killed.
+		# WebKit: ~4.5 GB per compile job. GeneratedSerializers.cpp alone OOM-killed cc1plus at 5 jobs
+		# in 16 GB (8 jobs failed earlier too); GitHub runners have 16 GB as well.
 		if [ -z "$JOBS" ]; then
-			JOBS=$(( $(awk "/MemTotal/ {print \$2}" /proc/meminfo) / 2800000 ))
+			JOBS=$(( $(awk "/MemTotal/ {print \$2}" /proc/meminfo) / 4500000 ))
 			[ "$JOBS" -ge 1 ] || JOBS=1; [ "$JOBS" -le "$(nproc)" ] || JOBS=$(nproc)
 		fi
 		echo "buildroot: $JOBS jobs"
