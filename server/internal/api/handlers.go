@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -247,18 +248,19 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	if f, err := s.Store.Get(id); err == nil && f.Last != nil {
 		s.recordHeartbeatSSE(f)
 	}
-	if s.opts.Weather != nil {
-		go s.pushWeather(id)
-	}
-	if s.opts.Calendar != nil {
-		go s.pushCalendar(id)
-	}
+	go s.pushData(id)
+	// The adapters cache for 10 minutes; refresh on that cadence so a page that stays
+	// open for days still shows current weather and calendar.
+	refresh := time.NewTicker(s.dataEvery)
+	defer refresh.Stop()
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-refresh.C:
+			go s.pushData(id)
 		case <-ping.C:
 			_, _ = io.WriteString(w, ": ping\n\n")
 			fl.Flush()
@@ -277,49 +279,74 @@ func (s *Server) recordHeartbeatSSE(f store.Frame) {
 	}})
 }
 
-func (s *Server) pushWeather(id string) {
+// weatherData is the weather widget's fields, shared by SSE and /api/data/weather.
+// A stale reading (fetch failed, cache still holds one) is shown rather than an error.
+func (s *Server) weatherData() map[string]any {
+	wx, err := s.opts.Weather.Current()
+	if err != nil && wx.Desc == "" {
+		return map[string]any{"temp": "", "desc": "weather unavailable"}
+	}
+	return map[string]any{"temp": strconv.Itoa(int(math.Round(wx.TempC))), "desc": strings.ToLower(wx.Desc)}
+}
+
+// calendarData is the calendar widget's fields, shared by SSE and /api/data/calendar.
+func (s *Server) calendarData(now time.Time) map[string]any {
+	evs, err := s.opts.Calendar.Upcoming(now, 3)
+	data := map[string]any{"l1": "", "l2": "", "l3": ""}
+	for i, e := range evs {
+		data["l"+strconv.Itoa(i+1)] = e.Line(now)
+	}
+	switch {
+	case err != nil && len(evs) == 0:
+		data["l1"] = "calendar unavailable"
+	case len(evs) == 0:
+		data["l1"] = "nothing coming up"
+	}
+	return data
+}
+
+// pushData publishes weather and calendar fields to every matching widget of a frame.
+func (s *Server) pushData(id string) {
 	f, err := s.Store.Get(id)
 	if err != nil {
 		return
 	}
+	var wx, cal map[string]any
 	for _, wdg := range f.Layout.Widgets {
-		if wdg.Type != "weather" {
-			continue
+		switch {
+		case wdg.Type == "weather" && s.opts.Weather != nil:
+			if wx == nil {
+				wx = s.weatherData()
+			}
+			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": wx})
+		case wdg.Type == "calendar" && s.opts.Calendar != nil:
+			if cal == nil {
+				cal = s.calendarData(time.Now())
+			}
+			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": cal})
 		}
-		wx, err := s.opts.Weather.Current()
-		if err != nil {
-			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": map[string]any{"desc": "weather unavailable"}})
-			continue
-		}
-		s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": map[string]any{
-			"temp": strconv.Itoa(int(wx.TempC + 0.5)), "desc": strings.ToLower(wx.Desc),
-		}})
 	}
 }
 
-func (s *Server) pushCalendar(id string) {
-	f, err := s.Store.Get(id)
-	if err != nil {
+// handleDataWeather serves GET /api/data/weather. The page never calls a third party:
+// the server fetches and caches, the page reads this or the SSE stream.
+func (s *Server) handleDataWeather(w http.ResponseWriter, _ *http.Request) {
+	if s.opts.Weather == nil {
+		http.Error(w, "no weather source configured (WEATHER_LAT, WEATHER_LON)", http.StatusNotFound)
 		return
 	}
-	now := time.Now()
-	for _, wdg := range f.Layout.Widgets {
-		if wdg.Type != "calendar" {
-			continue
-		}
-		evs, err := s.opts.Calendar.Upcoming(now, 3)
-		data := map[string]any{"l1": "", "l2": "", "l3": ""}
-		if err != nil && len(evs) == 0 {
-			data["l1"] = "calendar unavailable"
-		}
-		for i, e := range evs {
-			data["l"+strconv.Itoa(i+1)] = e.Line(now)
-		}
-		if err == nil && len(evs) == 0 {
-			data["l1"] = "nothing coming up"
-		}
-		s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": data})
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, s.weatherData())
+}
+
+// handleDataCalendar serves GET /api/data/calendar.
+func (s *Server) handleDataCalendar(w http.ResponseWriter, _ *http.Request) {
+	if s.opts.Calendar == nil {
+		http.Error(w, "no calendar source configured (CALENDAR_ICS_URL)", http.StatusNotFound)
+		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, s.calendarData(time.Now()))
 }
 
 func parseSize(s string) (int, int) {

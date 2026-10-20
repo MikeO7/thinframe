@@ -41,11 +41,13 @@ type Server struct {
 	mu    sync.Mutex
 	// offlineAfter marks a frame offline if no heartbeat for this long.
 	offlineAfter time.Duration
+	// dataEvery is how often an open SSE stream gets fresh weather and calendar data.
+	dataEvery time.Duration
 }
 
 // New wires a Server.
 func New(st *store.Store, opts Options) *Server {
-	s := &Server{Store: st, Hub: hub.New(), opts: opts, sse: newBroker(), offlineAfter: 3 * time.Minute}
+	s := &Server{Store: st, Hub: hub.New(), opts: opts, sse: newBroker(), offlineAfter: 3 * time.Minute, dataEvery: 10 * time.Minute}
 	s.Hub.OnClose = func(id string) {
 		_, _ = st.Update(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
 	}
@@ -60,6 +62,8 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("GET /frame/{id}", s.handleFramePage)
 	m.HandleFunc("GET /api/stream/{id}", s.handleSSE)
 	m.HandleFunc("GET /api/data/photo/next", s.handlePhotoNext)
+	m.HandleFunc("GET /api/data/weather", s.handleDataWeather)
+	m.HandleFunc("GET /api/data/calendar", s.handleDataCalendar)
 	m.HandleFunc("POST /api/frames/{id}/beacon", s.handleBeacon)
 	// Protected by token when set.
 	m.Handle("GET /api/frames", s.auth(http.HandlerFunc(s.handleList)))

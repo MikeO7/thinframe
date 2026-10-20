@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -17,9 +18,14 @@ type Weather struct {
 // WeatherSource provides current weather.
 type WeatherSource interface{ Current() (Weather, error) }
 
-// OpenMeteo is a free, keyless adapter. Cached 10 minutes.
+// OpenMeteoURL is the public forecast endpoint (free, no key).
+const OpenMeteoURL = "https://api.open-meteo.com/v1/forecast"
+
+// OpenMeteo is a keyless adapter, cached 10 minutes. On a failed fetch it returns
+// the last good reading (zero value if none) together with the error.
 type OpenMeteo struct {
 	Lat, Lon float64
+	BaseURL  string // empty = OpenMeteoURL; tests point it at an httptest server
 	mu       sync.Mutex
 	last     Weather
 	at       time.Time
@@ -33,24 +39,34 @@ var wmo = map[int]string{0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "
 func (o *OpenMeteo) Current() (Weather, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if time.Since(o.at) < 10*time.Minute {
+	if !o.at.IsZero() && time.Since(o.at) < 10*time.Minute {
 		return o.last, nil
 	}
-	url := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code", o.Lat, o.Lon)
+	base := o.BaseURL
+	if base == "" {
+		base = OpenMeteoURL
+	}
+	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code", base, o.Lat, o.Lon)
 	cl := http.Client{Timeout: 8 * time.Second}
 	resp, err := cl.Get(url)
 	if err != nil {
 		return o.last, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return o.last, fmt.Errorf("weather: %s", resp.Status)
+	}
 	var body struct {
-		Current struct {
+		Current *struct {
 			T    float64 `json:"temperature_2m"`
 			Code int     `json:"weather_code"`
 		} `json:"current"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return o.last, err
+	}
+	if body.Current == nil {
+		return o.last, fmt.Errorf("weather: response has no current block")
 	}
 	d := wmo[body.Current.Code]
 	if d == "" {
