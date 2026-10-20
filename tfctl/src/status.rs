@@ -53,12 +53,12 @@ pub fn collect() -> Status {
         st.mem_total_mb = total;
         st.mem_used_mb = used;
     }
-    st.ips = match spawn("ip", &["-4", "-o", "addr"]) {
-        Some(o) => parse_ip_addr(&o),
-        None => read("/proc/net/fib_trie")
-            .map(|t| parse_fib_trie(&t))
-            .unwrap_or_default(),
-    };
+    // /proc only (TASK 9: no shelling out except iwctl). The USB-C link's own address goes last,
+    // so `ips[0]` (heartbeat, status page) is the LAN one.
+    st.ips = read("/proc/net/fib_trie")
+        .map(|t| parse_fib_trie(&t))
+        .unwrap_or_default();
+    st.ips.sort_by_key(|ip| ip == crate::statuspage::USB_IP);
     st
 }
 
@@ -84,19 +84,6 @@ pub fn parse_meminfo(text: &str) -> (Option<u64>, Option<u64>) {
         total.map(|t| t / 1024),
         total.zip(avail).map(|(t, a)| t.saturating_sub(a) / 1024),
     )
-}
-
-/// `ip -4 -o addr`: "2: wlan0    inet 192.168.1.20/24 brd ... scope global wlan0"
-pub fn parse_ip_addr(text: &str) -> Vec<String> {
-    text.lines()
-        .filter(|l| !l.contains(" lo "))
-        .filter_map(|l| {
-            let mut it = l.split_whitespace();
-            it.position(|w| w == "inet")?;
-            it.next()
-                .map(|cidr| cidr.split('/').next().unwrap_or(cidr).to_string())
-        })
-        .collect()
 }
 
 /// /proc/net/fib_trie: local addresses sit on the line before a "/32 host LOCAL" marker.
@@ -217,9 +204,6 @@ mod tests {
 
     #[test]
     fn parses_ip_sources() {
-        let ip = "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever\n\
-                  2: wlan0    inet 192.168.1.20/24 brd 192.168.1.255 scope global wlan0\n";
-        assert_eq!(parse_ip_addr(ip), vec!["192.168.1.20"]);
         let trie = "Main:\n  +-- 0.0.0.0/0 3 0 5\n     |-- 127.0.0.1\n        /32 host LOCAL\n\
                     |-- 192.168.1.20\n        /32 host LOCAL\n     |-- 192.168.1.255\n        /32 link BROADCAST\n";
         assert_eq!(parse_fib_trie(trie), vec!["192.168.1.20"]);

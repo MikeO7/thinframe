@@ -34,6 +34,7 @@ curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application
 	-d '{"splash_text":"QEMU frame","splash_png":"'"$LOGO"'"}' "http://127.0.0.1:$PORT/api/frames/$ID/config" >/dev/null
 check "splash text and logo pushed by the server land on /data" \
 	wait_for 60 r 'grep -q "SPLASH_TEXT=\"QEMU frame\"" /etc/thinframe.conf && test -s /data/thinframe/splash.png'
+check "tfctl status reads its IP from /proc" r 'tfctl status | grep -q "^ip *: 10.0.2.15"'
 check "no syslogd/klogd/crond running" r '! ps -o comm | grep -qxE "syslogd|klogd|crond"'
 r 'ps -o pid,user,vsz,comm | grep -v "\[" ; free -m; df -h / /data /boot' > "$W/guest-state.txt" 2>&1 || true
 echo "rootfs.ext4: $(wc -c < "$HERE/out/rootfs.ext4") bytes" | tee -a "$RES"
