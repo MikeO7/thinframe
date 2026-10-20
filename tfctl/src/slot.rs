@@ -75,6 +75,8 @@ pub struct UEnv {
 
 impl UEnv {
     pub fn parse(text: &str) -> UEnv {
+        // U-Boot's `env export -t` ends the file with a NUL byte.
+        let text = text.trim_end_matches('\0');
         let get = |key: &str| {
             text.lines()
                 .map(str::trim)

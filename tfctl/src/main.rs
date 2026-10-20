@@ -3,7 +3,8 @@
 //! busybox + OpenRC only.
 //!
 //! Subcommands (see TASKS.md for which are done):
-//!   tfctl kiosk      run cog on DRM, restart on crash, run the agent thread (service entry point)
+//!   tfctl kiosk      run cog on DRM, restart on crash, run the agent thread (inittab respawn)
+//!   tfctl boot       per-boot setup from S90thinframe: provision, grow /data, hostname, USB DHCP
 //!   tfctl agent      control socket to the server alone (debugging; kiosk commands are logged)
 //!   tfctl update [--force]  software update from the server's config (the agent does this itself)
 //!   tfctl provision [--boot-dir D]  first boot: apply /boot/provision.txt, delete it (TASK 14)
@@ -22,6 +23,7 @@ use std::thread;
 
 mod agent;
 mod agent_cfg;
+mod boot;
 mod config;
 mod drm;
 mod font;
@@ -45,7 +47,7 @@ mod ws;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: tfctl <kiosk|agent|update [--force]|provision [--boot-dir D]|splash [TEXT]|\
+        "usage: tfctl <kiosk|boot|agent|update [--force]|provision [--boot-dir D]|splash [TEXT]|\
          wifi SSID PSK|status|set KEY VALUE>"
     );
     ExitCode::from(2)
@@ -75,6 +77,7 @@ fn main() -> ExitCode {
     };
     let result = match args.first().map(String::as_str) {
         Some("kiosk") => kiosk::run(&cfg),
+        Some("boot") => boot::run(&conf),
         Some("agent") => agent_alone(&cfg),
         Some("update") => update::run(&cfg, args.get(1).is_some_and(|a| a == "--force")),
         Some("provision") => provision::run(&args[1..]),

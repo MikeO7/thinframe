@@ -1,0 +1,8 @@
+auto lo
+iface lo inet loopback
+
+# USB-C recovery link (CDC ECM gadget, built into the kernel). udhcpd gives the Mac .1.
+auto usb0
+iface usb0 inet static
+	address 192.168.7.2
+	netmask 255.255.255.0

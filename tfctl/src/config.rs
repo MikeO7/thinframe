@@ -58,7 +58,7 @@ impl Default for Config {
             server_url: String::new(),
             frame_id: "frame".into(),
             poll_interval_s: 15,
-            fallback_url: "file:///var/lib/thinframe/www/status.html".into(),
+            fallback_url: "file:///run/thinframe/status.html".into(),
             brightness: 100,
             screen_off: String::new(),
             screen_on: String::new(),

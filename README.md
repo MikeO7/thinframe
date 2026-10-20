@@ -52,7 +52,7 @@ version (WPE, cog, kernel, mesa) is pinned in this repo and bumped on purpose.
  │  /api/frames/<id>/ws     │ <══ WebSocket ════> tfctl agent (Rust)      │
  │   push config + actions  │     heartbeats     │  (restart cog, reboot,   │
  │  /admin                  │                    │   rotation, update)      │
- │  /data volume (json)     │                    │ OpenRC sshd iwd dhcpcd   │
+ │  /data volume (json)     │                    │ BusyBox init dropbear iwd│
  └──────────────────────────┘                    └──────────────────────────┘
 ```
 
@@ -96,7 +96,7 @@ The frame's hardware is for the dashboard, not the OS. Hard limits, checked in T
 | Root filesystem | under 200 MB |
 | RAM used before cog starts | under 60 MB |
 | RAM used with the page up | under 300 MB |
-| Processes besides cog, OpenRC, sshd, iwd, dhcpcd, udev, seatd | none |
+| Processes besides cog, BusyBox init + getty, dropbear, iwd, dhcpcd, udevd, udhcpd (USB link) | none |
 | Custom code on the frame | one Rust binary, `tfctl`, under 1 MB, no shell helpers. Container is Go. |
 | Boot to page | under 20 s |
 | Touch to visible response | under 50 ms (one tap to a highlighted button) |

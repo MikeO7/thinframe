@@ -39,7 +39,14 @@ and add `aic8800` as a Buildroot kernel-module package. Phase one pins the same 
 ormarch tested; bumping is a one-line change once the frame is verified.
 
 ## BusyBox init instead of systemd
-Buildroot default. `/etc/init.d/S90thinframe` starts `tfctl kiosk`, which supervises cog itself; a BusyBox `inittab` respawn line restarts tfctl if it ever dies.
+Buildroot default. `/etc/inittab` respawns `tfctl kiosk`, which supervises cog itself (a software
+update exits tfctl and init starts the new binary). `/etc/init.d/S90thinframe` is one line,
+`tfctl boot`: provisioning, growing `/data`, hostname, the USB-C DHCP lease. The root is mounted
+read-only; `/data` (p4) holds `etc/thinframe.conf`, `ssh/` (dropbear host key + authorized_keys,
+bound over `/etc/dropbear`, which is also `~frame/.ssh`) and `iwd/`, bind-mounted from fstab.
+Logs, dhcpcd leases and the status page live in RAM (`/tmp`, `/run`). No syslogd, klogd, cron.
+Kernel console is `ttyGS0` (USB-C CDC ACM, built in with CDC ECM `usb0` = 192.168.7.2); the panel
+never shows console text (`FRAMEBUFFER_CONSOLE` off).
 
 ## SSH key only, user `frame`, no sudo at all
 Dropbear, key-only. tfctl runs as root for DRM, backlight, clock and updates; there is nothing else to escalate to. Host key generated once into `image/secrets/` so re-flashing a card

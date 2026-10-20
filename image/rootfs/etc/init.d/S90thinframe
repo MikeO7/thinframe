@@ -1,0 +1,5 @@
+#!/bin/sh
+# The only init script we own. Per-boot setup (provisioning, data growth, hostname, USB link)
+# is `tfctl boot`; the kiosk itself is the respawn line in /etc/inittab.
+[ "$1" = start ] && exec /usr/bin/tfctl boot
+exit 0

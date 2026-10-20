@@ -50,8 +50,9 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] `image/build.sh assemble`: MBR sig `50463037`, U-Boot at 8 KiB, p1 FAT32 `PFBOOT` 256 MiB
       (`zImage.a`, DTBs, `extlinux/extlinux.conf` with labels a/b, `boot.scr`, `uEnv.txt` with
       `slot=a tries=0`), p2 ext4 `rootA` 1 GiB, p3 ext4 `rootB` 1 GiB (empty), p4 ext4 `data` to end.
-- [ ] Root mounts read-only; `/etc/thinframe.conf`, `/etc/ssh`, `/var/lib/iwd`, `/var/log`,
-      `/var/lib/thinframe` are bind mounts from `data` (fstab in the overlay).
+- [ ] Root mounts read-only; `/etc/thinframe.conf`, `/etc/dropbear`, `/var/lib/iwd` are bind
+      mounts from `data` (fstab in the overlay). Logs and the status page stay in RAM
+      (decisions.md "BusyBox init"); the fallback `www/` is part of the root and of the overlay.
 - [ ] First boot grows p4 (not the root) to the card.
 - [ ] `image/build.sh bundle` also emits `system-<ver>.tar` (zImage, rootfs.ext4.zst, sha256,
       version.json) for the container to ship.
@@ -144,7 +145,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (Done: background + centred text line, SPLASH_BG/SPLASH_TEXT, rotation, kiosk draws it before cog and
       holds "cog missing" if cog is absent; PNG decoder (tfctl/src/png.rs, own inflate, 8-bit non-interlaced) blends
       `/etc/thinframe/splash.png` above the text; tfctl/src/{drm,splash,font,png}.rs. Pending: ship a logo, hardware check.)
-- [ ] Local status page (`/var/lib/thinframe/www/status.html`) shows the same logo and live text:
+- [ ] Local status page (`/run/thinframe/status.html`) shows the same logo and live text:
       "joining <ssid>", "reaching <server>", IP, then hands over to the dashboard.
 - [ ] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
       the logo; tfctl writes them to the data partition.

@@ -116,11 +116,12 @@ impl Targets {
     }
 }
 
-/// Add `key` to an authorized_keys file (dir 0700, file 0600) unless it is already there.
+/// Add `key` to an authorized_keys file (dir 0755, file 0644, root-owned) unless it is already
+/// there. Dropbear opens the file as the logging-in user, and refuses group/world-writable ones.
 pub fn add_authorized_key(path: &Path, key: &str) -> io::Result<()> {
     let dir = path.parent().unwrap();
     fs::create_dir_all(dir)?;
-    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o755))?;
     let mut cur = fs::read_to_string(path).unwrap_or_default();
     if cur.lines().any(|l| l.trim() == key.trim()) {
         return Ok(());
@@ -131,7 +132,7 @@ pub fn add_authorized_key(path: &Path, key: &str) -> io::Result<()> {
     cur.push_str(key.trim());
     cur.push('\n');
     fs::write(path, cur)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644))
 }
 
 /// Apply `provision.txt` if present. Returns false when there was nothing to do.
@@ -281,7 +282,7 @@ mod tests {
             );
             assert_eq!(
                 fs::metadata(keys).unwrap().permissions().mode() & 0o777,
-                0o600
+                0o644
             );
             assert_eq!(
                 fs::metadata(keys.parent().unwrap())
@@ -289,7 +290,7 @@ mod tests {
                     .permissions()
                     .mode()
                     & 0o777,
-                0o700
+                0o755
             );
         }
         assert_eq!(fs::read_to_string(&t.hostname_file).unwrap(), "kitchen\n");
