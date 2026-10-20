@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(inflate(DYNAMIC, 1 << 20).unwrap(), text());
         assert_eq!(inflate(FIXED, 1 << 20).unwrap(), text());
         let mut s = STORED.to_vec();
-        s.truncate(0);
+        s.clear();
         s.extend_from_slice(&[1, 5, 0, 0xfa, 0xff]);
         s.extend_from_slice(b"hello");
         assert_eq!(inflate(&s, 100).unwrap(), b"hello");

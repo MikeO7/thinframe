@@ -190,6 +190,21 @@ pub fn rollback(p: &Paths) -> io::Result<Slot> {
     Ok(target)
 }
 
+/// Version the automatic path last wrote to the standby slot (`/data/thinframe/system-attempt`).
+/// If we are not running it, that boot failed and U-Boot rolled back: never auto-retry it, or a
+/// broken bundle would be flashed again on every boot. The `update-system` action still can.
+pub fn attempted(p: &Paths) -> Option<String> {
+    fs::read_to_string(p.data.join("system-attempt"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+pub fn mark_attempt(p: &Paths, version: &str) -> io::Result<()> {
+    fs::create_dir_all(&p.data)?;
+    fs::write(p.data.join("system-attempt"), format!("{version}\n"))
+}
+
 /// On every agent connect: if U-Boot is still counting tries for the slot we booted from,
 /// the slot works; write `tries=0` and report it.
 pub fn confirm_slot(p: &Paths) -> Option<(String, String)> {

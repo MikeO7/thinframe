@@ -1,7 +1,9 @@
-# STUB (TASK 2): Buildroot build container. dl/ and ccache are bind-mounted by build.sh.
+# Buildroot build container (TASK 2). Native arch of the Docker host (arm64 on a Mac): Buildroot
+# cross-compiles, so no armv7 emulation is involved. Source, output and ccache live on volumes.
 FROM debian:trixie-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git wget cpio unzip rsync bc file python3 libncurses-dev \
-    ca-certificates xz-utils bzip2 genimage zstd u-boot-tools \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential bc bzip2 ca-certificates cpio debianutils diffutils dropbear-bin file \
+    findutils git gzip libncurses-dev mtools patch perl python3 rsync sed tar unzip wget xz-utils zstd \
  && rm -rf /var/lib/apt/lists/*
-WORKDIR /work
+ENV LANG=C.UTF-8 FORCE_UNSAFE_CONFIGURE=1 BR2_DL_DIR=/dl
+WORKDIR /br

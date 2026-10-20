@@ -41,3 +41,26 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   `cd server && gofmt -l .` → empty; `go vet ./...` → clean; `go test -count=1 -race ./...` → 6 packages ok
   (15 tests in internal/api); new tests passed `-count=20 -race`. `server/static/index.html` still loads
   picsum.photos but no route serves it [V, read in server.go]; left in place.
+- TASK 2: first full Buildroot build on the Mac (Podman VM, 8 CPU, 16 GB): 65 min warm-start after
+  the toolchain; WPE WebKit 2.50.5 OOM-killed cc1plus at 8 jobs, passes at 5 (`br-run.sh` now runs one
+  job per 2.8 GB of RAM). `rootfs.ext4` 199,229,440 B (190 MiB ext4, about 180 MiB used, 174 MiB of
+  files; largest: libWPEWebKit 65 MiB, libicudata 31 MiB) [V]. tfctl armv7 654,940 B.
+- TASK 3: `image/build.sh assemble`: self-check 11/11 PASS (MBR 0x50463037, U-Boot L byte-equal at
+  8 KiB, eGON header, p1 FAT32 PFBOOT 256 MiB at 4 MiB, 1 GiB rootA/rootB, ext4 magic, data label).
+  The first run caught p1 formatted FAT16 under an 0x0c entry; now `mkfs.fat -F 32 -s 4 -h 8192`
+  exactly as ormarch's assemble. `thinframe-sd.img` sha256 `91be0cab…ad6a` [V].
+- TASK 2/3 QEMU gate (`image/build.sh test`, orangepi-pc, QEMU U-Boot at 8 KiB of a copy, kernel
+  built here): 14/14 PASS, login prompt in 20 to 25 s under TCG; our boot.scr ran (slot a, tries 0);
+  dropbear key login as `frame`; 7.2.10; root ro ext4; /boot vfat ro; /data grew to 1788 MiB of a
+  4 GiB card; provision.txt applied and deleted; hostname = frame id; `tfctl kiosk` under init;
+  frame registered with a frameserver on the Mac; no syslogd/klogd/crond. 28 MiB used of 1002 (no
+  cog: the QEMU board has no panel) [V in QEMU; the frame itself is TASK 4]. Fixed on the way: config
+  writes failed with EROFS (rename next to a file bind mount), so `/etc/thinframe.conf` is now a
+  symlink into /data; BusyBox `S50crond` and `S01seedrng` removed; the test used `pgrep`, which this
+  BusyBox lacks. Output: image/out/qemu-test.txt.
+- TASK 12 rollback gate (`image/build.sh abtest`), server-driven only: A (slot a) → B written to slot
+  b, `tries left 2`, `frame:slot-confirmed` → BAD (no /sbin/init, /bin/sh) written to slot a: kernel
+  `No working init found` twice (`tries left 2`, `1`), panic=10 reboot, U-Boot flipped to b (`slot b,
+  tries left 0`), B reports from b again, agent emits `frame:system-update-skipped` and does not
+  re-flash BAD → C written to slot a and reports from a. 10/10 PASS [V in QEMU]. Output:
+  image/out/qemu-ab-test.txt.

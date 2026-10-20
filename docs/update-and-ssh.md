@@ -4,36 +4,34 @@ New frame? Start at [flashing.md](flashing.md). This page is for after that.
 
 ## Paths in
 1. Wi-Fi: `ssh frame@<frame name>` (hostname = FRAME_ID, router DNS) or the IP shown in `/admin`.
-   Key: `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh`.
-2. USB-C data cable to the Mac: the frame appears as a USB Ethernet device. Frame is
-   192.168.7.2, Mac side gets 192.168.7.1 via the frame's dhcpd. `ssh frame@192.168.7.2`.
-   Also a USB serial console: `screen /dev/tty.usbmodem* 115200`.
-3. Pull the card: p1 is FAT32, readable on the Mac. Edit `extlinux.conf` or `uEnv.txt` there.
+   Key: `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh` (or
+   `image/secrets/frame_id_ed25519` for a local build). Dropbear, key only, no root login. [U]
+2. USB-C data cable to the Mac: the kernel's built-in CDC gadget gives a USB Ethernet device
+   (frame 192.168.7.2, the Mac gets 192.168.7.1 from the frame's udhcpd) and a serial console
+   on `ttyGS0`: `ssh frame@192.168.7.2`, or `screen /dev/tty.usbmodem* 115200`. [U]
+3. Pull the card: p1 (`PFBOOT`) is FAT32, readable on the Mac: `uEnv.txt` (slot, tries,
+   `pf_mode`), `extlinux/slot-a.conf` / `slot-b.conf`, and `provision.txt` (dropped there by
+   `flash.sh --settings-only`, applied and deleted on the next boot).
+
+`frame` is an ordinary user: there is no sudo or doas on the image. Everything that changes the
+frame goes through the server (config, actions, updates), `provision.txt`, or a new card.
 
 ## Changing the page
-- Fast loop, no Git: `scripts/deploy.sh frame@thinframe` copies `www/`, `image/rootfs/` and a
-  freshly built `tfctl` to the frame over ssh/tar and restarts the service.
-- Proper: push to `main`, then on the frame `doas tfctl update`. It fetches the main tarball, applies it, restarts.
+Edit `server/static/` or the layout in `/admin`; the frame follows on its control socket.
+The frame's own `www/` is only the offline fallback.
 
 ## Changing config
-`/etc/thinframe.conf` on the frame (source of truth: `image/rootfs/etc/thinframe.conf`):
-
-```
-FRAME_URL="file:///var/lib/thinframe/www/index.html"
-COG_PLATFORM="drm"
-COG_ROTATION="3"          # quarter turns; verify on hardware
-COG_EXTRA_ARGS=""
-```
-
-`rc-service thinframe restart` after edits.
+`/etc/thinframe.conf` is a symlink to the data partition (`/data/etc/thinframe.conf`) and
+written by `tfctl` (config pushed from the server, `provision.txt`, `tfctl set` as root). The
+image default is `image/rootfs/etc/thinframe.conf`.
 
 ## Wi-Fi
-`doas tfctl wifi "My SSID" "passphrase"` writes an iwd profile and reconnects. Profiles live in
-`/var/lib/iwd/`. Remove one to forget it.
+Put `WIFI_SSID`/`WIFI_PSK` in `provision.txt` on PFBOOT and reboot, or (as root) `tfctl wifi
+"My SSID" "passphrase"`. Profiles live in `/var/lib/iwd/` (bound from `/data/iwd`).
 
 ## Debug
-- `tfctl status` : uptime, IP, memory, cog pid, URL.
-- `rc-service thinframe status`, `tail /var/log/thinframe.log`
-- `evtest` for touch, `dmesg | grep -E 'panel|silead|aic'` for drivers.
-- Safe mode: rename `extlinux/extlinux.conf` on p1 to use the `-min` DTB entry to get a
-  console only.
+- `tfctl status`: uptime, IP, memory, cog pid, URL.
+- `/var/log/thinframe.log` (RAM): tfctl and cog output. `dmesg` for drivers
+  (`dmesg | grep -E 'panel|dsi|silead|aic'`).
+- Console-only rescue: in `extlinux/slot-a.conf` on PFBOOT, change `DEFAULT thinframe` to
+  `DEFAULT min` (minimal DTB, kernel messages on the USB serial port).

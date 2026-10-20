@@ -4,7 +4,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-pub const DEFAULT_PATH: &str = "/var/lib/thinframe/www/status.html";
+/// On tmpfs: the root file system is read-only.
+pub const DEFAULT_PATH: &str = "/run/thinframe/status.html";
 
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")

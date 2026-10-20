@@ -1,0 +1,2 @@
+# Key-only (-s), no root login (-w). Host key and authorized_keys live on /data/ssh.
+DROPBEAR_ARGS="-s -w"

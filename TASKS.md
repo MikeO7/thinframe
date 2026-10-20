@@ -29,17 +29,17 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: `ls image/work/inputs` shows every file in the list above; hashes match a second run.
 
 ## 2. Buildroot image (Docker, cross-compile; no armv7 emulation needed)
-- [ ] `image/buildroot/` is a BR2_EXTERNAL tree: `external.desc`, `Config.in`, `external.mk`,
+- [x] `image/buildroot/` is a BR2_EXTERNAL tree: `external.desc`, `Config.in`, `external.mk`,
       `configs/pf1007l_defconfig`, `board/pf1007l/{linux.config,linux.fragment,patches/,dts/,
       rootfs-overlay -> ../../rootfs,post-image.sh,genimage.cfg,uboot/}`, `package/aic8800/`
       (kernel module package from the radxa source ormarch pinned), `package/tfctl/` (installs the
       prebuilt armv7 binary from tfctl/).
-- [ ] Defconfig: arm cortex-a7 neon-vfpv4 musl, BusyBox init, mainline kernel pinned to the ormarch
+- [x] Defconfig: arm cortex-a7 neon-vfpv4 musl, BusyBox init, mainline kernel pinned to the ormarch
       7.2.x tag with the panel patch + DTS, mesa3d (lima, gbm, egl, gles), libdrm, libinput, eudev,
       wpewebkit (no wayland), cog with `BR2_PACKAGE_COG_PLATFORM_DRM`, iwd, dhcpcd, dropbear,
       e2fsprogs (resize2fs), zstd, ca-certificates, font (DejaVu or Noto), tzdata. No X, no
-      wayland, no dbus, no systemd.
-- [ ] `image/build.sh` runs Buildroot in a Docker container (`image/Dockerfile.br`) with `dl/` and
+      wayland, no systemd (dbus only because iwd needs it).
+- [x] `image/build.sh` runs Buildroot in a Docker container (`image/Dockerfile.br`) with `dl/` and
       `ccache` on bind-mounted volumes so rebuilds take minutes. First build: 1 to 3 h.
 - [ ] Touch firmware: `PF1007L_TOUCH_FIRMWARE` copied into the overlay at build time, never committed.
 - [ ] DEBUG fragment adds evtest, libinput-tools, i2c-tools, strace.
@@ -47,15 +47,16 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
   kernel built here) boots to a login prompt and dropbear answers.
 
 ## 3. Assemble the card image (A/B layout, see decisions.md)
-- [ ] `image/build.sh assemble`: MBR sig `50463037`, U-Boot at 8 KiB, p1 FAT32 `PFBOOT` 256 MiB
+- [x] `image/build.sh assemble`: MBR sig `50463037`, U-Boot at 8 KiB, p1 FAT32 `PFBOOT` 256 MiB
       (`zImage.a`, DTBs, `extlinux/extlinux.conf` with labels a/b, `boot.scr`, `uEnv.txt` with
       `slot=a tries=0`), p2 ext4 `rootA` 1 GiB, p3 ext4 `rootB` 1 GiB (empty), p4 ext4 `data` to end.
-- [ ] Root mounts read-only; `/etc/thinframe.conf`, `/etc/ssh`, `/var/lib/iwd`, `/var/log`,
-      `/var/lib/thinframe` are bind mounts from `data` (fstab in the overlay).
-- [ ] First boot grows p4 (not the root) to the card.
-- [ ] `image/build.sh bundle` also emits `system-<ver>.tar` (zImage, rootfs.ext4.zst, sha256,
+- [x] Root mounts read-only; `/etc/dropbear`, `/var/lib/iwd` are bind mounts from `data` (fstab in
+      the overlay), `/etc/thinframe.conf` a symlink to `/data/etc/thinframe.conf`. Logs and the status page stay in RAM
+      (decisions.md "BusyBox init"); the fallback `www/` is part of the root and of the overlay.
+- [x] First boot grows p4 (not the root) to the card.
+- [x] `image/build.sh rootfs` (post-image.sh) also emits `system-<ver>.tar` (zImage, rootfs.ext4.zst, sha256,
       version.json) for the container to ship.
-- [ ] boot.scr: read `slot`/`tries` from `uEnv.txt`; if `tries>0` decrement and write back; if it hits
+- [x] boot.scr: read `slot`/`tries` from `uEnv.txt`; if `tries>0` decrement and write back; if it hits
       0, flip slot. (ormarch's boot.scr has the counter/state-file machinery; extend, don't rewrite.)
 - Gate: image self-check in `build.sh` passes; `image/out/thinframe-sd.img.sha256` written.
 
@@ -115,7 +116,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (tfctl/src/sysupdate.rs + slot.rs; `dd` only to the disk with MBR signature 50463037. Hardware unverified.)
 - [x] First heartbeat after boot writes `tries=0` (slot good) and reports `slot`, `system_version`.
       (On every agent connect: `confirm_slot`, event `slot-confirmed`. `/etc/thinframe.system-version` must be in the image.)
-- [ ] Rollback test in sim qemu mode: ship a bundle with a broken init, watch U-Boot flip back after 3 tries.
+- [x] Rollback test in sim qemu mode: ship a bundle with a broken init, watch U-Boot flip back after 3 tries.
 - Gate: sim qemu frame goes 2026.10.a → .b → rollback → .c with no manual steps.
 
 ## 14. Flashing must be three steps (docs/flashing.md is the spec)
@@ -144,7 +145,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (Done: background + centred text line, SPLASH_BG/SPLASH_TEXT, rotation, kiosk draws it before cog and
       holds "cog missing" if cog is absent; PNG decoder (tfctl/src/png.rs, own inflate, 8-bit non-interlaced) blends
       `/etc/thinframe/splash.png` above the text; tfctl/src/{drm,splash,font,png}.rs. Pending: ship a logo, hardware check.)
-- [ ] Local status page (`/var/lib/thinframe/www/status.html`) shows the same logo and live text:
+- [ ] Local status page (`/run/thinframe/status.html`) shows the same logo and live text:
       "joining <ssid>", "reaching <server>", IP, then hands over to the dashboard.
 - [ ] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
       the logo; tfctl writes them to the data partition.

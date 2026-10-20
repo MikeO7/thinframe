@@ -1,7 +1,7 @@
 //! Write an iwd profile and reconnect (TASK 7).
 //!   /var/lib/iwd/<SSID>.psk, mode 0600:
 //!     [Security]\nPassphrase=<psk>\n\n[Settings]\nAutoConnect=true\n
-//!   then `rc-service iwd restart`, `iwctl station wlan0 connect <SSID>`, print `iwctl ... show`.
+//!   then `/etc/init.d/S40iwd restart`, `iwctl station wlan0 connect <SSID>`, print `iwctl ... show`.
 use std::fs;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
@@ -55,7 +55,7 @@ pub fn run(ssid: &str, psk: &str) -> io::Result<()> {
         ));
     }
     write_profile(Path::new(IWD_DIR), ssid, psk)?;
-    sh("rc-service", &["iwd", "restart"])?;
+    sh("/etc/init.d/S40iwd", &["restart"])?;
     std::thread::sleep(std::time::Duration::from_secs(2));
     sh("iwctl", &["station", STATION, "connect", ssid])?;
     print!("{}", sh("iwctl", &["station", STATION, "show"])?);

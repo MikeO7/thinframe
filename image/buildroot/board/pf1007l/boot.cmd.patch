@@ -1,0 +1,26 @@
+--- a/boot.cmd
++++ b/boot.cmd
+@@ -30,6 +30,23 @@
+ 	env import -t -r ${ramdisk_addr_r} ${filesize}
+ fi
+ 
++# thinframe A/B (TASK 3). uEnv.txt carries slot=a|b and tries=N. tfctl sets tries=3 after it
++# writes the standby slot, and tries=0 once the new slot is up. Each start here spends one try;
++# the start that spends the last one boots the other slot. pf_mode=linux in uEnv.txt keeps the
++# USB disk fallback below for an explicit pf_mode=ums only.
++if test -z "${slot}"; then setenv slot a; fi
++if test -z "${tries}"; then setenv tries 0; fi
++if test ${tries} -gt 0; then
++	setexpr tries ${tries} - 1
++	if test ${tries} -eq 0; then
++		if test "${slot}" = "a"; then setenv slot b; else setenv slot a; fi
++	fi
++	env export -t ${ramdisk_addr_r} slot tries pf_mode
++	fatwrite mmc 0:1 ${ramdisk_addr_r} /uEnv.txt ${filesize}
++fi
++setenv pf_extlinux /extlinux/slot-${slot}.conf
++echo "thinframe: slot ${slot}, tries left ${tries}"
++
+ # Did Linux confirm the last start? It copies pf_boots into pf_ok.
+ setenv pf_prev_ok no
+ if test "${pf_ok}" = "${pf_boots}"; then setenv pf_prev_ok yes; fi

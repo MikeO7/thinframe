@@ -160,6 +160,11 @@ impl Agent {
             .name("sysupdate".into())
             .spawn(move || {
                 let res = sysupdate::system(&cfg, &arts, &ver, &paths);
+                if res.is_ok() {
+                    if let Err(e) = sysupdate::mark_attempt(&paths, &ver) {
+                        eprintln!("tfctl: agent: {e}");
+                    }
+                }
                 let (kind, text) = match &res {
                     Ok(slot) => (
                         "system-update",
@@ -195,8 +200,17 @@ impl Agent {
         }
         let want = self.system_version.clone();
         if let Some(have) = sysupdate::system_version(&self.paths) {
+            let failed_before = sysupdate::attempted(&self.paths).as_deref() == Some(&want);
+            if failed_before && !self.tried.contains(&want) {
+                self.tried.push(want.clone());
+                self.event(
+                    "system-update-skipped",
+                    &format!("{want} was written before and did not boot; not retrying"),
+                );
+            }
             if !want.is_empty()
                 && have != want
+                && !failed_before
                 && !self.tried.contains(&want)
                 && self.artifacts.get("system").is_ok()
                 && !self.busy.load(Ordering::SeqCst)
@@ -334,6 +348,44 @@ mod tests {
             )
             .unwrap_err();
         assert!(!a.exit, "{e}");
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn rolled_back_system_version_is_not_flashed_again() {
+        let (mut a, _rx, _) = agent("rollback");
+        let base = std::env::temp_dir().join(format!("tfctl-rb-{}", std::process::id()));
+        a.paths = update::Paths::under(&base);
+        std::fs::create_dir_all(base.join("root/etc")).unwrap();
+        std::fs::write(
+            base.join("root/etc/thinframe.system-version"),
+            "2026.10.a\n",
+        )
+        .unwrap();
+        sysupdate::mark_attempt(&a.paths, "2026.10.b").unwrap();
+        let sum = "c".repeat(64);
+        a.apply_config(
+            &json::parse(&format!(
+                r#"{{"system_version":"2026.10.b","artifacts":{{"system":"system-2026.10.b.tar:{sum}"}}}}"#
+            ))
+            .unwrap(),
+        );
+        a.maybe_auto_update();
+        assert!(
+            !a.busy.load(Ordering::SeqCst),
+            "must not start a second flash"
+        );
+        assert!(a.tried.contains(&"2026.10.b".to_string()));
+        let ev = a.events.lock().unwrap().clone();
+        assert!(
+            ev.iter().any(|(k, _)| k == "system-update-skipped"),
+            "{ev:?}"
+        );
+        // Reported once, not on every config push.
+        a.maybe_auto_update();
+        let n = a.events.lock().unwrap().len();
+        assert_eq!(n, ev.len());
+        let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_file(&a.conf_path);
     }
 

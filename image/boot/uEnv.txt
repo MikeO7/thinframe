@@ -1,5 +1,3 @@
-# Read and rewritten by boot.scr (ormarch U-Boot build L) and by tfctl. Plain name=value lines.
 slot=a
 tries=0
-# pf_mode=auto | linux | ums   (ums = present the card to the Mac as a USB disk)
-#pf_mode=auto
+pf_mode=linux

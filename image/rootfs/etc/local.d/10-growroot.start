@@ -1,9 +1,0 @@
-#!/bin/sh
-# First boot: grow the data partition (p4) to the end of the card, then disable this script.
-set -e
-DEV=/dev/mmcblk0
-[ -b ${DEV}p4 ] || exit 0
-echo ", +" | sfdisk --no-reread -N 4 $DEV >/dev/null 2>&1 || true
-partx -u $DEV 2>/dev/null || true
-resize2fs ${DEV}p4 >/dev/null 2>&1 || true
-chmod -x "$0"
