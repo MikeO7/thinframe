@@ -12,7 +12,7 @@ concurrency: { group: release, cancel-in-progress: false }
 jobs:
   image:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 355
     outputs: { version: "${{ steps.ver.outputs.version }}" }
     steps:
       - uses: actions/checkout@v7
@@ -29,6 +29,13 @@ jobs:
           path: image/cache/dl
           key: br-dl-${{ hashFiles('image/build.sh', 'image/buildroot/configs/*') }}
           restore-keys: br-dl-
+      # A cold build (WebKit on 4 cores) does not fit in one 6 h job. ccache is saved even when the
+      # build step times out, so the next run (re-dispatch, or next week) resumes from it.
+      - uses: actions/cache/restore@v4
+        with:
+          path: image/cache/ccache
+          key: br-ccache-${{ github.run_id }}
+          restore-keys: br-ccache-
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: armv7-unknown-linux-musleabihf }
       - uses: actions/setup-go@v7
@@ -37,7 +44,14 @@ jobs:
           pip install cargo-zigbuild
           sudo apt-get update -q && sudo apt-get install -y -q qemu-system-arm zstd
       - name: build (no keys in release images)
+        timeout-minutes: 320
+        env: { THINFRAME_CCACHE: "${{ github.workspace }}/image/cache/ccache" }
         run: RELEASE=1 THINFRAME_VERSION="${{ steps.ver.outputs.version }}" image/build.sh all
+      - if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: image/cache/ccache
+          key: br-ccache-${{ github.run_id }}
       - name: QEMU boot test of the real image
         run: image/build.sh test
       - run: |
