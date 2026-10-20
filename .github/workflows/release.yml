@@ -10,14 +10,29 @@ on:
   workflow_dispatch:
 concurrency: { group: release, cancel-in-progress: false }
 jobs:
-  image:
+  # Tag first, while GITHUB_SHA is still the tip of main. GITHUB_TOKEN may not create a ref on a
+  # commit whose workflow files differ from main (it lacks the workflows permission), so tagging
+  # after the 5 h build failed with a 403 once a workflow change had merged meanwhile (2026-10-20).
+  tag:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    permissions: { contents: write }
     outputs: { version: "${{ steps.ver.outputs.version }}" }
     steps:
-      - uses: actions/checkout@v7
       - id: ver
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME}"; else v="v$(date -u +%Y.%m.%d)"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$v" >/dev/null 2>&1 ||
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$v" -f sha="$GITHUB_SHA" >/dev/null
+
+  image:
+    needs: tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    outputs: { version: "${{ needs.tag.outputs.version }}" }
+    steps:
+      - uses: actions/checkout@v7
           if [ "${GITHUB_REF_TYPE}" = tag ]; then v="${GITHUB_REF_NAME}"; else v="v$(date -u +%Y.%m.%d)"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: free disk for Buildroot (WebKit needs ~20 GB)
@@ -46,7 +61,7 @@ jobs:
       - name: build (no keys in release images)
         timeout-minutes: 320
         env: { THINFRAME_CCACHE: "${{ github.workspace }}/image/cache/ccache" }
-        run: RELEASE=1 THINFRAME_VERSION="${{ steps.ver.outputs.version }}" image/build.sh all
+        run: RELEASE=1 THINFRAME_VERSION="${{ needs.tag.outputs.version }}" image/build.sh all
       - if: always()
         uses: actions/cache/save@v4
         with:
@@ -115,7 +130,7 @@ jobs:
       - env: { GH_TOKEN: "${{ github.token }}", V: "${{ needs.image.outputs.version }}" }
         run: |
           gh release view "$V" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
-            gh release create "$V" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$V" \
+            gh release create "$V" -R "$GITHUB_REPOSITORY" --title "$V" \
               --notes "Card image for flash.sh and A/B system bundle. QEMU test: see qemu-test.txt."
           gh release upload "$V" -R "$GITHUB_REPOSITORY" --clobber out/thinframe-sd.img.zst \
             out/thinframe-sd.img.zst.sha256 out/system-*.tar out/system.sha256 out/qemu-test.txt
