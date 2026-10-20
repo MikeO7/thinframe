@@ -1,0 +1,5 @@
+# DEBUG=1 image/build.sh rootfs: tools for bring-up (TASK 2). Built in its own output tree,
+# so a release build never carries them. Every image already has libinput's C tools
+# (libinput debug-events, list-devices) and BusyBox i2cdetect/i2cdump/i2cget/i2cset.
+BR2_PACKAGE_EVTEST=y
+BR2_PACKAGE_STRACE=y

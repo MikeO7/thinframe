@@ -42,7 +42,9 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] `image/build.sh` runs Buildroot in a Docker container (`image/Dockerfile.br`) with `dl/` and
       `ccache` on bind-mounted volumes so rebuilds take minutes. First build: 1 to 3 h.
 - [ ] Touch firmware: `PF1007L_TOUCH_FIRMWARE` copied into the overlay at build time, never committed.
-- [ ] DEBUG fragment adds evtest, libinput-tools, i2c-tools, strace.
+- [x] DEBUG fragment adds evtest, libinput-tools, i2c-tools, strace.
+      (`DEBUG=1 image/build.sh rootfs`, own output tree, version `-debug`: evtest + strace; libinput
+      tools and BusyBox i2c* are in every image; i2c-tools itself needs BUSYBOX_SHOW_OTHERS.)
 - Gate: `output/images/rootfs.ext4` under 200 MB; QEMU (vexpress or orangepi-pc board with the
   kernel built here) boots to a login prompt and dropbear answers.
 
