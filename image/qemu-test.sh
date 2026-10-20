@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016  # guest commands are single-quoted on purpose
+# shellcheck disable=SC2016,SC2119  # guest commands are single-quoted on purpose; start_server takes an optional dir
 # QEMU boot test of the real card image (TASK 2 gate). Harness: image/qemu-lib.sh.
 # Result: image/out/qemu-test.txt. No sudo, no devices.
 set -euo pipefail
