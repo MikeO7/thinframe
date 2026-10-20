@@ -246,7 +246,10 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
       console via `consoleblank`.
 - [ ] Health check in `tfctl kiosk`: detect a hung WebProcess and restart cog.
-- [ ] `tfctl status` (tfctl/src/status.rs): read /proc and /sys, no shelling out except iwctl.
-- [ ] Size audit: `du -sh` of the root, `ps` list at idle. Remove anything not in the README budget.
+- [x] `tfctl status` (tfctl/src/status.rs): read /proc and /sys, no shelling out except iwctl.
+      (IPs from /proc/net/fib_trie, USB-C address last; QEMU check `tfctl status` shows 10.0.2.15.)
+- [x] Size audit: `du -sh` of the root, `ps` list at idle. Remove anything not in the README budget.
+      (docs/log.md 2026-10-20: root 169 MiB, crond/seedrng/syslogd/klogd removed, DejaVu Serif and
+      Condensed dropped, idle `ps` = README list + dbus for iwd. Re-check on the frame with cog up.)
 - [ ] GitHub Actions builds tfctl and the image on a tag and attaches both to a release.
 - [ ] Speaker, accelerometer rotation, light sensor: see upstream `docs/hardware.md`. Not now.

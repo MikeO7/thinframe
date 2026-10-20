@@ -88,3 +88,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   BUSYBOX_SHOW_OTHERS); BusyBox's i2c* applets cover it, and br-run.sh now stops when a fragment
   option is dropped (tested by re-adding it). WebKit OOM-killed cc1plus again at 5 jobs
   (GeneratedSerializers.cpp); the job budget is now 4.5 GB each, 3 jobs on 16 GB.
+- TASK 9 size audit (QEMU, image `2026.10.20-a9b1c71c`): target tree 169 MiB (was 174); largest
+  libWPEWebKit 65 MiB, libicudata 31 MiB, mesa megadriver 11 MiB (33 hard links, one copy), DejaVu
+  Sans + Mono (Serif and Condensed dropped: pages use sans-serif and monospace only). ext4 free
+  14.9 MiB of 190. Idle `ps` (kernel threads aside): init, udevd, dbus-daemon, iwd, dhcpcd (+3
+  privsep helpers), dropbear, udhcpd, getty, tfctl, WPENetworkProcess: the README list plus dbus,
+  which iwd needs. 26 MiB used of 1002 at the login prompt [V in QEMU].
+- TASK 9 `tfctl status`: IPs from /proc/net/fib_trie (no `ip` spawn; only iwctl is spawned), USB-C
+  address sorted last so the heartbeat and status page report the LAN address. QEMU 17/17 incl.
+  `tfctl status` → `ip : 10.0.2.15 192.168.7.2` [V in QEMU].
