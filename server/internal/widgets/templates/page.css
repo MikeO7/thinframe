@@ -11,6 +11,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:
 .clock-date{font-size:3.5vh;color:var(--dim);margin-top:1vh}
 .weather-temp{font-size:9vh;font-weight:300}
 .weather-desc{color:var(--dim);font-size:3vh}
+.cal-line{font-size:3.2vh;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status{font-size:2.6vh;color:var(--dim);line-height:1.5}
 .text{font-size:4vh;white-space:pre-wrap}
 iframe{border:0;width:100%;height:100%}

@@ -186,8 +186,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       MCP `set_layout`/`list_widgets`. Gate: two frames, two layouts, one container.
 - [x] S5b Photo adapter: `PHOTOS_DIR` scan, resize to 1280x800 and 800x1280, EXIF strip, cache,
       `/api/data/photo/next`. Interface `PhotoSource` so Immich/Google/iCloud can be added later.
-- [ ] S5c `hello` reply carries `time_unix` and `tz`; weather and calendar adapters behind
-      `/api/data/*`; the page never calls third parties directly.
+- [x] S5c `hello` reply carries `time_unix` and `tz`; weather and calendar adapters (open-meteo, public .ics via
+      `CALENDAR_ICS_URL`, no recurrence expansion) feed widgets over SSE; the page never calls third parties directly.
 - Gate: two frames with different ids show different pages from one container.
 
 ## M. Simulator (second container, dev only)

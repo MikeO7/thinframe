@@ -250,6 +250,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Weather != nil {
 		go s.pushWeather(id)
 	}
+	if s.opts.Calendar != nil {
+		go s.pushCalendar(id)
+	}
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
 	for {
@@ -291,6 +294,31 @@ func (s *Server) pushWeather(id string) {
 		s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": map[string]any{
 			"temp": strconv.Itoa(int(wx.TempC + 0.5)), "desc": strings.ToLower(wx.Desc),
 		}})
+	}
+}
+
+func (s *Server) pushCalendar(id string) {
+	f, err := s.Store.Get(id)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, wdg := range f.Layout.Widgets {
+		if wdg.Type != "calendar" {
+			continue
+		}
+		evs, err := s.opts.Calendar.Upcoming(now, 3)
+		data := map[string]any{"l1": "", "l2": "", "l3": ""}
+		if err != nil && len(evs) == 0 {
+			data["l1"] = "calendar unavailable"
+		}
+		for i, e := range evs {
+			data["l"+strconv.Itoa(i+1)] = e.Line(now)
+		}
+		if err == nil && len(evs) == 0 {
+			data["l1"] = "nothing coming up"
+		}
+		s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": data})
 	}
 }
 

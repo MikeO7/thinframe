@@ -27,7 +27,8 @@ type Options struct {
 	Token     string // empty = no auth (LAN dev only)
 	Photos    *photos.Service
 	Artifacts *artifacts.Dir
-	Weather   WeatherSource // may be nil
+	Weather   WeatherSource  // may be nil
+	Calendar  CalendarSource // may be nil
 	Version   string
 }
 

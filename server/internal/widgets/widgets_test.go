@@ -49,3 +49,15 @@ func TestUnknownTypeRendersPlaceholder(t *testing.T) {
 		t.Fatalf("%v %s", err, b)
 	}
 }
+
+func TestCalendarWidgetRenders(t *testing.T) {
+	f := store.Frame{ID: "k", Config: store.DefaultConfig(), Layout: store.Layout{Cols: 4, Rows: 3, Widgets: []store.Widget{
+		{ID: "cal", Type: "calendar", X: 0, Y: 0, W: 2, H: 1}}}}
+	b, err := Render(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `data-field="l1"`) || strings.Contains(string(b), `class="unknown"`) {
+		t.Errorf("calendar widget missing: %s", b)
+	}
+}

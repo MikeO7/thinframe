@@ -14,6 +14,7 @@
 //	PHOTOS_DIR    folder photo source; unset = photo widget shows nothing
 //	ARTIFACTS_DIR default /artifacts; tfctl-armv7, overlay.tar.gz, system-*.tar, versions.json
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter
+//	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
 //	TZ            frames receive this time zone
 package main
 
@@ -61,6 +62,14 @@ func main() {
 		}
 		opts.Photos = ph
 		log.Printf("photos: %s", dir)
+	}
+	if u := os.Getenv("CALENDAR_ICS_URL"); u != "" {
+		loc, err := time.LoadLocation(env("TZ", "UTC"))
+		if err != nil {
+			loc = time.UTC
+		}
+		opts.Calendar = &api.ICS{URL: u, Loc: loc}
+		log.Printf("calendar: ics feed enabled")
 	}
 	if lat, lon := os.Getenv("WEATHER_LAT"), os.Getenv("WEATHER_LON"); lat != "" && lon != "" {
 		la, e1 := strconv.ParseFloat(lat, 64)
