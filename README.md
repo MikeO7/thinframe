@@ -113,7 +113,7 @@ The frame's hardware is for the dashboard, not the OS. Hard limits, checked in T
 
 Full walkthrough and troubleshooting: [docs/flashing.md](docs/flashing.md).
 
-Change the dashboard: edit `server/static/`, `docker compose up -d --build`. The frame is never touched.
+Change the dashboard: edit the frame's layout in `/admin` (or via MCP); widget templates live in `server/internal/widgets/`. The frame is never touched.
 
 ## Layout
 
