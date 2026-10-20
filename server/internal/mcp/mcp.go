@@ -87,6 +87,9 @@ func register(m *sdk.Server, s *api.Server) {
 		ScreenOn   *string  `json:"screen_on,omitempty" jsonschema:"HH:MM local"`
 		URL        *string  `json:"url,omitempty" jsonschema:"override page URL; empty = this server's dashboard"`
 		Tags       []string `json:"tags,omitempty"`
+		SplashText *string  `json:"splash_text,omitempty" jsonschema:"one line under the boot logo; shown from the next boot"`
+		SplashBG   *string  `json:"splash_bg,omitempty" jsonschema:"boot splash background #rrggbb"`
+		SplashPNG  *string  `json:"splash_png,omitempty" jsonschema:"boot logo as base64 PNG, at most 48 KiB; empty stops sending it (the frame keeps its last logo)"`
 	}
 	sdk.AddTool(m, &sdk.Tool{Name: "set_frame_config", Description: "Change one or more config fields on a frame. Pushed to the frame immediately if it is online."},
 		func(_ context.Context, _ *sdk.CallToolRequest, in setCfgIn) (*sdk.CallToolResult, map[string]any, error) {
@@ -111,6 +114,15 @@ func register(m *sdk.Server, s *api.Server) {
 			}
 			if in.Tags != nil {
 				patch["tags"] = in.Tags
+			}
+			if in.SplashText != nil {
+				patch["splash_text"] = *in.SplashText
+			}
+			if in.SplashBG != nil {
+				patch["splash_bg"] = *in.SplashBG
+			}
+			if in.SplashPNG != nil {
+				patch["splash_png"] = *in.SplashPNG
 			}
 			if len(patch) == 0 {
 				return nil, nil, fmt.Errorf("nothing to change")

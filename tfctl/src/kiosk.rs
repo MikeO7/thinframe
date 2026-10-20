@@ -46,15 +46,25 @@ pub fn run(cfg: &Config) -> io::Result<()> {
         return Ok(());
     }
     let (tx, rx) = mpsc::channel();
+    let mut k = Kiosk::new(cfg);
     if !cfg.server_url.is_empty() {
-        let (c, tx) = (cfg.clone(), tx.clone());
-        thread::Builder::new().name("agent".into()).spawn(move || {
-            if let Err(e) = agent::run(&c, tx) {
-                eprintln!("tfctl: agent: {e}");
+        match agent::Agent::new(cfg, tx.clone(), &cfg.path) {
+            Ok(mut a) => {
+                // Written before cog starts, so cog opens on "joining…"/"reaching…" (TASK 15).
+                if !cfg.fallback_url.is_empty() {
+                    a.start_on_status_page();
+                    k.url = cfg.fallback_url.clone();
+                }
+                thread::Builder::new().name("agent".into()).spawn(move || {
+                    if let Err(e) = agent::serve(a) {
+                        eprintln!("tfctl: agent: {e}");
+                    }
+                })?;
             }
-        })?;
+            Err(e) => eprintln!("tfctl: agent: {e}"),
+        }
     }
-    Kiosk::new(cfg).supervise(&rx)
+    k.supervise(&rx)
 }
 
 pub struct Kiosk {

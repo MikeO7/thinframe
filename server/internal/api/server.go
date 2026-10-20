@@ -4,13 +4,16 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -116,6 +119,28 @@ func (s *Server) TokenOK(r *http.Request) bool { return s.opts.Token == "" || to
 // ErrInvalid is returned for bad input.
 var ErrInvalid = errors.New("invalid input")
 
+// MaxSplashPNG bounds the logo pushed in every config message (decoded bytes).
+const MaxSplashPNG = 48 << 10
+
+var rgbRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// checkSplashPNG accepts "" (no logo) or standard base64 of a PNG up to MaxSplashPNG bytes.
+func checkSplashPNG(s string) error {
+	if s == "" {
+		return nil
+	}
+	b, err := base64.StdEncoding.DecodeString(s)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w: splash_png is not base64: %v", ErrInvalid, err)
+	case len(b) > MaxSplashPNG:
+		return fmt.Errorf("%w: splash_png is %d bytes, limit %d", ErrInvalid, len(b), MaxSplashPNG)
+	case !bytes.HasPrefix(b, []byte("\x89PNG\r\n\x1a\n")):
+		return fmt.Errorf("%w: splash_png is not a PNG", ErrInvalid)
+	}
+	return nil
+}
+
 // SetConfig merges non-nil fields into a frame's config, bumps page_version when the
 // page is affected, persists, and pushes to the frame if online.
 func (s *Server) SetConfig(id string, patch map[string]any) (store.Frame, error) {
@@ -148,6 +173,22 @@ func (s *Server) SetConfig(id string, patch map[string]any) (store.Frame, error)
 				c.Tags = asStrings(v)
 			case "name":
 				f.Name, _ = v.(string)
+			case "splash_text":
+				c.SplashText, _ = v.(string)
+			case "splash_bg":
+				str, _ := v.(string)
+				if str != "" && !rgbRe.MatchString(str) {
+					bad = fmt.Errorf("%w: splash_bg must be #rrggbb", ErrInvalid)
+					return
+				}
+				c.SplashBG = str
+			case "splash_png":
+				str, _ := v.(string)
+				if err := checkSplashPNG(str); err != nil {
+					bad = err
+					return
+				}
+				c.SplashPNG = str
 			default:
 				bad = fmt.Errorf("%w: unknown config field %q", ErrInvalid, k)
 				return
@@ -220,6 +261,7 @@ func (s *Server) ConfigFor(f store.Frame) map[string]any {
 		"url": c.URL, "rotation": c.Rotation, "brightness": c.Brightness,
 		"screen_off": c.ScreenOff, "screen_on": c.ScreenOn, "page_version": c.PageVersion,
 		"tags": c.Tags, "name": f.Name,
+		"splash_text": c.SplashText, "splash_bg": c.SplashBG, "splash_png": c.SplashPNG,
 	}
 	if s.opts.Artifacts != nil {
 		v := s.opts.Artifacts.Versions()

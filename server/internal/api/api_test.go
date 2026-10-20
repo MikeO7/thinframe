@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -255,5 +256,38 @@ func TestAdminRenders(t *testing.T) {
 	f, _ := s.Store.Get("kitchen")
 	if f.Config.Rotation != 1 || f.Config.Brightness != 50 || len(f.Config.Tags) != 2 {
 		t.Fatalf("%+v", f.Config)
+	}
+}
+
+func TestSplashConfig(t *testing.T) {
+	_, ts := newTest(t, "")
+	png := "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAYAAAC09K7GAAAAPElEQVR42mN0UWiy2Xksvy3Pi8MnZi3HNSaX0E1pQqoyThF29xlWMf+ZzKLBaOPZyrBQf45manllY9xzAM7wEmsd43BoAAAAAElFTkSuQmCC"
+	url := ts.URL + "/api/frames/kitchen/config"
+	resp, body := do(t, "PUT", url, "", map[string]any{"splash_text": "Kitchen", "splash_bg": "#203040", "splash_png": png})
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	var cfg map[string]any
+	_ = json.Unmarshal(body, &cfg)
+	if cfg["splash_text"] != "Kitchen" || cfg["splash_bg"] != "#203040" || cfg["splash_png"] != png {
+		t.Fatalf("splash fields not in the frame's config: %v", cfg)
+	}
+	big := base64.StdEncoding.EncodeToString(append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, MaxSplashPNG)...))
+	for _, bad := range []map[string]any{
+		{"splash_bg": "203040"},
+		{"splash_bg": "#20304"},
+		{"splash_png": "not base64!"},
+		{"splash_png": base64.StdEncoding.EncodeToString([]byte("GIF89a"))},
+		{"splash_png": big},
+	} {
+		resp, body := do(t, "PUT", url, "", bad)
+		if resp.StatusCode != 400 || !strings.Contains(string(body), "splash") {
+			t.Fatalf("accepted %v: %d %s", bad, resp.StatusCode, body)
+		}
+	}
+	resp, body = do(t, "PUT", url, "", map[string]any{"splash_png": "", "splash_bg": ""})
+	_ = json.Unmarshal(body, &cfg)
+	if resp.StatusCode != 200 || cfg["splash_png"] != "" || cfg["splash_text"] != "Kitchen" {
+		t.Fatalf("clearing the logo: %d %v", resp.StatusCode, cfg)
 	}
 }

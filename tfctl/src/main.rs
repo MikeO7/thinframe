@@ -23,6 +23,7 @@ use std::thread;
 
 mod agent;
 mod agent_cfg;
+mod b64;
 mod boot;
 mod config;
 mod drm;

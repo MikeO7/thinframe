@@ -129,10 +129,15 @@ impl Canvas {
 }
 
 pub const LOGO_PATH: &str = "/etc/thinframe/splash.png";
+/// Pushed by the server (`splash_png`); wins over the image's logo.
+pub const DATA_LOGO_PATH: &str = "/data/thinframe/splash.png";
 
 /// The logo, if one is installed and decodes; a bad file is logged and ignored.
 fn load_logo() -> Option<png::Image> {
-    let path = std::env::var("TFCTL_SPLASH_PNG").unwrap_or_else(|_| LOGO_PATH.into());
+    let path = std::env::var("TFCTL_SPLASH_PNG").unwrap_or_else(|_| {
+        let data = std::path::Path::new(DATA_LOGO_PATH).exists();
+        (if data { DATA_LOGO_PATH } else { LOGO_PATH }).into()
+    });
     let bytes = std::fs::read(&path).ok()?;
     match png::decode(&bytes) {
         Ok(i) => Some(i),

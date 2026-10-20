@@ -26,7 +26,11 @@ const FALLBACK_AFTER: u32 = 3;
 const STABLE_SESSION: Duration = Duration::from_secs(30);
 
 pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
-    let mut a = Agent::new(cfg, kiosk, &cfg.path)?;
+    serve(Agent::new(cfg, kiosk, &cfg.path)?)
+}
+
+/// The connect / session / poll loop for an agent the caller built (the kiosk prepares it first).
+pub fn serve(mut a: Agent) -> io::Result<()> {
     let mut backoff = 1u64;
     loop {
         if sys::term_requested() {
@@ -171,15 +175,25 @@ impl Agent {
         self.failures = 0;
         if self.on_fallback {
             self.on_fallback = false;
-            eprintln!("tfctl: agent: server back, leaving fallback page");
+            eprintln!("tfctl: agent: server answered, showing the dashboard");
             let _ = self.send(KioskCmd::SetUrl(self.cfg.url.clone()));
+        }
+    }
+
+    /// Boot (TASK 15): the kiosk opens on the local status page, not on a dashboard that cannot
+    /// load yet; the first answer from the server switches to the dashboard (`server_ok`).
+    pub(crate) fn start_on_status_page(&mut self) {
+        if !self.cfg.fallback_url.is_empty() {
+            self.on_fallback = true;
+            self.write_status_page();
         }
     }
 
     pub(crate) fn server_failed(&mut self) {
         self.failures += 1;
-        if self.failures >= FALLBACK_AFTER && !self.on_fallback && !self.cfg.fallback_url.is_empty()
-        {
+        if self.on_fallback {
+            self.write_status_page();
+        } else if self.failures >= FALLBACK_AFTER && !self.cfg.fallback_url.is_empty() {
             self.on_fallback = true;
             eprintln!(
                 "tfctl: agent: {} failures, showing fallback page",
@@ -190,21 +204,32 @@ impl Agent {
         }
     }
 
-    /// Refresh the local status page with the reason and our IP (TASKS 14/15).
-    fn write_status_page(&self) {
+    /// Refresh the local status page with what we wait for and our IP (TASKS 14/15).
+    pub(crate) fn write_status_page(&self) {
         let st = crate::status::collect();
+        let ssid = crate::wifi::configured_ssid(std::path::Path::new(crate::wifi::IWD_DIR));
+        let headline = crate::statuspage::headline(
+            &self.cfg.server_url,
+            ssid.as_deref(),
+            &st.ips,
+            self.failures,
+            FALLBACK_AFTER,
+        );
         let mut details = vec![format!("frame {}", self.cfg.frame_id)];
-        if let Some(ip) = st.ips.first() {
+        let lan: Vec<&String> = st
+            .ips
+            .iter()
+            .filter(|ip| *ip != crate::statuspage::USB_IP)
+            .collect();
+        if let Some(ip) = lan.first() {
             details.push(format!("IP {ip}"));
         }
-        details.push("retrying every few seconds".into());
+        if self.failures > 0 {
+            details.push("retrying every few seconds".into());
+        }
         let path = std::env::var("TFCTL_STATUS_PAGE")
             .unwrap_or_else(|_| crate::statuspage::DEFAULT_PATH.into());
-        if let Err(e) = crate::statuspage::write(
-            &path,
-            &format!("cannot reach {}", self.cfg.server_url),
-            &details,
-        ) {
+        if let Err(e) = crate::statuspage::write(&path, &headline, &details) {
             eprintln!("tfctl: agent: status page: {e}");
         }
     }

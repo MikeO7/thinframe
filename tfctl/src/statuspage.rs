@@ -14,8 +14,12 @@ fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// Headline ("cannot reach http://nas:8080") plus detail lines (IP, frame id, retry note).
-pub fn render(headline: &str, details: &[String]) -> String {
+/// Headline ("cannot reach http://nas:8080") plus detail lines (IP, frame id, retry note), under
+/// the splash logo when one is installed (TASK 15: same logo from splash to dashboard).
+pub fn render(headline: &str, details: &[String], logo: Option<&str>) -> String {
+    let img = logo
+        .map(|p| format!("<img src=\"file://{}\" alt=\"\">", esc(p)))
+        .unwrap_or_default();
     let lines: String = details
         .iter()
         .map(|d| format!("<p>{}</p>", esc(d)))
@@ -26,11 +30,34 @@ pub fn render(headline: &str, details: &[String]) -> String {
          <style>html,body{{margin:0;height:100%;background:#0b0d10;color:#dfe3e8;\
          font:32px sans-serif}}main{{height:100%;display:flex;flex-direction:column;\
          align-items:center;justify-content:center;text-align:center}}\
-         h1{{font-size:44px;font-weight:600}}p{{margin:.2em 0;color:#9aa4af}}</style></head>\
-         <body><main><h1>{}</h1>{}</main></body></html>",
+         h1{{font-size:44px;font-weight:600}}p{{margin:.2em 0;color:#9aa4af}}\
+         img{{max-width:40%;max-height:40%}}</style></head>\
+         <body><main>{}<h1>{}</h1>{}</main></body></html>",
+        img,
         esc(headline),
         lines
     )
+}
+
+/// The USB-C link's own address (image/rootfs/etc/network/interfaces); not a way to the server.
+pub const USB_IP: &str = "192.168.7.2";
+
+/// What the frame is waiting for (TASK 15 order: joining Wi-Fi, reaching the server, given up).
+/// `ips` are the frame's IPv4 addresses, `failures` the failed server attempts so far.
+pub fn headline(
+    server: &str,
+    ssid: Option<&str>,
+    ips: &[String],
+    failures: u32,
+    give_up: u32,
+) -> String {
+    let online = ips.iter().any(|ip| ip != USB_IP);
+    match (online, ssid) {
+        (false, Some(s)) => format!("joining {s}"),
+        (false, None) => "no Wi-Fi configured".into(),
+        (true, _) if failures < give_up => format!("reaching {server}"),
+        (true, _) => format!("cannot reach {server}"),
+    }
 }
 
 /// Write atomically (tmp + rename) so cog never reads half a file.
@@ -40,7 +67,10 @@ pub fn write(path: &str, headline: &str, details: &[String]) -> io::Result<()> {
         fs::create_dir_all(dir)?;
     }
     let tmp = p.with_extension("html.tmp");
-    fs::write(&tmp, render(headline, details))?;
+    let logo = [crate::splash::DATA_LOGO_PATH, crate::splash::LOGO_PATH]
+        .into_iter()
+        .find(|l| Path::new(l).exists());
+    fs::write(&tmp, render(headline, details, logo))?;
     fs::rename(&tmp, p)
 }
 
@@ -53,11 +83,33 @@ mod tests {
         let h = render(
             "cannot reach <srv>",
             &["IP 192.168.1.5".into(), "a&b".into()],
+            None,
         );
+        assert!(!h.contains("<img"));
+        let with_logo = render("x", &[], Some("/data/thinframe/splash.png"));
+        assert!(with_logo.contains("<img src=\"file:///data/thinframe/splash.png\""));
         assert!(h.contains("cannot reach &lt;srv&gt;"));
         assert!(h.contains("<p>IP 192.168.1.5</p>"));
         assert!(h.contains("<p>a&amp;b</p>"));
         assert!(!h.contains("<srv>"));
+    }
+
+    #[test]
+    fn headline_follows_the_boot_order() {
+        let s = "http://nas:8080";
+        let usb = vec![USB_IP.to_string()];
+        let lan = vec![USB_IP.to_string(), "192.168.1.20".to_string()];
+        assert_eq!(headline(s, Some("Home"), &[], 0, 3), "joining Home");
+        assert_eq!(headline(s, Some("Home"), &usb, 5, 3), "joining Home");
+        assert_eq!(headline(s, None, &usb, 0, 3), "no Wi-Fi configured");
+        assert_eq!(
+            headline(s, Some("Home"), &lan, 2, 3),
+            "reaching http://nas:8080"
+        );
+        assert_eq!(
+            headline(s, Some("Home"), &lan, 3, 3),
+            "cannot reach http://nas:8080"
+        );
     }
 
     #[test]
