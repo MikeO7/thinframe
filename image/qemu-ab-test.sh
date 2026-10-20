@@ -10,7 +10,7 @@ RES="$(cd "$(dirname "$0")" && pwd)/out/qemu-ab-test.txt"
 # shellcheck source=SCRIPTDIR/qemu-lib.sh
 . "$(dirname "$0")/qemu-lib.sh"
 A="$(cat "$HERE/out/system-version" 2>/dev/null || true)"
-[ -n "$A" ] && [ -f "$HERE/out/system-$A.tar" ] || { echo "STOP: no image/out/system-<ver>.tar; run image/build.sh rootfs" >&2; exit 1; }
+if [ -z "$A" ] || [ ! -f "$HERE/out/system-$A.tar" ]; then echo "STOP: no image/out/system-<ver>.tar; run image/build.sh rootfs" >&2; exit 1; fi
 B="$A-b"; BAD="$A-bad"; C="$A-c"
 TFCTL="$HERE/work/tfctl/tfctl"
 
