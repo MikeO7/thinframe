@@ -42,8 +42,10 @@ ormarch tested; bumping is a one-line change once the frame is verified.
 Buildroot default. `/etc/inittab` respawns `tfctl kiosk`, which supervises cog itself (a software
 update exits tfctl and init starts the new binary). `/etc/init.d/S90thinframe` is one line,
 `tfctl boot`: provisioning, growing `/data`, hostname, the USB-C DHCP lease. The root is mounted
-read-only; `/data` (p4) holds `etc/thinframe.conf`, `ssh/` (dropbear host key + authorized_keys,
-bound over `/etc/dropbear`, which is also `~frame/.ssh`) and `iwd/`, bind-mounted from fstab.
+read-only; `/data` (p4) holds `etc/thinframe.conf` (`/etc/thinframe.conf` is a symlink to it, so
+`tfctl` can replace it atomically; a file bind mount pins the old inode), `ssh/` (dropbear host key +
+authorized_keys, bound over `/etc/dropbear`, which is also `~frame/.ssh`) and `iwd/`, both
+bind-mounted from fstab. `dbus-daemon` runs because iwd takes its commands over D-Bus [V].
 Logs, dhcpcd leases and the status page live in RAM (`/tmp`, `/run`). No syslogd, klogd, cron.
 Kernel console is `ttyGS0` (USB-C CDC ACM, built in with CDC ECM `usb0` = 192.168.7.2); the panel
 never shows console text (`FRAMEBUFFER_CONSOLE` off).
@@ -127,9 +129,9 @@ the image is immutable and replaced whole. Card layout grows from 2 to 4 partiti
 | Part | Content | Why |
 |---|---|---|
 | p1 FAT32 `PFBOOT` | U-Boot script, `extlinux.conf`, `uEnv.txt`, `zImage.a` `zImage.b`, DTBs | U-Boot picks the slot from `uEnv.txt` (`slot=a|b`, `tries=N`) |
-| p2 ext4 `rootA` | Alpine root, read-only mount | active or standby |
-| p3 ext4 `rootB` | Alpine root, read-only mount | standby or active |
-| p4 ext4 `data` | `/etc/thinframe.conf`, ssh host keys, iwd profiles, logs, www fallback | survives updates; bind-mounted over the read-only root |
+| p2 ext4 `rootA` | Buildroot root, read-only mount | active or standby |
+| p3 ext4 `rootB` | Buildroot root, read-only mount | standby or active |
+| p4 ext4 `data` | `/etc/thinframe.conf`, ssh host keys, iwd profiles, logs, www fallback | survives updates; linked or bind-mounted into the read-only root |
 
 Update flow: CI builds `system-<ver>.tar` = {zImage, modules, rootfs.ext4.zst, sha256}. The container
 ships it under `/api/artifacts/`. The agent sees `system_version` change, streams the rootfs into the

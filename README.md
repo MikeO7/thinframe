@@ -39,7 +39,7 @@ version (WPE, cog, kernel, mesa) is pinned in this repo and bumped on purpose.
 | Touch | Silead GSL, I2C0 0x40, needs proprietary `gsl_m86_hd.fw` (not in Git) |
 | Wi-Fi | AIC8800DC on SDIO, 2.4 GHz only, out-of-tree driver |
 | GPU | Mali-400 MP2, Mesa lima, GLES 2 only |
-| USB | One USB-C, device mode (powers the frame). Gadget serial + NCM network for recovery |
+| USB | One USB-C, device mode (powers the frame). Gadget serial + CDC ECM network for recovery |
 | Storage | 16 GB eMMC. **Never written.** We boot from SD only. |
 
 ## Architecture
@@ -60,13 +60,15 @@ On the card:
 ```
 microSD (MBR)
   8 KiB      u-boot-pf1007l-L.bin         (reused, pinned, from ormarch)
-  4 MiB      p1 FAT32 PFBOOT              zImage, DTB, initramfs, extlinux.conf, boot.scr
-  260 MiB    p2 ext4 rootA                Buildroot rootfs (A/B slots, read-only)
+  4 MiB      p1 FAT32 PFBOOT 256 MiB      zImage.a/.b, DTBs, extlinux/slot-{a,b}.conf, boot.scr, uEnv.txt
+  260 MiB    p2 ext4 rootA 1 GiB          Buildroot rootfs, read-only (slot a)
+             p3 ext4 rootB 1 GiB          slot b, written by A/B updates
+             p4 ext4 data, rest of card   thinframe.conf, ssh keys, iwd profiles
 
-OS      : Buildroot (musl, BusyBox init), WPE WebKit 2.50 + cog 0.18.5 on DRM, mesa lima
+OS      : Buildroot (musl, BusyBox init), WPE WebKit 2.50 + cog 0.18.4 on DRM, mesa lima
 Kernel  : mainline 7.2.x + ormarch panel patch/DTS + aic8800 module package
 Init    : BusyBox init
-Net     : iwd (Wi-Fi) + dhcpcd, usb gadget NCM as fallback
+Net     : iwd (Wi-Fi) + dhcpcd, USB-C gadget (CDC ECM 192.168.7.2) as fallback
 Control : one outbound WebSocket from tfctl; server pushes, frame acks. No inbound ports. SSH for humans only.
 Access  : dropbear, key only, user `frame`
 Display : cog --platform=drm, launched and supervised by tfctl
@@ -96,7 +98,7 @@ The frame's hardware is for the dashboard, not the OS. Hard limits, checked in T
 | Root filesystem | under 200 MB |
 | RAM used before cog starts | under 60 MB |
 | RAM used with the page up | under 300 MB |
-| Processes besides cog, BusyBox init + getty, dropbear, iwd, dhcpcd, udevd, udhcpd (USB link) | none |
+| Processes besides cog, BusyBox init + getty, dropbear, iwd + dbus-daemon, dhcpcd, udevd, udhcpd (USB link) | none |
 | Custom code on the frame | one Rust binary, `tfctl`, under 1 MB, no shell helpers. Container is Go. |
 | Boot to page | under 20 s |
 | Touch to visible response | under 50 ms (one tap to a highlighted button) |

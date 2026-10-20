@@ -28,6 +28,12 @@ docker run --rm -i \
 		O=/br/output
 		make -s -C "$BR" O=$O BR2_EXTERNAL=/src/image/buildroot pf1007l_defconfig
 		make -s -C "$BR" O=$O tfctl-dirclean	# local package: always take the freshly staged binary
+		# WebKit needs ~2.8 GB per compile job; more jobs than that gets cc1plus OOM-killed.
+		if [ -z "$JOBS" ]; then
+			JOBS=$(( $(awk "/MemTotal/ {print \$2}" /proc/meminfo) / 2800000 ))
+			[ "$JOBS" -ge 1 ] || JOBS=1; [ "$JOBS" -le "$(nproc)" ] || JOBS=$(nproc)
+		fi
+		echo "buildroot: $JOBS jobs"
 		start=$(date +%s)
 		set +o pipefail
 		make -C "$BR" O=$O ${JOBS:+BR2_JLEVEL=$JOBS} $BRTARGET 2>&1 | tee $O/build.log | grep --line-buffered "^>>> "

@@ -14,12 +14,14 @@ rm -rf "$T/etc/dropbear" && mkdir -m 0755 "$T/etc/dropbear"
 # The frame user's keys are dropbear's: one file on /data, written by `tfctl provision`.
 install -d -m 0755 "$T/home/frame"
 ln -sfn /etc/dropbear "$T/home/frame/.ssh"
+# Config lives on /data; a symlink (not a file bind) so tfctl can replace it atomically.
+ln -sfn /data/etc/thinframe.conf "$T/etc/thinframe.conf"
 # dhcpcd keeps leases in /var/db; on a read-only root that is RAM.
 ln -sfn ../tmp "$T/var/db"
 
 # Nothing periodic and no logging daemon (README budget): drop BusyBox's syslog/klogd and
-# seedrng (it writes to the read-only root).
-rm -f "$T"/etc/init.d/S01syslogd "$T"/etc/init.d/S02klogd "$T"/etc/init.d/S20seedrng
+# crond, and seedrng (it writes to the read-only root).
+rm -f "$T"/etc/init.d/S01syslogd "$T"/etc/init.d/S02klogd "$T"/etc/init.d/S*seedrng "$T"/etc/init.d/S50crond
 
 # Offline fallback page (the dashboard itself comes from frameserver).
 rm -rf "$T/var/lib/thinframe/www" && cp -a "$REPO/www" "$T/var/lib/thinframe/www"

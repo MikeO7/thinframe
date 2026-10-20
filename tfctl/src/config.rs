@@ -146,8 +146,11 @@ pub fn parse_rgb(s: &str) -> Option<u32> {
 }
 
 /// Rewrite the given keys in place (comments, order and unrelated lines preserved), append the
-/// ones that were missing, drop duplicates of a rewritten key. Atomic via rename.
+/// ones that were missing, drop duplicates of a rewritten key. Atomic via rename next to the
+/// real file: on the frame /etc/thinframe.conf is a symlink into /data (the root is read-only).
 pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
+    let real = fs::canonicalize(path).unwrap_or_else(|_| path.into());
+    let path = real.to_str().unwrap_or(path);
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -222,6 +225,26 @@ mod tests {
         let c = load(ps).unwrap();
         assert_eq!(c.frame_id, "kitchen");
         assert_eq!(c.token, "t0k");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_overrides_writes_through_a_symlink() {
+        let dir = std::env::temp_dir().join(format!("tfctl-cfg-ln-{}", std::process::id()));
+        fs::create_dir_all(dir.join("data")).unwrap();
+        fs::create_dir_all(dir.join("etc")).unwrap();
+        let real = dir.join("data/thinframe.conf");
+        fs::write(&real, "FRAME_ID=\"a\"\n").unwrap();
+        let link = dir.join("etc/thinframe.conf");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        save_overrides(link.to_str().unwrap(), &[("FRAME_ID", "b")]).unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(load(link.to_str().unwrap()).unwrap().frame_id, "b");
+        assert!(!dir.join("etc/thinframe.conf.tmp").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -38,7 +38,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       7.2.x tag with the panel patch + DTS, mesa3d (lima, gbm, egl, gles), libdrm, libinput, eudev,
       wpewebkit (no wayland), cog with `BR2_PACKAGE_COG_PLATFORM_DRM`, iwd, dhcpcd, dropbear,
       e2fsprogs (resize2fs), zstd, ca-certificates, font (DejaVu or Noto), tzdata. No X, no
-      wayland, no dbus, no systemd.
+      wayland, no systemd (dbus only because iwd needs it).
 - [ ] `image/build.sh` runs Buildroot in a Docker container (`image/Dockerfile.br`) with `dl/` and
       `ccache` on bind-mounted volumes so rebuilds take minutes. First build: 1 to 3 h.
 - [ ] Touch firmware: `PF1007L_TOUCH_FIRMWARE` copied into the overlay at build time, never committed.
@@ -50,8 +50,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] `image/build.sh assemble`: MBR sig `50463037`, U-Boot at 8 KiB, p1 FAT32 `PFBOOT` 256 MiB
       (`zImage.a`, DTBs, `extlinux/extlinux.conf` with labels a/b, `boot.scr`, `uEnv.txt` with
       `slot=a tries=0`), p2 ext4 `rootA` 1 GiB, p3 ext4 `rootB` 1 GiB (empty), p4 ext4 `data` to end.
-- [ ] Root mounts read-only; `/etc/thinframe.conf`, `/etc/dropbear`, `/var/lib/iwd` are bind
-      mounts from `data` (fstab in the overlay). Logs and the status page stay in RAM
+- [ ] Root mounts read-only; `/etc/dropbear`, `/var/lib/iwd` are bind mounts from `data` (fstab in
+      the overlay), `/etc/thinframe.conf` a symlink to `/data/etc/thinframe.conf`. Logs and the status page stay in RAM
       (decisions.md "BusyBox init"); the fallback `www/` is part of the root and of the overlay.
 - [ ] First boot grows p4 (not the root) to the card.
 - [ ] `image/build.sh bundle` also emits `system-<ver>.tar` (zImage, rootfs.ext4.zst, sha256,

@@ -21,7 +21,7 @@ Edit `server/static/` or the layout in `/admin`; the frame follows on its contro
 The frame's own `www/` is only the offline fallback.
 
 ## Changing config
-`/etc/thinframe.conf` is bind-mounted from the data partition (`/data/etc/thinframe.conf`) and
+`/etc/thinframe.conf` is a symlink to the data partition (`/data/etc/thinframe.conf`) and
 written by `tfctl` (config pushed from the server, `provision.txt`, `tfctl set` as root). The
 image default is `image/rootfs/etc/thinframe.conf`.
 
