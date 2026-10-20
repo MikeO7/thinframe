@@ -28,6 +28,7 @@ mod font;
 mod http;
 mod json;
 mod kiosk;
+mod png;
 mod provision;
 mod screen;
 mod sha1;

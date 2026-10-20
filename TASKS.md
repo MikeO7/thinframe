@@ -139,7 +139,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       an embedded bitmap font. Runs from OpenRC `boot` runlevel right after udev, before networking.
       Hands the DRM device over when cog starts.
       (Done: background + centred text line, SPLASH_BG/SPLASH_TEXT, rotation, kiosk draws it before cog and
-      holds "cog missing" if cog is absent; tfctl/src/{drm,splash,font}.rs. Pending: PNG decoder, hardware check.)
+      holds "cog missing" if cog is absent; PNG decoder (tfctl/src/png.rs, own inflate, 8-bit non-interlaced) blends
+      `/etc/thinframe/splash.png` above the text; tfctl/src/{drm,splash,font,png}.rs. Pending: ship a logo, hardware check.)
 - [ ] Local status page (`/var/lib/thinframe/www/status.html`) shows the same logo and live text:
       "joining <ssid>", "reaching <server>", IP, then hands over to the dashboard.
 - [ ] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
