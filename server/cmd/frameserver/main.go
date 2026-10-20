@@ -16,6 +16,7 @@
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter
 //	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
 //	TZ            frames receive this time zone
+//	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
 package main
 
 import (
@@ -81,6 +82,9 @@ func main() {
 	}
 	if opts.Token == "" {
 		log.Printf("WARNING: FRAME_TOKEN empty, /api and /mcp are open to the network")
+	}
+	if d, err := time.ParseDuration(os.Getenv("PAGE_STALE")); err == nil && d > 0 {
+		opts.PageStale = d
 	}
 	srv := api.New(st, opts)
 	mux := http.NewServeMux()

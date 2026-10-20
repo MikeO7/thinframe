@@ -37,6 +37,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	s.pageReset(id)
 	// Full state on connect: config, then every unacked action.
 	s.pushConfig(f)
 	for _, a := range f.Pending {
@@ -45,11 +46,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	pingT := time.NewTicker(30 * time.Second)
 	defer pingT.Stop()
+	pageT := time.NewTicker(s.pageCheck)
+	defer pageT.Stop()
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-pageT.C:
+				s.checkPage(id)
 			case <-pingT.C:
 				pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 				err := c.Ping(pctx)

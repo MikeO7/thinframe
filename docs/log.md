@@ -97,3 +97,10 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - TASK 9 `tfctl status`: IPs from /proc/net/fib_trie (no `ip` spawn; only iwctl is spawned), USB-C
   address sorted last so the heartbeat and status page report the LAN address. QEMU 17/17 incl.
   `tfctl status` → `ip : 10.0.2.15 192.168.7.2` [V in QEMU].
+- TASK 9 hung page: the dashboard sends `POST /api/frames/<id>/alive` every 30 s from a JS timer
+  (stops when the WebProcess hangs; cog's network process keeps the SSE socket open, so the socket
+  is no signal). The server checks every 30 s per connected frame: a page that pinged during this
+  agent connection and is quiet for PAGE_STALE (default 3 min) gets one `restart-kiosk` and a
+  `page` event; another needs a fresh ping. `TestHungPageRestartsCogOnce` (-race, 5 runs) and
+  tests/e2e.sh with PAGE_STALE=20s: no restart over 30 s of a live page, then `kill -STOP` on the
+  sim's WPEWebProcess → "no ping for 2xs, restarting cog" [V in the sim container].

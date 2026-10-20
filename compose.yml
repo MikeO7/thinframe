@@ -8,6 +8,7 @@ services:
     volumes: ["${DATA_DIR:-./server/data}:/data"]
     environment:
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
+      - PAGE_STALE=${PAGE_STALE:-}
   simframe:
     profiles: [sim]
     build:

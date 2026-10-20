@@ -245,7 +245,10 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 ## 9. Polish (optional, after everything above)
 - [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
       console via `consoleblank`.
-- [ ] Health check in `tfctl kiosk`: detect a hung WebProcess and restart cog.
+- [x] Health check in `tfctl kiosk`: detect a hung WebProcess and restart cog.
+      (Done server-side: the page pings `/alive` from a JS timer; a page that pinged during this agent
+      connection and is quiet for PAGE_STALE (3 min) gets one `restart-kiosk`. server/internal/api/
+      watchdog.go; tests/e2e.sh freezes the sim WebProcess with SIGSTOP. On the panel: not seen.)
 - [x] `tfctl status` (tfctl/src/status.rs): read /proc and /sys, no shelling out except iwctl.
       (IPs from /proc/net/fib_trie, USB-C address last; QEMU check `tfctl status` shows 10.0.2.15.)
 - [x] Size audit: `du -sh` of the root, `ps` list at idle. Remove anything not in the README budget.

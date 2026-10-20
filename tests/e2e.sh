@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export PORT="${PORT:-18088}" FRAME_TOKEN=e2e-token
+export PORT="${PORT:-18088}" FRAME_TOKEN=e2e-token PAGE_STALE=20s
 TMP="$(mktemp -d)"; export DATA_DIR="$TMP/data" SIM_OUT="$TMP/out"
 mkdir -p "$DATA_DIR" "$SIM_OUT"
 DC=(docker compose -p thinframe-e2e -f "$ROOT/compose.yml" --profile sim)
@@ -43,4 +43,13 @@ echo "ok   MCP set_frame_config rotation=3"
 changed() { [ "$(dims)" != "$before" ] && [ "$(shasum -a 256 "$SHOT" | cut -c1-64)" != "$sum_before" ]; }
 wait_for 60 changed || fail "screenshot did not change after rotation 3 (still $before)"
 echo "ok   screenshot changed: $before -> $(dims)"
+
+# Hung page: freeze the WebProcess (its JS ping timer stops; the network process keeps the
+# sockets), and the server must restart cog (TASK 9, server/internal/api/watchdog.go).
+hung() { api "$BASE/api/frames/sim" | grep -q 'restarting cog'; }
+sleep 30; ! hung || fail "restart-kiosk while the page was alive"
+# shellcheck disable=SC2016  # runs in the container
+"${DC[@]}" exec -T simframe sh -c 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = WPEWebProcess ] && kill -STOP "${p#/proc/}"; done; true'
+wait_for 120 hung || fail "no restart after the WebProcess froze"
+echo "ok   frozen WebProcess detected, restart-kiosk sent"
 echo "e2e: ok"
