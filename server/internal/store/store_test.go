@@ -69,3 +69,13 @@ func TestGetReturnsCopy(t *testing.T) {
 		t.Fatal("Get leaked internal pointer")
 	}
 }
+
+func TestTouchKeepsLastSamples(t *testing.T) {
+	var tc Touch
+	for i := 1; i <= MaxTouchSamples+5; i++ {
+		tc.Add(i, 0, tc.At)
+	}
+	if len(tc.SamplesMS) != MaxTouchSamples || tc.SamplesMS[0] != 6 || tc.Max() != MaxTouchSamples+5 {
+		t.Fatalf("samples %v", tc.SamplesMS)
+	}
+}

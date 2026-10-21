@@ -45,6 +45,11 @@ fn reap_group(pgid: u32) {
 
 /// The dashboard's dark background (server page.css `--bg`).
 const BG_COLOR: &str = "#0b0d10";
+/// WebKit's own memory limit for the WebProcess (cog `--web-mem-limit`, MiB). Above a third of it
+/// WebKit drops caches, above half it collects hard (cog's default thresholds). The README budget
+/// is 300 MB with the page up; this keeps the page well inside it. No kill threshold: a hung
+/// page is the server watchdog's job (restart-kiosk).
+const WEB_MEM_LIMIT_MIB: u32 = 256;
 
 const RESTART_DELAY: Duration = Duration::from_secs(3);
 const BACKOFF_DELAY: Duration = Duration::from_secs(30);
@@ -167,7 +172,8 @@ impl Kiosk {
             c
         };
         // Dark until the page paints: the default is a white flash at every (re)start.
-        c.arg(format!("--bg-color={BG_COLOR}"));
+        c.arg(format!("--bg-color={BG_COLOR}"))
+            .arg(format!("--web-mem-limit={WEB_MEM_LIMIT_MIB}"));
         c.args(&self.extra_args).arg(&self.url);
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
             .unwrap_or_else(|_| format!("/run/user/{}", uid_of(&self.user).unwrap_or(1000)));
@@ -394,6 +400,7 @@ mod tests {
                 "--platform=drm",
                 "--platform-params=renderer=gles,rotation=1",
                 "--bg-color=#0b0d10",
+                "--web-mem-limit=256",
                 "--x",
                 "http://s/frame/k"
             ]

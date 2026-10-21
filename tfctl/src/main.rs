@@ -24,6 +24,7 @@ use std::thread;
 mod agent;
 mod agent_cfg;
 mod b64;
+mod bench;
 mod boot;
 mod config;
 mod drm;
@@ -55,7 +56,7 @@ mod ws;
 fn usage() -> ExitCode {
     eprintln!(
         "usage: tfctl <kiosk|boot|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
-         wifi SSID PSK|status|set KEY VALUE>"
+         wifi SSID PSK|status|bench [TAPS]|set KEY VALUE>"
     );
     ExitCode::from(2)
 }
@@ -91,6 +92,7 @@ fn main() -> ExitCode {
         Some("splash") => splash::run(&cfg, args.get(1..).unwrap_or_default()),
         Some("wifi") if args.len() == 3 => wifi::run(&args[1], &args[2]),
         Some("status") => status::run(&cfg),
+        Some("bench") => bench::run(&cfg, &args[1..]),
         Some("set") if args.len() == 3 => config::save_overrides(&conf, &[(&args[1], &args[2])]),
         _ => return usage(),
     };

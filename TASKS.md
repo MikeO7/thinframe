@@ -272,8 +272,16 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] libinput: no gestures/tap timeouts; page uses pointer events and `touch-action: none`.
       (Page side done: server page.css `touch-action:none`, page.js pointer events; the local Wi-Fi and
       PAIR pages use `touch-action:manipulation` (the network list scrolls). libinput: on the frame.)
-- [ ] No swap/zram; WebProcess memory cap env; `ps` audit shows only the allowed process list.
-- [ ] `tfctl bench`: replay a tap, record touch→first-paint; beacon from page; shown in /admin.
+- [x] No swap/zram; WebProcess memory cap env; `ps` audit shows only the allowed process list.
+      (Kernel without CONFIG_SWAP, no zram. The cap is cog `--web-mem-limit=256` (MiB, kiosk.rs). The
+      journey test's audit allows only the README list (+ hostapd, the QEMU image's simulated AP) and
+      `free -m` under 300 MB with the page up [V in QEMU, docs/log.md]. On the panel: section 5.)
+- [x] `tfctl bench`: replay a tap, record touch→first-paint; beacon from page; shown in /admin.
+      (tfctl/src/bench.rs: a uinput touchscreen taps the middle of the panel through udev, libinput
+      and cog. The page beacons `painted_at_ms`, and bench prints tap -> paint per tap. Also the
+      `bench` frame action (MCP/admin), whose result is a `bench` event. The server keeps the last 50
+      samples in `frame.touch`; /admin shows last, p50 and max [V in QEMU]. QEMU's numbers are not the
+      frame's (emulated CPU, software GL); the gate below is measured on the panel.)
 - Gate: touch→response under 50 ms, 60 fps in a 10 s swipe test, idle CPU under 5 %, logged in docs/log.md.
 
 ## E. Install to internal storage (later; needs an explicit go from the owner)
