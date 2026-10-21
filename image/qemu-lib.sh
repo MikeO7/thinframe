@@ -138,7 +138,7 @@ built_version() {	# the newest system-<ver>.tar in $OUT (the QEMU=1 build writes
 	local a; a="$(cat "$OUT/system-version" 2>/dev/null || true)"
 	# shellcheck disable=SC2012  # names are ours
 	[ -n "$a" ] || { a="$(ls -t "$OUT"/system-*.tar 2>/dev/null | head -1)"; a="${a##*/system-}"; a="${a%.tar}"; }
-	[ -n "$a" ] && [ -f "$OUT/system-$a.tar" ] || { echo "STOP: no system-<ver>.tar in $OUT; build the image first" >&2; exit 1; }
+	if [ -z "$a" ] || [ ! -f "$OUT/system-$a.tar" ]; then echo "STOP: no system-<ver>.tar in $OUT; build the image first" >&2; exit 1; fi
 	echo "$a"
 }
 frame() { api "/api/frames/$ID"; }
