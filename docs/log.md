@@ -345,3 +345,36 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   call list_frames, release_status and list_widgets with no error. The Inspector CLI (TypeScript SDK) does
   tools/list and tools/call. The same Python client against the Docker image `server/Dockerfile` passes.
   `go test ./...` passes.
+
+## 2026-10-21 M5: the whole journey on the simulator, end to end
+- New `image/qemu-journey-test.sh` (+ `image/qemu-screen.sh` for taps, screendumps and the keyboard). It runs
+  the QEMU=1 image (`2026.10.21-dde39b8b-qemu`, built from main + this branch) through U-Boot under -M virt, with the panel
+  (virtio-gpu 800x1280) and a multitouch screen. The card is provisioned as `flash.sh` does it when no Wi-Fi is
+  typed: server URL, frame id and SSH key only.
+- Two bugs found and fixed on the way:
+  - **False "update skipped".** Right after B booted and confirmed its slot, the agent reported "B was written
+    before and did not boot; not retrying". The skip check compared the server's version with the last
+    attempt only, not with what runs. It now needs `have != want` too. Regression test
+    `running_the_attempted_version_is_no_skip` fails on the old code and passes on the new [V]. The message now
+    says "failed to boot or rolled back", because a manual rollback lands there as well.
+  - **`provision: /etc/hostname: Read-only file system`** on every first boot. Provisioning no longer writes
+    /etc/hostname on the frame; `tfctl boot` sets the hostname from FRAME_ID on each boot [V, serial log clean].
+- The first version of the test passed on a black screen ("Display output is not active" while cog restarts).
+  The checks now use only hard signals:
+  - cog's `<url> Loaded successfully` lines;
+  - a new `/alive` ping from the dashboard's JS;
+  - cog's `rotation=N` argument;
+  - the server's records.
+  Screenshots are kept only once a page has painted.
+- Result, 36/36 PASS [V] (`image/out/qemu/qemu-journey-test.txt`):
+  ```
+  fresh card: Wi-Fi page first; networks listed; row tapped -> password page; "far out man" typed on the
+  on-screen keyboard; joined Groovy Wifi; frame asks to pair; PAIR page loads; PAIR pressed (one tap) ->
+  server accepted; dashboard JS runs; A on slot a; MCP list_frames online; MCP rotation 1 -> cog rotation=1 ->
+  dashboard back; rotation 3 -> back; MCP set_layout -> server renders it -> frame reloads; reload-page acked;
+  server offers B -> B on slot b, slot confirmed, no false skip, dashboard runs on B (Wi-Fi + pairing kept);
+  MCP rollback -> A on slot a, B not flashed again, dashboard on A, still A 3 min later; MCP reboot -> U-Boot
+  ran -> back online alone -> dashboard runs
+  ```
+- Screens: docs/img/journey-1-wifi-list.jpg, -3-typed.jpg, -4-pair.jpg, -6-rotation-1.jpg, -9-after-reboot.jpg
+  (the layout set over MCP, still there after update, rollback and reboot).

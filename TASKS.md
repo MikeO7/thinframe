@@ -260,6 +260,11 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] M3 `docker compose --profile sim up --build` from the repo root starts both containers (README).
 - [x] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
       (`tests/e2e.sh` with compose.yml; CI job `e2e-sim`. `tests/e2e-native.sh` covers the no-Docker path.)
+- [x] M5 `image/qemu-journey-test.sh`: the owner's whole journey on the real image under -M virt, by touch and
+      MCP only: fresh card (no Wi-Fi, no token) -> Wi-Fi page -> on-screen keyboard -> PAIR -> dashboard ->
+      MCP rotation/layout/reload -> system update -> MCP rollback that sticks -> MCP reboot. 36 checks on hard
+      signals (cog's load lines, the page's /alive pings, cog's command line, server records). Passed
+      2026-10-21 (docs/log.md, docs/img/journey-*.jpg).
 
 ## 13. Smoothness (measure, then tune)
 - [ ] Confirm GPU compositing in WPE on lima (`WEBKIT_SHOW_FPS=1`); fix before anything else.

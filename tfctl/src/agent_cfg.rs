@@ -239,12 +239,15 @@ impl Agent {
         }
         let want = self.system_version.clone();
         if let Some(have) = sysupdate::system_version(&self.paths) {
-            let failed_before = sysupdate::attempted(&self.paths).as_deref() == Some(&want);
+            // Written before and not what runs now: it failed to boot (U-Boot fell back) or was
+            // rolled back on purpose. Either way, flashing it again by itself would undo that.
+            let failed_before =
+                have != want && sysupdate::attempted(&self.paths).as_deref() == Some(&want);
             if failed_before && !self.tried.contains(&want) {
                 self.tried.push(want.clone());
                 self.event(
                     "system-update-skipped",
-                    &format!("{want} was written before and did not boot; not retrying"),
+                    &format!("{want} was installed before and is not running (failed to boot or rolled back); not retrying"),
                 );
             }
             if !want.is_empty()
@@ -433,6 +436,31 @@ mod tests {
             )
             .unwrap_err();
         assert!(!a.exit, "{e}");
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn running_the_attempted_version_is_no_skip() {
+        // Slot b booted the update fine: the attempt marker still names it, but it runs.
+        let (mut a, _rx, _) = agent("ranfine");
+        let base = std::env::temp_dir().join(format!("tfctl-ok-{}", std::process::id()));
+        a.paths = update::Paths::under(&base);
+        std::fs::create_dir_all(base.join("root/etc")).unwrap();
+        std::fs::write(
+            base.join("root/etc/thinframe.system-version"),
+            "2026.10.b\n",
+        )
+        .unwrap();
+        sysupdate::mark_attempt(&a.paths, "2026.10.b").unwrap();
+        a.apply_config(&json::parse(r#"{"system_version":"2026.10.b"}"#).unwrap());
+        a.maybe_auto_update();
+        let ev = a.events.lock().unwrap().clone();
+        assert!(
+            ev.iter().all(|(k, _)| k != "system-update-skipped"),
+            "{ev:?}"
+        );
+        assert!(!a.busy.load(Ordering::SeqCst));
+        let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_file(&a.conf_path);
     }
 
