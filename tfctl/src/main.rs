@@ -46,6 +46,7 @@ mod status;
 mod statuspage;
 mod sys;
 mod sysupdate;
+mod touchfw;
 mod update;
 mod wifi;
 mod wifisetup;

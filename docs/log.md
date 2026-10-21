@@ -301,3 +301,35 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   PASS  C written to slot a, rebooted, C reports from slot a
   qemu-ab-test: 2026.10.21-7845dfb8-qemu -> -b -> -bad (rolled back) -> -c passed
   ```
+
+## 2026-10-21 Touch firmware for release images; TASK 8 status
+- Gap found while reviewing the release: `post-build.sh` warns "no touch firmware staged; touch will not
+  work on this image" for every CI image [V, release log]. A frame flashed from a release could not be
+  tapped, so the Wi-Fi page and PAIR were unusable. Building with `PF1007L_TOUCH_FIRMWARE` was the only
+  way to get touch.
+- Fix: `tfctl boot` step "touch firmware" (tfctl/src/touchfw.rs, docs/decisions.md). When the image
+  has no `/lib/firmware/silead/gsl_m86_hd.fw` and a silead device is unbound, it reads the table
+  read-only from the frame's own eMMC Android boot image, checks the SHA-256, caches it on /data, sets
+  firmware_class.path and re-probes. QEMU has no silead device, so the step does nothing there.
+- Evidence so far: `cargo test` 104 passed. `touchfw::tests` runs the whole chain on a synthetic
+  disk: boot image header v0, then gzip with stored blocks and a file name, then newc cpio, then an
+  ELF32 with `.rel.data` R_ARM_ABS32 pointers into `.rodata`, then the table. A wrong hash is
+  refused. The arithmetic for E025's real header (kernel 10,221,784 bytes, page 2048) puts the ramdisk at
+  page 4,993. armv7 binary 863,004 bytes. **On the frame: not yet.** TASKS section 6 has the check.
+- TASK 8 (`scripts/deploy.sh`) cannot pass as written, and its gate stays open. The script predates
+  the image this repo now builds:
+  - it uses `doas` and `rc-service`, which are not in the image;
+  - it untars over `/`, but the root is read-only ext4 with A/B slots;
+  - the dashboard is no longer `www/` on the frame but is served by the Go server (TASK 10).
+  The ways that replace it already exist and are verified: system updates through the server (S8,
+  M2); page changes now happen on the server. A new gate for fast iteration needs the owner's
+  call (product decision). Not loosened.
+
+## 2026-10-21 TASK 9: release with tfctl and the image
+- Run 39533807044 (workflow_dispatch on main 298a20f, 54 min, success) published v2026.10.21 with:
+  `tfctl-armv7` 850,216 bytes, `tfctl-armv7.sha256` (`shasum -c`: OK), `thinframe-sd.img.zst`
+  64,507,571 bytes, `system-v2026.10.21.tar` (zImage, rootfs.ext4.zst, sha256, version.json),
+  `qemu-test.txt` ("qemu-test: all checks passed") [V].
+- In the release rootfs (debugfs): `/usr/bin/iwctl` 104,908 bytes (readline fix, TASK 17) and
+  `/usr/bin/tfctl`. There is no hostapd (it is in the sim only) and no `/lib/firmware/silead`. That is
+  expected; the eMMC path above covers it.

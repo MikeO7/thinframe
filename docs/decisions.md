@@ -350,3 +350,23 @@ no one has to type a password into `flash.sh`, and moving house only takes a tap
   "Groovy Wifi" (WPA2) and "Cafe" (open). S35simwifi starts them. It is a shell init script, but
   it lives in the qemu-overlay that only qemu.fragment includes, so no frame image carries it.
 
+
+## Touch firmware from the frame's own eMMC
+
+The Silead table `gsl_m86_hd` is the vendor's, so it may not be in Git or in a published image.
+An owner who builds the image passes it in with `PF1007L_TOUCH_FIRMWARE`. A release image has none,
+and without it the frame cannot be tapped, so Wi-Fi setup and PAIR (TASK 17) would be stuck.
+- **Where it comes from.** Every PF1007L still has its Android on the eMMC. `tfctl boot` reads it from
+  there, at the Android boot image at sector 172,032 (recovery at 2,400,256 is the fallback). From that image
+  it takes the gzip cpio ramdisk, then `gslX680new.ko`, then the `gslx680_fw_grp` entry. The method is
+  ormarch E025/E028 and `image/vendor/extract_gsl_fw.py`, ported. **[D]** offsets, **[V]** parser on a
+  synthetic image.
+- **Safety.** The eMMC is opened with `File::open`, which is read-only, and only after its MBR is
+  checked as *not* ours. The module has no write path. "Never write the eMMC" holds by construction.
+- **Trust.** The result is used only if it has the silead page layout and the SHA-256 the project
+  tested (e11ffa8a…). Any other firmware, from a different panel batch, is refused and logged.
+- **Loading.** The root is read-only, so the file goes to `/data/thinframe/firmware/silead/` and
+  `/sys/module/firmware_class/parameters/path` points there. tfctl then asks the I2C bus to probe the
+  unbound `silead` device again (`/sys/bus/i2c/drivers_probe`). It does this on every boot, because
+  udev loads `silead` before /data is mounted.
+- **Cost.** No crate. It reuses png.rs's inflate and sha256.rs. +13 KB, so tfctl is 863 KB.

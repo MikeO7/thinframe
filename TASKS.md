@@ -42,6 +42,9 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] `image/build.sh` runs Buildroot in a Docker container (`image/Dockerfile.br`) with `dl/` and
       `ccache` on bind-mounted volumes so rebuilds take minutes. First build: 1 to 3 h.
 - [ ] Touch firmware: `PF1007L_TOUCH_FIRMWARE` copied into the overlay at build time, never committed.
+      Release images have none: `tfctl boot` then reads it, read-only, from the frame's own Android
+      boot image on the eMMC, checks its SHA-256 and keeps it on /data (tfctl/src/touchfw.rs; unit
+      tests on a synthetic boot image [V]; on the frame [U], see section 6).
 - [x] DEBUG fragment adds evtest, libinput-tools, i2c-tools, strace.
       (`DEBUG=1 image/build.sh rootfs`, own output tree, version `-debug`: evtest + strace; libinput
       tools and BusyBox i2c* are in every image; i2c-tools itself needs BUSYBOX_SHOW_OTHERS.)
@@ -78,6 +81,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 
 ## 6. Touch
 - [ ] `evtest` shows the Silead device. Firmware loaded (`dmesg | grep silead`).
+- [ ] Release image (no firmware in it): the boot log says `touch firmware read from /dev/mmcblkN
+      sector 172032`, `/data/thinframe/firmware/silead/gsl_m86_hd.fw` has SHA-256 e11ffa8a…, taps work.
 - [ ] Tapping the four corners of `www/index.html` (it prints coordinates) matches. Fix with
       `LIBINPUT_CALIBRATION_MATRIX` in `image/rootfs/etc/udev/rules.d/90-touch.rules`.
       Upstream found a vertical flip is needed relative to the rotated output. [D]
@@ -290,5 +295,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] Size audit: `du -sh` of the root, `ps` list at idle. Remove anything not in the README budget.
       (docs/log.md 2026-10-20: root 169 MiB, crond/seedrng/syslogd/klogd removed, DejaVu Serif and
       Condensed dropped, idle `ps` = README list + dbus for iwd. Re-check on the frame with cog up.)
-- [ ] GitHub Actions builds tfctl and the image on a tag and attaches both to a release.
+- [x] GitHub Actions builds tfctl and the image on a tag and attaches both to a release.
+      (release.yml run 39533807044 -> v2026.10.21: tfctl-armv7 + sha256, thinframe-sd.img.zst, system tar;
+      docs/log.md 2026-10-21. That run was dispatched; a pushed v* tag runs the same jobs.)
 - [ ] Speaker, accelerometer rotation, light sensor: see upstream `docs/hardware.md`. Not now.

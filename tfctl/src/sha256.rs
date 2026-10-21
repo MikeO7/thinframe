@@ -112,7 +112,6 @@ pub fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-#[cfg(test)]
 pub fn sha256_hex(data: &[u8]) -> String {
     let mut s = Sha256::new();
     s.update(data);
