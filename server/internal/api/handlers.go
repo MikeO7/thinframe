@@ -164,18 +164,23 @@ func (s *Server) handlePostAction(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleBeacon takes the page's touch latency measurement (no auth: sendBeacon cannot set headers).
+// Only known frames are updated; the store keeps the last MaxTouchSamples.
 func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		LatencyMS int    `json:"latency_ms"`
-		Widget    string `json:"widget"`
+		LatencyMS   int    `json:"latency_ms"`
+		PaintedAtMS int64  `json:"painted_at_ms"`
+		Widget      string `json:"widget"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in)
 	if in.LatencyMS > 0 && in.LatencyMS < 10000 {
-		_, _ = s.Store.Update(r.PathValue("id"), func(f *store.Frame) {
-			if f.Last != nil {
-				f.Last.LatencyMS = in.LatencyMS
-			}
-		})
+		if _, err := s.Store.Get(r.PathValue("id")); err == nil {
+			_, _ = s.Store.Update(r.PathValue("id"), func(f *store.Frame) {
+				if f.Touch == nil {
+					f.Touch = &store.Touch{}
+				}
+				f.Touch.Add(in.LatencyMS, in.PaintedAtMS, time.Now().UTC())
+			})
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

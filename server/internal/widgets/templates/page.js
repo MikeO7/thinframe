@@ -43,15 +43,19 @@
   }
   connect();
 
-  let downAt = 0;
+  // Touch to paint: from when the input reached WebKit (e.timeStamp, or now if that is on another
+  // clock) until the frame after the highlight was drawn. painted_at_ms is the frame's wall clock
+  // then, so `tfctl bench` can measure from the moment it injected the tap.
   addEventListener('pointerdown', e => {
-    downAt = performance.now();
+    const now = performance.now();
+    const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 10000 ? e.timeStamp : now;
     const sec = e.target.closest('.w');
-    if (!sec) return;
-    sec.classList.add('touched');
+    if (sec) sec.classList.add('touched');
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const ms = Math.round(performance.now() - downAt);
-      navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/beacon', JSON.stringify({ latency_ms: ms, widget: sec.id }));
+      const end = performance.now();
+      navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/beacon', JSON.stringify({
+        latency_ms: Math.max(1, Math.round(end - t0)), widget: sec ? sec.id : '',
+        painted_at_ms: Math.round(performance.timeOrigin + end) }));
     }));
   }, { passive: true });
   const clear = () => widgets.forEach(w => w.classList.remove('touched'));

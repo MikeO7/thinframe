@@ -233,10 +233,23 @@ Levers, in the order to pull them (TASK 13):
    daemon (one-shot `ntpd -q` at boot and on resume), `dmesg` ring only.
 7. **Panel refresh**: run the page at the panel's native 59.7 Hz; no vsync-off tricks.
 
-Measurement, not opinion: TASK 13 adds `tfctl bench`, which replays a touch via `evemu` on the
-sim/qemu or a real frame and records touch→first-paint from `WEBKIT_SHOW_FPS` / a page-side
-`performance.now()` beacon posted to the server. The numbers go into the heartbeat so `/admin`
-shows latency per frame over time.
+Measurement, not opinion: `tfctl bench [TAPS]` (TASK 13) taps the middle of the panel through a
+virtual touchscreen. It uses `/dev/uinput` (`CONFIG_INPUT_UINPUT`) with raw ioctls; there is no
+evemu and no crate. The tap takes the real path through udev, libinput and cog. The page's
+`pointerdown` handler measures from the event's `timeStamp` to the frame after its highlight was
+drawn (two `requestAnimationFrame`s). It sends a beacon with that number and `painted_at_ms`, the
+wall clock at that frame.
+
+The server keeps the last 50 samples in `frame.touch`, apart from the heartbeat. They used to sit
+in `last_heartbeat.latency_ms`, so every heartbeat wiped them. `/admin` and MCP `list_frames` show
+the last value, p50 and max. bench reads `painted_at_ms` back with the frame's token and prints
+tap -> paint, which is everything but the touch controller's own I2C read. [V in QEMU, see
+log.md; on the panel: U]
+
+The WebProcess memory cap is cog's `--web-mem-limit=256` (MiB). WebKit drops caches at a third of
+that and collects hard at half (cog defaults). There is no kill threshold: the server watchdog
+already handles a hung page. Swap is off in the kernel (`# CONFIG_SWAP is not set`) and there is
+no zram.
 
 ## Two planes: control over one outbound WebSocket, data inside the page
 The frame never listens. `tfctl` dials `ws://<server>/api/frames/<id>/ws` with the bearer token
@@ -246,7 +259,7 @@ objects with a `type` field.
 | Direction | type | Payload |
 |---|---|---|
 | frame → server | `hello` | tfctl_version, system_version, slot, ip, boot_id |
-| frame → server | `heartbeat` (every 60 s, and on change) | mem_used_mb, temp_c, wifi_rssi, latency_ms, page_url, uptime_s |
+| frame → server | `heartbeat` (every 60 s, and on change) | mem_used_mb, temp_c, wifi_rssi, page_url, uptime_s (touch latency comes from the page's beacon) |
 | frame → server | `ack` | id of the command, ok/error |
 | server → frame | `config` | the full config object (same as GET /config) |
 | server → frame | `action` | id + one of reboot, restart-kiosk, reload-page, update-software, update-system, rollback, screenshot |

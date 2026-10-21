@@ -3,6 +3,7 @@
 //! channel and a temp conf file. The socket loop lives in agent.rs.
 use crate::agent::Agent;
 use crate::b64;
+use crate::bench;
 use crate::config;
 use crate::json::Value;
 use crate::kiosk::KioskCmd;
@@ -168,6 +169,7 @@ impl Agent {
                 self.artifacts.get("system")?;
                 self.start_system_update(ver)
             }
+            "bench" => self.start_bench(v),
             "rollback" => {
                 let slot = sysupdate::rollback(&self.paths)?;
                 self.event("rollback", &format!("booting slot {} next", slot.name()));
@@ -176,6 +178,29 @@ impl Agent {
             }
             other => Err(io::Error::other(format!("unknown action '{other}'"))),
         }
+    }
+
+    /// TASK 13: `tfctl bench` from the server (it needs root, which the agent has). Taps take
+    /// seconds, so it runs in its own thread; the result is a `bench` event.
+    fn start_bench(&mut self, v: &Value) -> io::Result<()> {
+        let taps = v
+            .field_string("taps")
+            .and_then(|t| t.parse().ok())
+            .unwrap_or(bench::TAPS)
+            .clamp(1, 50);
+        let (cfg, events) = (self.cfg.clone(), self.events.clone());
+        thread::Builder::new().name("bench".into()).spawn(move || {
+            let (kind, text) =
+                match bench::measure(&cfg, taps, &mut |l| eprintln!("tfctl: bench: {l}")) {
+                    Ok(s) => ("bench", s),
+                    Err(e) => ("bench-failed", e.to_string()),
+                };
+            eprintln!("tfctl: agent: event {kind}: {text}");
+            if let Ok(mut q) = events.lock() {
+                q.push((kind.into(), text));
+            }
+        })?;
+        Ok(())
     }
 
     /// Version from the action's `version` field, else the last config's.

@@ -40,6 +40,17 @@ acked() { frame | tr -d ' \n' | grep -q "{[^{}]*\"name\":\"$1\"[^{}]*\"ok\":true
 no_event() { ! event "$1"; }
 rendered() { curl -fsS "http://127.0.0.1:$PORT/frame/$ID" | grep -q "$1"; }
 stays() { sleep "$1"; on "$2" "$3"; }
+benched() { event bench && frame | tr -d '\n' | grep -o '"frame:bench"[^}]*' | tee -a "$RES"; }
+admin_touch() { curl -fsS "http://127.0.0.1:$PORT/admin" | grep -q 'p50 [0-9]* · max'; }
+# README budget: nothing runs but these (kernel threads aside; sh/ps are this ssh session;
+# hostapd is the QEMU image's simulated access point).
+OK_PROCS='hostapd|init|getty|dropbear|iwd|dbus-daemon|dhcpcd|udevd|udhcpd|tfctl|cog|WPEWebProcess|WPENetworkProcess|sh|ps|grep'
+procs() {	# kernel threads are [name] in args; the rest by program name
+	r 'ps -o args' | sed 1d | grep -v '^\[' | awk '{ sub(".*/", "", $1); sub(":$", "", $1); print $1 }' |
+		grep -v -E "^($OK_PROCS)$" | sort -u > "$W/extra-procs.txt" || true
+	cat "$W/extra-procs.txt" >&2; [ ! -s "$W/extra-procs.txt" ]
+}
+mem() { r 'free -m' | tee -a "$RES" | awk '/^Mem:/ { exit !($3 < 300) }'; }
 mkdir -p "$SHOTS"; rm -f "$SHOTS"/*.png
 echo "== bundle $B from system-$A.tar"
 make_bundles "$A" "$B"
@@ -67,6 +78,11 @@ check "PAIR pressed on the frame: server accepted it" wait_for 300 srv_has "POST
 check "the dashboard runs in cog (its JS pings /alive)" page_up "$a"
 check "heartbeat: A on slot a" wait_for 600 on "$A" a
 snap 5-dashboard 300 || true
+check "MCP frame_action bench" mcp_ok frame_action "{\"id\":\"$ID\",\"name\":\"bench\"}"
+check "bench: uinput taps paint on the page (event)" wait_for 180 benched
+check "/admin shows touch p50 and max" admin_touch
+check "only the README's processes run" procs
+check "under 300 MB used with the page up" mem
 
 check "MCP list_frames sees the frame online" mcp_online
 a=$(alive)

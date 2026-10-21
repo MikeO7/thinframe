@@ -263,7 +263,7 @@ func (s *Server) SetLayout(id string, l store.Layout) (store.Frame, error) {
 }
 
 // ValidActions lists what a frame understands.
-var ValidActions = []string{"reboot", "restart-kiosk", "reload-page", "screen", "update-software", "update-system", "rollback", "screenshot"}
+var ValidActions = []string{"reboot", "restart-kiosk", "reload-page", "screen", "update-software", "update-system", "rollback", "screenshot", "bench"}
 
 // Act queues an action and pushes it if the frame is online.
 func (s *Server) Act(id, name string, args map[string]string) (store.Action, error) {

@@ -378,3 +378,28 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   ```
 - Screens: docs/img/journey-1-wifi-list.jpg, -3-typed.jpg, -4-pair.jpg, -6-rotation-1.jpg, -9-after-reboot.jpg
   (the layout set over MCP, still there after update, rollback and reboot).
+
+## 2026-10-21 TASK 13 software: tfctl bench, touch record, WebProcess cap, process audit
+- **Bug: /admin's touch latency vanished.** The page's beacon wrote `last_heartbeat.latency_ms`, and
+  the next heartbeat replaced the whole record, so the value lasted at most one heartbeat. The
+  samples now live in `frame.touch` (last 50, plus p50 and max), and a beacon for an unknown frame
+  no longer touches the store. `TestTouchSurvivesHeartbeat` covers it [V].
+- `tfctl bench [TAPS]` (tfctl/src/bench.rs) and the `bench` frame action. The action exists because
+  `/dev/uinput` needs root and the agent has it.
+  - The kernel gets `CONFIG_INPUT_UINPUT`. A virtual direct-touch screen taps the middle of the panel.
+  - The page measures from `pointerdown`'s `timeStamp` to the frame after its highlight, then beacons
+    `painted_at_ms`. bench reads that back with the frame's token.
+  - Binary size: armv7 tfctl 879,260 bytes.
+- `cog --web-mem-limit=256`. Both the image's cog and the sim's are 0.18.4 and list the option [V].
+- QEMU journey test (`2026.10.21-941cf510-qemu`), now 41/41 PASS [V in QEMU]. The new checks:
+  - MCP `frame_action bench` -> event `7 of 10 taps painted; tap -> paint p50 70 ms, max 2239 ms;
+    in the page p50 53 ms, max 60 ms`.
+  - /admin shows p50 and max.
+  - `ps` shows only the README list (+ hostapd, the QEMU image's simulated AP).
+  - `free -m` with the page up: `Mem: 1000 total, 283 used`, `Swap: 0`.
+- These numbers are QEMU's, not the frame's:
+  - The emulated CPU (TCG) and Mesa software GL starve the WebProcess. In a separate run, taps went
+    unanswered and the page itself took up to 1.9 s.
+  - 283 MB used includes llvmpipe's buffers, which the frame's lima GPU does not need.
+  - The gate (under 50 ms, 60 fps, idle CPU under 5 %) is measured on the panel, so it stays open.
+- `tests/e2e.sh` (Docker sim): ok. `cargo test`: 108 passed. `go test ./...`: ok.

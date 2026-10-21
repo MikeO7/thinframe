@@ -291,3 +291,28 @@ func TestSplashConfig(t *testing.T) {
 		t.Fatalf("clearing the logo: %d %v", resp.StatusCode, cfg)
 	}
 }
+
+func TestTouchSurvivesHeartbeat(t *testing.T) {
+	s, ts := newTest(t, "secret")
+	if _, err := s.recordHeartbeat("f1", store.Heartbeat{IP: "10.0.0.5"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ms := range []int{40, 20, 30} {
+		do(t, "POST", ts.URL+"/api/frames/f1/beacon", "", map[string]any{"latency_ms": ms, "painted_at_ms": 1700000000000 + ms})
+	}
+	do(t, "POST", ts.URL+"/api/frames/ghost/beacon", "", map[string]any{"latency_ms": 9})
+	if _, err := s.recordHeartbeat("f1", store.Heartbeat{IP: "10.0.0.6"}); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := s.Store.Get("f1")
+	if f.Touch == nil || f.Touch.LastMS != 30 || f.Touch.PaintedAtMS != 1700000000030 || f.Touch.P50() != 30 || f.Touch.Max() != 40 {
+		t.Fatalf("touch after heartbeat: %+v", f.Touch)
+	}
+	if _, err := s.Store.Get("ghost"); err == nil {
+		t.Fatal("a beacon created an unknown frame")
+	}
+	_, page := do(t, "GET", ts.URL+"/admin", "", nil)
+	if !bytes.Contains(page, []byte("30 ms")) || !bytes.Contains(page, []byte("max 40")) {
+		t.Fatalf("admin does not show the touch latency")
+	}
+}

@@ -19,7 +19,7 @@ import (
 const Instructions = "thinframe manages wall-mounted picture frames. Each frame shows a dashboard " +
 	"rendered by this server. Start with list_frames. Change a frame with set_frame_config " +
 	"(rotation, brightness, schedule, splash) or set_layout (see list_widgets). frame_action reboots, " +
-	"updates or rolls back; omitting id targets every frame and needs confirm=true."
+	"updates, rolls back or runs bench (touch to paint, result in get_logs, samples in list_frames); omitting id targets every frame and needs confirm=true."
 
 // Handler returns the /mcp http.Handler with bearer auth matching the REST API.
 // Streamable HTTP, stateless: speaks MCP 2026-07-28 (server/discover, per-request _meta) and the
@@ -170,7 +170,7 @@ func register(m *sdk.Server, s *api.Server) {
 
 	type actIn struct {
 		ID      string `json:"id,omitempty" jsonschema:"frame id; omit with confirm=true to target every frame"`
-		Name    string `json:"name" jsonschema:"one of: reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot"`
+		Name    string `json:"name" jsonschema:"one of: reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot, bench"`
 		Arg     string `json:"arg,omitempty" jsonschema:"argument, e.g. on|off for screen"`
 		Confirm bool   `json:"confirm,omitempty" jsonschema:"required true when id is omitted (applies to all frames)"`
 	}

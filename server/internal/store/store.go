@@ -44,10 +44,50 @@ type Heartbeat struct {
 	SystemVersion string    `json:"system_version"`
 	Slot          string    `json:"slot"`
 	PageURL       string    `json:"page_url"`
-	LatencyMS     int       `json:"latency_ms"`
 	ScreenState   string    `json:"screen_state"`
 	CogPID        int       `json:"cog_pid"`
 	LoadAvg       float64   `json:"load_avg"`
+}
+
+// Touch is the page's own touch-to-paint measurement (its beacon), kept beside the heartbeat so a
+// heartbeat does not wipe it. PaintedAtMS is the frame's wall clock when the response was on
+// screen; `tfctl bench` compares it with the moment it injected the tap.
+type Touch struct {
+	LastMS      int       `json:"last_ms"`
+	PaintedAtMS int64     `json:"painted_at_ms,omitempty"`
+	SamplesMS   []int     `json:"samples_ms"` // oldest first, at most MaxTouchSamples
+	At          time.Time `json:"at"`
+}
+
+// MaxTouchSamples bounds Touch.SamplesMS.
+const MaxTouchSamples = 50
+
+// Add records one measurement.
+func (t *Touch) Add(ms int, paintedAtMS int64, at time.Time) {
+	t.LastMS, t.PaintedAtMS, t.At = ms, paintedAtMS, at
+	t.SamplesMS = append(t.SamplesMS, ms)
+	if n := len(t.SamplesMS); n > MaxTouchSamples {
+		t.SamplesMS = append([]int(nil), t.SamplesMS[n-MaxTouchSamples:]...)
+	}
+}
+
+// P50 is the median sample (0 with none).
+func (t Touch) P50() int {
+	if len(t.SamplesMS) == 0 {
+		return 0
+	}
+	s := append([]int(nil), t.SamplesMS...)
+	sort.Ints(s)
+	return s[len(s)/2]
+}
+
+// Max is the slowest sample.
+func (t Touch) Max() int {
+	m := 0
+	for _, v := range t.SamplesMS {
+		m = max(m, v)
+	}
+	return m
 }
 
 // Action is a one-shot command. It stays pending until the frame acks it.
@@ -96,6 +136,7 @@ type Frame struct {
 	FirstSeen time.Time  `json:"first_seen"`
 	LastSeen  time.Time  `json:"last_seen"`
 	Last      *Heartbeat `json:"last_heartbeat,omitempty"`
+	Touch     *Touch     `json:"touch,omitempty"`
 	Pending   []Action   `json:"pending_actions"`
 	History   []Action   `json:"action_history"`
 	Events    []Event    `json:"events"`
