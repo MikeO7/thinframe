@@ -1,0 +1,9 @@
+# U-Boot qemu_arm for the M2 A/B test (qemu.fragment): boot.cmd writes uEnv.txt and pf/uboot.env.
+CONFIG_FAT_WRITE=y
+CONFIG_CMD_SETEXPR=y
+CONFIG_CMD_SYSBOOT=y
+CONFIG_BOOTDELAY=0
+# Like the frame's build L: run /boot.scr from the card's first partition, not standard boot's
+# extlinux scan (which would skip the slot logic).
+CONFIG_USE_BOOTCOMMAND=y
+CONFIG_BOOTCOMMAND="virtio scan; load virtio 0:1 ${scriptaddr} /boot.scr && source ${scriptaddr}"

@@ -240,7 +240,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] M1 `sim/` fast mode: Debian trixie cog 0.18.4 headless + WPEWebDriver + real tfctl agent as
       frame `sim`, screenshots to `sim/out/frame.png`. Gate passed 2026-10-18: rotation 0 via REST
       gave a 375x600 portrait shot, rotation 3 gave 800x500 landscape; a layout PUT changed the shot.
-- [ ] M2 `sim/qemu/`: the REAL Buildroot image under `qemu-system-arm -M virt` (same rootfs.ext4,
+- [x] M2 `sim/qemu/`: the REAL Buildroot image under `qemu-system-arm -M virt` (same rootfs.ext4,
       same tfctl, same cog on DRM): a `pf1007l_qemu_defconfig` that reuses the main defconfig with
       the virt kernel fragment (virtio-gpu for /dev/dri/card0, virtio-input touchscreen, virtio-net,
       virtio-blk) and mesa swrast for GLES; `sim/qemu/run.sh` boots the A/B SD image with user-mode
@@ -250,6 +250,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       an A/B system update + rollback runs end-to-end inside QEMU. Slow (TCG), for correctness only.
       2026-10-20: frame registers and the screendump shows the dashboard (two bugs fixed, docs/log.md);
       A/B inside -M virt still open (direct kernel boot, no U-Boot).
+      2026-10-21: A/B passes inside -M virt: `BOARD=virt image/qemu-ab-test.sh` boots the QEMU=1 card
+      through U-Boot qemu_arm and the real boot.cmd slot logic (docs/log.md).
 - [x] M3 `docker compose --profile sim up --build` from the repo root starts both containers (README).
 - [x] M4 `tests/e2e.sh`: start both, wait for heartbeat, set config via MCP, assert screenshot changed.
       (`tests/e2e.sh` with compose.yml; CI job `e2e-sim`. `tests/e2e-native.sh` covers the no-Docker path.)
@@ -258,6 +260,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] Confirm GPU compositing in WPE on lima (`WEBKIT_SHOW_FPS=1`); fix before anything else.
 - [ ] cpufreq governor experiment: performance vs ondemand, record touch latency and idle temp.
 - [ ] libinput: no gestures/tap timeouts; page uses pointer events and `touch-action: none`.
+      (Page side done: server page.css `touch-action:none`, page.js pointer events; the local Wi-Fi and
+      PAIR pages use `touch-action:manipulation` (the network list scrolls). libinput: on the frame.)
 - [ ] No swap/zram; WebProcess memory cap env; `ps` audit shows only the allowed process list.
 - [ ] `tfctl bench`: replay a tap, record touch→first-paint; beacon from page; shown in /admin.
 - Gate: touch→response under 50 ms, 60 fps in a 10 s swipe test, idle CPU under 5 %, logged in docs/log.md.

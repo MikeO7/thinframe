@@ -352,7 +352,8 @@ fn file(path: &str, ctype: &'static str) -> Resp {
 // ---- pages (1280x800 landscape after cog's rotation; sized in vh/vw like pair.rs) ----
 
 const CSS: &str = "@font-face{font-family:Shrikhand;src:url(/font.ttf)}\
-html,body{margin:0;height:100%;overflow:hidden;background:#f4dcaa BG}\
+html,body{margin:0;height:100%;overflow:hidden;background:#f4dcaa BG;\
+user-select:none;-webkit-user-select:none;touch-action:manipulation}\
 body{color:#5b3a1e;font:3.4vh Shrikhand,Georgia,serif}\
 .card{position:absolute;left:4vw;top:7vh;width:56vw;max-height:80vh;box-sizing:border-box;padding:2.2vh 2.4vw 2.6vh;\
 background:#f4dcaa;border:.6vh solid #5b3a1e;border-radius:3vh;box-shadow:1.2vh 1.2vh 0 #b8452a}\

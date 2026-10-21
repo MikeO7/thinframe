@@ -56,6 +56,7 @@ docker run --rm -i \
 		[ -n "$BRTARGET" ] && exit 0
 		I=$O/images
 		mkdir -p $DEST
+		[ ! -f $I/u-boot.bin ] || cp $I/u-boot.bin $DEST/	# QEMU=1: U-Boot for -M virt (M2 A/B)
 		cp $I/thinframe-sd.img $I/system-$THINFRAME_VERSION.tar $I/rootfs.ext4 $I/zImage $I/*.dtb \
 			$I/boot.scr $I/slot-a.conf $DEST/
 		cp $O/build.log $DEST/buildroot.log

@@ -11,7 +11,7 @@ use crate::slot;
 use std::fs;
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, FileExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 /// cog's runtime dir is private; the status page is readable by anyone who logs in.
@@ -135,7 +135,7 @@ fn blkpg_resize(disk: &fs::File, start: u64, len: u64) -> io::Result<()> {
 }
 
 fn grow_data() -> io::Result<()> {
-    let cands = ["/dev/mmcblk0", "/dev/mmcblk1", "/dev/mmcblk2"].map(Path::new);
+    let cands = slot::DISKS.map(Path::new);
     let disk = slot::find_disk(&cands).ok_or_else(|| io::Error::other("no thinframe disk"))?;
     let name = disk.file_name().unwrap().to_string_lossy().to_string();
     let sectors: u64 = fs::read_to_string(format!("/sys/block/{name}/size"))?
@@ -152,16 +152,7 @@ fn grow_data() -> io::Result<()> {
     f.write_all_at(&p4_entry(&mbr, len), P4 as u64)?;
     f.sync_all()?;
     blkpg_resize(&f, start as u64, len as u64)?;
-    let p4: PathBuf = format!(
-        "{}{}4",
-        disk.display(),
-        if name.ends_with(|c: char| c.is_ascii_digit()) {
-            "p"
-        } else {
-            ""
-        }
-    )
-    .into();
+    let p4 = slot::part_n(&disk, 4);
     sh("resize2fs", &[&p4.to_string_lossy()])?;
     eprintln!("tfctl: boot: data partition now {} MiB", len as u64 / 2048);
     Ok(())

@@ -154,15 +154,24 @@ pub fn find_disk(candidates: &[&Path]) -> Option<std::path::PathBuf> {
     })
 }
 
+/// Where the card can be: the frame's SD slot (mmcblk*), or virtio-blk under `qemu -M virt` (M2).
+/// `find_disk` still takes only the one with our MBR signature.
+pub const DISKS: [&str; 4] = ["/dev/mmcblk0", "/dev/mmcblk1", "/dev/mmcblk2", "/dev/vda"];
+
 /// `/dev/mmcblk0` + slot -> `/dev/mmcblk0p2`.
 pub fn part_dev(disk: &Path, slot: Slot) -> std::path::PathBuf {
+    part_n(disk, slot.part())
+}
+
+/// Partition `n` of a whole disk: `/dev/mmcblk0` + 1 -> `/dev/mmcblk0p1`, `/dev/vda` + 1 -> `/dev/vda1`.
+pub fn part_n(disk: &Path, n: u8) -> std::path::PathBuf {
     let s = disk.to_string_lossy();
     let sep = if s.ends_with(|c: char| c.is_ascii_digit()) {
         "p"
     } else {
         ""
     };
-    std::path::PathBuf::from(format!("{s}{sep}{}", slot.part()))
+    std::path::PathBuf::from(format!("{s}{sep}{n}"))
 }
 
 #[cfg(test)]
@@ -235,6 +244,10 @@ mod tests {
         assert_eq!(
             part_dev(Path::new("/dev/sda"), Slot::A).to_str().unwrap(),
             "/dev/sda2"
+        );
+        assert_eq!(
+            part_n(Path::new("/dev/vda"), 1).to_str().unwrap(),
+            "/dev/vda1"
         );
         fs::remove_dir_all(&dir).unwrap();
     }

@@ -74,7 +74,7 @@ pub fn render(
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>thinframe</title><style>\
          @font-face{{font-family:Shrikhand;src:url(\"file:///usr/share/fonts/thinframe/Shrikhand-Regular.ttf\")}}\
-         html,body{{margin:0;height:100%;overflow:hidden;background:{bg}}}\
+         html,body{{margin:0;height:100%;overflow:hidden;background:{bg};user-select:none;-webkit-user-select:none;touch-action:manipulation}}\
          body{{color:#5b3a1e;font:3.6vh Shrikhand,Georgia,serif}}\
          main{{position:absolute;left:5vw;top:40vh;width:54vw;padding:2.5vh 3vw 3.5vh;\
          background:#f4dcaa;border:.6vh solid #5b3a1e;border-radius:3vh;box-shadow:1.2vh 1.2vh 0 #b8452a}}\
