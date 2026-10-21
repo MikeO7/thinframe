@@ -10,43 +10,9 @@ set -euo pipefail
 # shellcheck source=SCRIPTDIR/qemu-lib.sh
 . "$(dirname "$0")/qemu-lib.sh"
 RES="$OUT/qemu-ab-test.txt"
-A="$(cat "$OUT/system-version" 2>/dev/null || true)"
-# The QEMU=1 build writes no system-version: take its newest bundle (names are ours, ls is fine).
-# shellcheck disable=SC2012
-[ -n "$A" ] || { A="$(ls -t "$OUT"/system-*.tar 2>/dev/null | head -1)"; A="${A##*/system-}"; A="${A%.tar}"; }
-if [ -z "$A" ] || [ ! -f "$OUT/system-$A.tar" ]; then echo "STOP: no system-<ver>.tar in $OUT; build the image first" >&2; exit 1; fi
-B="$A-b"; BAD="$A-bad"; C="$A-c"
-TFCTL="$HERE/work/tfctl/tfctl"
-
+A="$(built_version)"; B="$A-b"; BAD="$A-bad"; C="$A-c"
 echo "== bundles $B $BAD $C from system-$A.tar"
-rm -rf "$W/bundles" && mkdir -p "$W/bundles"
-cp "$OUT/system-$A.tar" "$W/bundles/"
-docker run --rm -v thinframe-br:/br -v "$W/bundles":/b -e A="$A" -e B="$B" -e BAD="$BAD" -e C="$C" \
-	thinframe-br bash -euo pipefail -c '
-	DFS=$(ls /br/output*/host/sbin/debugfs | head -1)
-	mk() {	# version [break]
-		d=/b/$1; mkdir -p $d && tar -xf /b/system-$A.tar -C $d
-		zstd -q -d $d/rootfs.ext4.zst -o $d/rootfs.ext4 && rm $d/rootfs.ext4.zst
-		echo "$1" > $d/ver
-		$DFS -w -R "rm /etc/thinframe.system-version" $d/rootfs.ext4 >/dev/null 2>&1
-		$DFS -w -R "write $d/ver /etc/thinframe.system-version" $d/rootfs.ext4 >/dev/null 2>&1
-		[ -z "${2:-}" ] || for f in /sbin/init /bin/sh; do $DFS -w -R "rm $f" $d/rootfs.ext4 >/dev/null 2>&1; done
-		zstd -q -19 -T0 $d/rootfs.ext4 -o $d/rootfs.ext4.zst && rm $d/rootfs.ext4 $d/ver
-		(cd $d && sha256sum zImage rootfs.ext4.zst > sha256 && printf "{\"version\":\"%s\"}\n" "$1" > version.json)
-		tar -C $d -cf /b/system-$1.tar zImage rootfs.ext4.zst sha256 version.json && rm -rf $d
-	}
-	mk $B; mk $BAD broken; mk $C'
-# Software version stays $A (what the image carries), so only the system layer moves.
-for v in "$B" "$BAD" "$C"; do
-	"$ROOT/scripts/make-artifacts.sh" "$A" "$TFCTL" "$W/bundles/system-$v.tar" "$W/art-$v" >/dev/null
-done
-
-frame() { api "/api/frames/$ID"; }
-on() {	# version slot: the last heartbeat reports both
-	frame | tr -d ' \n' | grep -q "\"last_heartbeat\":{[^}]*\"system_version\":\"$1\"" &&
-		frame | tr -d ' \n' | grep -q "\"last_heartbeat\":{[^}]*\"slot\":\"$2\""
-}
-event() { frame | grep -q "\"frame:$1\""; }	# the server prefixes frame events
+make_bundles "$A" "$B" -bad "$BAD" "$C"
 
 prepare_image
 start_server

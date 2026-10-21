@@ -84,7 +84,9 @@ pub struct Targets {
     pub user_keys: PathBuf,
     /// `/data/ssh/authorized_keys`, bind-mounted over /etc/dropbear by the image.
     pub dropbear_keys: PathBuf,
-    pub hostname_file: PathBuf,
+    /// Where to keep the name; None on the frame, whose root is read-only: `tfctl boot` sets the
+    /// hostname from FRAME_ID in thinframe.conf on every boot instead.
+    pub hostname_file: Option<PathBuf>,
     /// Run `hostname NAME` too (only on the frame).
     pub set_hostname: bool,
 }
@@ -97,7 +99,7 @@ impl Targets {
             conf: config::path().into(),
             user_keys: "/home/frame/.ssh/authorized_keys".into(),
             dropbear_keys: "/data/ssh/authorized_keys".into(),
-            hostname_file: "/etc/hostname".into(),
+            hostname_file: None,
             set_hostname: true,
         }
     }
@@ -110,7 +112,7 @@ impl Targets {
             conf: base.join("thinframe.conf"),
             user_keys: base.join("home/.ssh/authorized_keys"),
             dropbear_keys: base.join("data/ssh/authorized_keys"),
-            hostname_file: base.join("hostname"),
+            hostname_file: Some(base.join("hostname")),
             set_hostname: false,
         }
     }
@@ -183,9 +185,10 @@ pub fn apply(t: &Targets) -> io::Result<bool> {
         }
     }
     if let Some(name) = &p.frame_id {
-        // Best effort: /etc may be read-only; FRAME_ID in thinframe.conf is the durable copy.
-        if let Err(e) = fs::write(&t.hostname_file, format!("{name}\n")) {
-            eprintln!("tfctl: provision: {}: {e}", t.hostname_file.display());
+        if let Some(f) = &t.hostname_file {
+            if let Err(e) = fs::write(f, format!("{name}\n")) {
+                eprintln!("tfctl: provision: {}: {e}", f.display());
+            }
         }
         if t.set_hostname {
             let _ = Command::new("hostname").arg(name).status();
@@ -293,7 +296,10 @@ mod tests {
                 0o755
             );
         }
-        assert_eq!(fs::read_to_string(&t.hostname_file).unwrap(), "kitchen\n");
+        assert_eq!(
+            fs::read_to_string(t.hostname_file.as_ref().unwrap()).unwrap(),
+            "kitchen\n"
+        );
         // Second run with the same file: same result, key not duplicated.
         fs::write(t.boot_dir.join(FILE), EXAMPLE).unwrap();
         assert!(apply(&t).unwrap());
@@ -316,7 +322,7 @@ mod tests {
         assert!(apply(&t).unwrap());
         assert!(!t.iwd_dir.exists(), "short psk rejected");
         assert!(!t.user_keys.exists());
-        assert!(!t.hostname_file.exists());
+        assert!(!t.hostname_file.as_ref().unwrap().exists());
         let c = config::load(t.conf.to_str().unwrap()).unwrap();
         assert_eq!((c.token.as_str(), c.frame_id.as_str()), ("abc", "frame"));
         assert!(run(&["--bogus".into()]).is_err());
