@@ -88,7 +88,7 @@ func main() {
 	}
 	srv := api.New(st, opts)
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcp.Handler(srv))
+	mux.Handle("/mcp", mcp.Handler(srv, Version))
 	mux.Handle("/", srv.Routes())
 
 	hs := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: mux, ReadHeaderTimeout: 10 * time.Second}

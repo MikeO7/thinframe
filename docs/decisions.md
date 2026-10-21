@@ -177,6 +177,22 @@ widget top-left on all frames", "update every frame to the latest system image",
 the sim frame looks like". Go: `github.com/modelcontextprotocol/go-sdk`. Tools are thin wrappers
 over the same handlers the REST API and `/admin` use, so there is one code path.
 
+**Protocol (2026-10-21).** The server is stateless streamable HTTP on go-sdk v1.8.0, which is the newest
+release. It serves spec 2026-07-28 (`server/discover`, per-request `_meta`, `resultType`, `ttlMs`/`cacheScope`)
+and, for older clients, the initialize handshake back to 2024-11-05. The SDK negotiates the version per
+request. **[V]** in `internal/mcp/mcp_test.go` (raw JSON-RPC for every version), and against real clients:
+Python `mcp` 2.3.0 and 1.30.0 (what Hermes Agent uses), the TypeScript Inspector CLI, and the Docker image.
+- **Results are objects.** Clients on versions before 2026-07-28 validate `structuredContent` as an object.
+  `list_frames` used to return a bare array, and Python `mcp` 1.30 failed on it with a pydantic
+  `ValidationError`. The output is now `{frames}`, `{actions}` and `{events}`.
+- **Hints.** Every tool has a title and annotations (read-only, destructive, idempotent; openWorld false).
+  Clients use them to decide what needs a confirmation.
+- **Origin.** `http.CrossOriginProtection` refuses cross-site browser requests, as the transport spec
+  requires. CLI clients send no Origin and pass.
+- **Auth.** It stays a static bearer token, with `WWW-Authenticate: Bearer` on a 401. An OAuth 2.1
+  authorization server would be a second service for a home LAN. Every client named above takes a
+  header. **[U]** enough until a client needs OAuth.
+
 Initial tool list (TASK S7):
 
 | Tool | Does |
