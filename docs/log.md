@@ -333,3 +333,15 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - In the release rootfs (debugfs): `/usr/bin/iwctl` 104,908 bytes (readline fix, TASK 17) and
   `/usr/bin/tfctl`. There is no hostapd (it is in the sim only) and no `/lib/firmware/silead`. That is
   expected; the eMMC path above covers it.
+
+## 2026-10-21 MCP: newest spec, checked against Hermes's client
+- go-sdk v1.8.0 is the latest release (`go list -m -versions`). Spec 2026-07-28: `server/discover` lists
+  `["2026-07-28","2025-11-25","2025-06-18","2025-03-26","2024-11-05"]` [V, curl and test].
+- Bug: Python `mcp` 1.30.0 (Hermes Agent's MCP client) failed on `list_frames` against main with
+  `pydantic ValidationError ... CallToolResult` (structuredContent was an array) [V]. Fixed: results are now
+  objects. Added titles, annotations, instructions, the real server version, Origin checking, and
+  WWW-Authenticate on a 401.
+- After the fix [V]: Python `mcp` 2.3.0 and 1.30.0 negotiate 2025-11-25, list 8 tools with hints, and
+  call list_frames, release_status and list_widgets with no error. The Inspector CLI (TypeScript SDK) does
+  tools/list and tools/call. The same Python client against the Docker image `server/Dockerfile` passes.
+  `go test ./...` passes.

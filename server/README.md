@@ -36,11 +36,30 @@ The control socket's `hello` reply carries `time_unix`, `tz` (`$TZ`, else `/etc/
 and `server_version`.
 
 ## MCP
-`/mcp` (streamable HTTP, `Authorization: Bearer $FRAME_TOKEN`). Add to Claude Code:
+`/mcp`: streamable HTTP, stateless, `Authorization: Bearer $FRAME_TOKEN`. Speaks MCP
+**2026-07-28** (`server/discover`, no handshake) and falls back per client to 2025-11-25, 2025-06-18,
+2025-03-26 and 2024-11-05. Official Go SDK v1.8.0. Tools carry titles and read-only/destructive
+hints, results are JSON objects (structuredContent), and browser requests from other sites are refused.
 
+Claude Code:
 ```sh
 claude mcp add --transport http thinframe http://nas.local:8080/mcp --header "Authorization: Bearer $FRAME_TOKEN"
 ```
+
+Hermes Agent (`~/.hermes/config.yaml`):
+```yaml
+mcp_servers:
+  thinframe:
+    url: "http://nas.local:8080/mcp"
+    headers:
+      Authorization: "Bearer <FRAME_TOKEN>"
+```
+
+Any other client (Cursor, Codex, Claude Desktop through a remote connector, the MCP Inspector) works the same way:
+URL `http://<host>:8080/mcp`, transport "streamable HTTP" (sometimes just "http"), the header above. There is no
+OAuth. A client that insists on OAuth needs the header option.
+Check it with `npx @modelcontextprotocol/inspector --cli http://nas.local:8080/mcp --transport http
+--header "Authorization: Bearer $FRAME_TOKEN" --method tools/list`.
 
 Then: "list my frames", "rotate kitchen to landscape", "update all frames to the latest system",
 "what does the sim frame look like right now". Tool table in `docs/decisions.md`.

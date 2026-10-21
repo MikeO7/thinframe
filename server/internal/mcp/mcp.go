@@ -4,7 +4,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,13 +15,29 @@ import (
 	"github.com/MikeO7/thinframe/server/internal/widgets"
 )
 
+// Instructions tell an MCP client (Claude Code, Hermes, ...) what this server is for.
+const Instructions = "thinframe manages wall-mounted picture frames. Each frame shows a dashboard " +
+	"rendered by this server. Start with list_frames. Change a frame with set_frame_config " +
+	"(rotation, brightness, schedule, splash) or set_layout (see list_widgets). frame_action reboots, " +
+	"updates or rolls back; omitting id targets every frame and needs confirm=true."
+
 // Handler returns the /mcp http.Handler with bearer auth matching the REST API.
-func Handler(s *api.Server) http.Handler {
-	server := sdk.NewServer(&sdk.Implementation{Name: "thinframe", Version: "0.1.0"}, nil)
+// Streamable HTTP, stateless: speaks MCP 2026-07-28 (server/discover, per-request _meta) and the
+// older initialize handshake (2025-11-25 back to 2024-11-05), negotiated per client by the SDK.
+func Handler(s *api.Server, version string) http.Handler {
+	server := sdk.NewServer(&sdk.Implementation{Name: "thinframe", Title: "thinframe", Version: version},
+		&sdk.ServerOptions{Instructions: Instructions})
 	register(server, s)
-	h := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{Stateless: true})
+	h := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{
+		Stateless: true,
+		// The spec requires Origin validation: a browser page from another site is refused.
+		// CLI clients send no Origin and pass.
+		CrossOriginProtection: http.NewCrossOriginProtection(),
+		MaxRequestBodyBytes:   1 << 20,
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.TokenOK(r) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="thinframe", error="invalid_token"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -30,10 +45,33 @@ func Handler(s *api.Server) http.Handler {
 	})
 }
 
+func ptr[T any](v T) *T { return &v }
+
+// Hints for clients that ask before running a tool. Nothing here reaches outside the server and
+// its frames, so OpenWorld is false everywhere.
+var (
+	readOnly    = &sdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr(false)}
+	safeWrite   = &sdk.ToolAnnotations{DestructiveHint: ptr(false), IdempotentHint: true, OpenWorldHint: ptr(false)}
+	replaces    = &sdk.ToolAnnotations{DestructiveHint: ptr(true), IdempotentHint: true, OpenWorldHint: ptr(false)}
+	destructive = &sdk.ToolAnnotations{DestructiveHint: ptr(true), OpenWorldHint: ptr(false)}
+)
+
+func tool(name, title, desc string, a *sdk.ToolAnnotations) *sdk.Tool {
+	ann := *a
+	ann.Title = title
+	return &sdk.Tool{Name: name, Title: title, Description: desc, Annotations: &ann}
+}
+
 type idIn struct {
 	ID string `json:"id" jsonschema:"frame id, e.g. kitchen"`
 }
 type empty struct{}
+
+// Results are JSON objects: structuredContent and outputSchema must be objects for clients on
+// protocol versions before 2026-07-28 (the Python and TypeScript SDKs validate this).
+type framesOut struct {
+	Frames []frameOut `json:"frames"`
+}
 
 type frameOut struct {
 	ID      string         `json:"id"`
@@ -48,24 +86,19 @@ func toOut(s *api.Server, f store.Frame) frameOut {
 	return frameOut{ID: f.ID, Name: f.Name, Online: s.Online(f), Config: s.ConfigFor(f), Last: f.Last, Pending: len(f.Pending)}
 }
 
-func text(v any) *sdk.CallToolResult {
-	b, _ := json.MarshalIndent(v, "", "  ")
-	return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(b)}}}
-}
-
 func register(m *sdk.Server, s *api.Server) {
-	sdk.AddTool(m, &sdk.Tool{Name: "list_frames", Description: "List every known frame with online state, last heartbeat (ip, memory, temperature, latency, versions) and config."},
-		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, []frameOut, error) {
+	sdk.AddTool(m, tool("list_frames", "List frames", "List every known frame with online state, last heartbeat (ip, memory, temperature, latency, versions) and config.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, framesOut, error) {
 			fs := s.Store.List()
-			out := make([]frameOut, len(fs))
+			out := framesOut{Frames: make([]frameOut, len(fs))}
 			for i, f := range fs {
-				out[i] = toOut(s, f)
+				out.Frames[i] = toOut(s, f)
 			}
-			return text(out), out, nil
+			return nil, out, nil
 		})
 
-	sdk.AddTool(m, &sdk.Tool{Name: "get_frame", Description: "Full detail for one frame: config, layout, pending actions, last 20 events."},
-		func(_ context.Context, _ *sdk.CallToolRequest, in idIn) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(m, tool("get_frame", "Get frame", "Full detail for one frame: config, layout, pending actions, last 20 events.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, in idIn) (*sdk.CallToolResult, map[string]any, error) {
 			f, err := s.Store.Get(in.ID)
 			if err != nil {
 				return nil, nil, err
@@ -75,7 +108,7 @@ func register(m *sdk.Server, s *api.Server) {
 				ev = ev[len(ev)-20:]
 			}
 			out := map[string]any{"frame": toOut(s, f), "layout": f.Layout, "pending": f.Pending, "events": ev}
-			return text(out), out, nil
+			return nil, out, nil
 		})
 
 	type setCfgIn struct {
@@ -91,7 +124,7 @@ func register(m *sdk.Server, s *api.Server) {
 		SplashBG   *string  `json:"splash_bg,omitempty" jsonschema:"boot splash background #rrggbb"`
 		SplashPNG  *string  `json:"splash_png,omitempty" jsonschema:"boot logo as base64 PNG, at most 48 KiB; empty stops sending it (the frame keeps its last logo)"`
 	}
-	sdk.AddTool(m, &sdk.Tool{Name: "set_frame_config", Description: "Change one or more config fields on a frame. Pushed to the frame immediately if it is online."},
+	sdk.AddTool(m, tool("set_frame_config", "Set frame config", "Change one or more config fields on a frame. Pushed to the frame immediately if it is online.", safeWrite),
 		func(_ context.Context, _ *sdk.CallToolRequest, in setCfgIn) (*sdk.CallToolResult, map[string]any, error) {
 			patch := map[string]any{}
 			if in.Name != nil {
@@ -132,7 +165,7 @@ func register(m *sdk.Server, s *api.Server) {
 				return nil, nil, err
 			}
 			out := s.ConfigFor(f)
-			return text(out), out, nil
+			return nil, out, nil
 		})
 
 	type actIn struct {
@@ -141,35 +174,38 @@ func register(m *sdk.Server, s *api.Server) {
 		Arg     string `json:"arg,omitempty" jsonschema:"argument, e.g. on|off for screen"`
 		Confirm bool   `json:"confirm,omitempty" jsonschema:"required true when id is omitted (applies to all frames)"`
 	}
-	sdk.AddTool(m, &sdk.Tool{Name: "frame_action", Description: "Send a one-shot action to a frame (or all frames with confirm=true). Returns the queued action; the frame acks it over its socket."},
-		func(_ context.Context, _ *sdk.CallToolRequest, in actIn) (*sdk.CallToolResult, any, error) {
+	type actionsOut struct {
+		Actions []store.Action `json:"actions"`
+	}
+	sdk.AddTool(m, tool("frame_action", "Frame action", "Send a one-shot action to a frame (or all frames with confirm=true). Returns the queued actions; the frame acks each over its socket.", destructive),
+		func(_ context.Context, _ *sdk.CallToolRequest, in actIn) (*sdk.CallToolResult, actionsOut, error) {
 			var args map[string]string
 			if in.Arg != "" {
 				args = map[string]string{"arg": in.Arg}
 			}
 			if in.ID == "" {
 				if !in.Confirm {
-					return nil, nil, fmt.Errorf("refusing to act on all frames without confirm=true")
+					return nil, actionsOut{}, fmt.Errorf("refusing to act on all frames without confirm=true")
 				}
-				var out []store.Action
+				out := actionsOut{Actions: []store.Action{}}
 				for _, f := range s.Store.List() {
 					a, err := s.Act(f.ID, in.Name, args)
 					if err != nil {
-						return nil, nil, err
+						return nil, actionsOut{}, err
 					}
-					out = append(out, a)
+					out.Actions = append(out.Actions, a)
 				}
-				return text(out), out, nil
+				return nil, out, nil
 			}
 			a, err := s.Act(in.ID, in.Name, args)
 			if err != nil {
-				return nil, nil, err
+				return nil, actionsOut{}, err
 			}
-			return text(a), a, nil
+			return nil, actionsOut{Actions: []store.Action{a}}, nil
 		})
 
-	sdk.AddTool(m, &sdk.Tool{Name: "list_widgets", Description: "Widget types available for layouts, with their props."},
-		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(m, tool("list_widgets", "List widgets", "Widget types available for layouts, with their props.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, map[string]any, error) {
 			out := map[string]any{
 				"types": widgets.Types,
 				"props": map[string]string{
@@ -179,28 +215,28 @@ func register(m *sdk.Server, s *api.Server) {
 				"grid":    "cols x rows (1..12 each); widgets have x,y,w,h in cells and must not overlap",
 				"example": store.DefaultLayout(),
 			}
-			return text(out), out, nil
+			return nil, out, nil
 		})
 
 	type layoutIn struct {
 		ID     string       `json:"id" jsonschema:"frame id"`
 		Layout store.Layout `json:"layout" jsonschema:"the complete layout to set (cols, rows, theme, widgets[])"`
 	}
-	sdk.AddTool(m, &sdk.Tool{Name: "set_layout", Description: "Replace a frame's dashboard layout. Validated (grid bounds, overlaps, known types). The page reloads immediately."},
+	sdk.AddTool(m, tool("set_layout", "Set layout", "Replace a frame's dashboard layout. Validated (grid bounds, overlaps, known types). The page reloads immediately.", replaces),
 		func(_ context.Context, _ *sdk.CallToolRequest, in layoutIn) (*sdk.CallToolResult, store.Layout, error) {
 			f, err := s.SetLayout(in.ID, in.Layout)
 			if err != nil {
 				return nil, store.Layout{}, err
 			}
-			return text(f.Layout), f.Layout, nil
+			return nil, f.Layout, nil
 		})
 
 	type logsIn struct {
 		ID string `json:"id"`
 		N  int    `json:"n,omitempty" jsonschema:"number of events, default 50"`
 	}
-	sdk.AddTool(m, &sdk.Tool{Name: "get_logs", Description: "Recent events for a frame: connections, config pushes, actions and their acks, frame-reported events."},
-		func(_ context.Context, _ *sdk.CallToolRequest, in logsIn) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(m, tool("get_logs", "Get logs", "Recent events for a frame: connections, config pushes, actions and their acks, frame-reported events.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, in logsIn) (*sdk.CallToolResult, map[string]any, error) {
 			f, err := s.Store.Get(in.ID)
 			if err != nil {
 				return nil, nil, err
@@ -214,12 +250,12 @@ func register(m *sdk.Server, s *api.Server) {
 			for _, e := range ev {
 				fmt.Fprintf(&sb, "%s %-10s %s\n", e.At.Format("2006-01-02 15:04:05"), e.Kind, e.Text)
 			}
-			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: sb.String()}}}, ev, nil
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: sb.String()}}}, map[string]any{"events": ev}, nil
 		})
 
-	sdk.AddTool(m, &sdk.Tool{Name: "release_status", Description: "Which tfctl/system versions this server carries and which frames are behind."},
-		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(m, tool("release_status", "Release status", "Which tfctl/system versions this server carries and which frames are behind.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, map[string]any, error) {
 			out := s.ReleaseStatus()
-			return text(out), out, nil
+			return nil, out, nil
 		})
 }
