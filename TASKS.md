@@ -211,11 +211,14 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] S4 FRAME_TOKEN bearer auth on /api and /mcp (frame page and admin stay LAN-open).
 - [x] S7 MCP: `/mcp` streamable HTTP with bearer auth, tools from decisions.md table, each calling the
       same handler as REST. Gate: from Claude Code, "rotate frame sim to 1" changes the sim screenshot.
-- [ ] S8 Weekly `release.yml`: rebuild the Buildroot image on the pinned LTS branch + pinned kernel, QEMU boot test, publish
+- [x] S8 Weekly `release.yml`: rebuild the Buildroot image on the pinned LTS branch + pinned kernel, QEMU boot test, publish
       container with the new `system-<date>.tar` embedded. Dependabot for Go (server), Cargo (tfctl) and GitHub Actions.
+      (Cron Mondays 04:17 UTC; run 39494363118 green: release v2026.10.20 carries qemu-test.txt and
+      system-v2026.10.20.tar, ghcr.io/mikeo7/thinframe-server:v2026.10.20 pushed. .github/dependabot.yml
+      covers gomod server+sim, cargo, github-actions, docker.)
 - [x] S9 Frames auto-register on first heartbeat with a valid token (no pre-creation in admin).
-- [ ] S10 `release.yml` publishes `thinframe-sd.img.zst` + `.sha256` as a GitHub release asset on tag,
-      so flash.sh never needs a local build.
+- [x] S10 `release.yml` publishes `thinframe-sd.img.zst` + `.sha256` as a GitHub release asset on tag,
+      so flash.sh never needs a local build. (v2026.10.20: thinframe-sd.img.zst 64 MB + .sha256.)
 - [x] S6 Artifacts: `scripts/make-artifacts.sh` (run by release.yml after cross-building tfctl) stages
       `tfctl-armv7`, `overlay.tar.gz`, `versions.json` into `server/artifacts/`, which the Dockerfile copies to
       `/artifacts`; server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.

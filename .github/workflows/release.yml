@@ -1,7 +1,7 @@
 name: release
 # Tag v* or the weekly schedule: build the Buildroot card image + OS bundle against the pinned
 # LTS tree and kernel, boot it in QEMU, then publish a GitHub release (thinframe-sd.img.zst for
-# flash.sh, system-<ver>.tar for A/B updates) and the server image that carries the bundle.
+# flash.sh, system-<ver>.tar for A/B updates, tfctl-armv7) and the server image that carries the bundle.
 on:
   push:
     tags: ['v*']
@@ -101,6 +101,12 @@ jobs:
           (cd tfctl && cargo zigbuild --release --target armv7-unknown-linux-musleabihf)
           scripts/make-artifacts.sh "${{ needs.image.outputs.version }}" \
             tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl image/out/system-*.tar
+      - name: tfctl as a release asset (TASK 9)
+        run: |
+          mkdir -p rel && cp tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl rel/tfctl-armv7
+          (cd rel && sha256sum tfctl-armv7 > tfctl-armv7.sha256)
+      - uses: actions/upload-artifact@v4
+        with: { name: tfctl, path: "rel/tfctl-armv7*" }
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v4
@@ -125,10 +131,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: image, path: out }
+      - uses: actions/download-artifact@v4
+        with: { name: tfctl, path: out }
       - env: { GH_TOKEN: "${{ github.token }}", V: "${{ needs.image.outputs.version }}" }
         run: |
           gh release view "$V" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
             gh release create "$V" -R "$GITHUB_REPOSITORY" --title "$V" \
               --notes "Card image for flash.sh and A/B system bundle. QEMU test: see qemu-test.txt."
           gh release upload "$V" -R "$GITHUB_REPOSITORY" --clobber out/thinframe-sd.img.zst \
-            out/thinframe-sd.img.zst.sha256 out/system-*.tar out/system.sha256 out/qemu-test.txt
+            out/thinframe-sd.img.zst.sha256 out/system-*.tar out/system.sha256 out/qemu-test.txt \
+            out/tfctl-armv7 out/tfctl-armv7.sha256
