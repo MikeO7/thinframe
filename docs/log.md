@@ -324,3 +324,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   The ways that replace it already exist and are verified: system updates through the server (S8,
   M2); page changes now happen on the server. A new gate for fast iteration needs the owner's
   call (product decision). Not loosened.
+
+## 2026-10-21 TASK 9: release with tfctl and the image
+- Run 39533807044 (workflow_dispatch on main 298a20f, 54 min, success) published v2026.10.21 with:
+  `tfctl-armv7` 850,216 bytes, `tfctl-armv7.sha256` (`shasum -c`: OK), `thinframe-sd.img.zst`
+  64,507,571 bytes, `system-v2026.10.21.tar` (zImage, rootfs.ext4.zst, sha256, version.json),
+  `qemu-test.txt` ("qemu-test: all checks passed") [V].
+- In the release rootfs (debugfs): `/usr/bin/iwctl` 104,908 bytes (readline fix, TASK 17) and
+  `/usr/bin/tfctl`. There is no hostapd (it is in the sim only) and no `/lib/firmware/silead`. That is
+  expected; the eMMC path above covers it.

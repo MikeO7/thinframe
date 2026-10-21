@@ -295,5 +295,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] Size audit: `du -sh` of the root, `ps` list at idle. Remove anything not in the README budget.
       (docs/log.md 2026-10-20: root 169 MiB, crond/seedrng/syslogd/klogd removed, DejaVu Serif and
       Condensed dropped, idle `ps` = README list + dbus for iwd. Re-check on the frame with cog up.)
-- [ ] GitHub Actions builds tfctl and the image on a tag and attaches both to a release.
+- [x] GitHub Actions builds tfctl and the image on a tag and attaches both to a release.
+      (release.yml run 39533807044 -> v2026.10.21: tfctl-armv7 + sha256, thinframe-sd.img.zst, system tar;
+      docs/log.md 2026-10-21. That run was dispatched; a pushed v* tag runs the same jobs.)
 - [ ] Speaker, accelerometer rotation, light sensor: see upstream `docs/hardware.md`. Not now.
