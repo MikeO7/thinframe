@@ -455,7 +455,10 @@ pub fn render_list(s: &Setup) -> String {
     body.push_str(
         "<form method=\"post\" action=\"/wifi/scan\"><button class=\"ghost\">Scan again</button></form></main>",
     );
-    page(s, STEP1, &body, Some(8), "")
+    // Reload to show scan results: often while still looking, rarely once there is a list, so a
+    // slow panel never swallows a tap in a reload.
+    let refresh = if s.nets.is_empty() { 3 } else { 20 };
+    page(s, STEP1, &body, Some(refresh), "")
 }
 
 /// The keyboard: four layers, special keys by name. Small on purpose (no library).

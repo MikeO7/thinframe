@@ -318,7 +318,8 @@ and each frame picks a ray colour per background pixel and blends the static lay
 
 ## Wi-Fi setup on the frame's screen
 
-A frame with a radio and no connection shows a Wi-Fi page before the PAIR page (TASK 17). That way
+A frame with a radio and no connection shows a Wi-Fi page before the PAIR page (TASK 17), so
+setup is: power on, pick Wi-Fi, press PAIR. That way
 no one has to type a password into `flash.sh`, and moving house only takes a tap. **[V in QEMU]**
 - **Where the page lives.** Pairing posts to the server. Before Wi-Fi works there is no server, so
   the agent serves the page itself, from a small HTTP listener in tfctl on 127.0.0.1:8091.
@@ -326,7 +327,8 @@ no one has to type a password into `flash.sh`, and moving house only takes a tap
   - It answers only while the setup page is on screen. A dashboard page cannot reach it once the
     frame is online.
   - It is std only, about 150 lines; no crate.
-- **No D-Bus client.** tfctl drives iwd through `iwctl` and parses its tables, colour escapes
+- **No D-Bus client.** tfctl drives iwd through `iwctl` (built only with readline, hence
+  `BR2_PACKAGE_READLINE=y`; readline is GPL-3.0 and so is iwctl, iwd itself stays LGPL) and parses its tables, colour escapes
   included, as status.rs already does for RSSI.
   - The join is `iwctl --passphrase P station wlan0 connect SSID`, after
     `known-networks SSID forget`. A stale profile from provision.txt would otherwise win over the
