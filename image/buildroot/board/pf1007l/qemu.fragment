@@ -13,3 +13,11 @@ BR2_TARGET_ENABLE_ROOT_LOGIN=y
 # access points, started by qemu-overlay/etc/init.d/S35simwifi. The overlay goes after the frame's.
 BR2_PACKAGE_HOSTAPD=y
 BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_THINFRAME_PATH)/../rootfs $(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/qemu-overlay"
+# M2 A/B inside -M virt: U-Boot for QEMU's virt board runs the same boot.cmd slot logic (the
+# harness swaps "mmc 0:1" for "virtio 0:1"); sim/qemu/run.sh boots it with -bios.
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="qemu_arm"
+BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/uboot-qemu.fragment"
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
+BR2_TARGET_UBOOT_FORMAT_BIN=y

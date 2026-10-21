@@ -45,10 +45,7 @@ impl Paths {
             data: "/data/thinframe".into(),
             boot: "/boot".into(),
             cmdline: "/proc/cmdline".into(),
-            disks: ["/dev/mmcblk0", "/dev/mmcblk1", "/dev/mmcblk2"]
-                .iter()
-                .map(PathBuf::from)
-                .collect(),
+            disks: crate::slot::DISKS.iter().map(PathBuf::from).collect(),
         }
     }
     /// Test trees under `base`: base/root, base/data, base/boot, base/cmdline.

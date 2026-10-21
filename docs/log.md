@@ -272,3 +272,32 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   (`POST /api/pair` 20:16:55). The Wi-Fi page never showed: iwd joined inside the grace period [V].
 - The list page's 20 s reload (set after the first run) was on screen through Run A. The tap on a
   network row went through, painted about 30 s later under TCG [V].
+
+## 2026-10-21 M2 done: A/B system update and rollback inside `-M virt`
+- The QEMU=1 build now also makes U-Boot 2025.01 `qemu_arm` (qemu.fragment, uboot-qemu.fragment:
+  FAT_WRITE, and a boot command that sources /boot.scr like the frame's build L). Without that boot
+  command, standard boot took /extlinux/extlinux.conf and skipped the slot logic [V, serial log].
+- `BOARD=virt image/qemu-ab-test.sh` (image/qemu-lib.sh). The card is the QEMU=1 image. boot.scr is the
+  same `boot.cmd` + `boot.cmd.patch` with `mmc 0:1` read as `virtio 0:1`. The slot configs drop the A33
+  DTB (QEMU passes its own) and use ttyAMA0. provision.txt joins the sim's "Groovy Wifi", because the image
+  has a radio and Wi-Fi comes first (TASK 17). The first try sat on the Wi-Fi page, which is correct.
+- Bug found and fixed: tfctl looked for the card only at /dev/mmcblk0..2, so under virt (/dev/vda)
+  the system update could not find its disk ("grow data: no thinframe disk").
+  - `slot::DISKS` now adds /dev/vda. The MBR signature guard is unchanged, so only our card is ever
+    written.
+  - `slot::part_n` names partitions on both kinds of disk. PFBOOT's remount used `<disk>p1`, which was
+    wrong for vda.
+- Result, all from server config changes, no manual step [V]:
+  ```
+  PASS  boot 1: A on slot a reports to the server
+  PASS  B written to slot b, rebooted, B reports from slot b
+  PASS  U-Boot booted b with tries pending
+  PASS  slot b confirmed by the agent (event)
+  PASS  BAD written to slot a and the board rebooted into it
+  PASS  BAD kernel panics (no init)
+  PASS  U-Boot spent the last try and flipped back to slot b
+  PASS  rolled back: B reports from slot b again
+  PASS  agent refuses to flash BAD again (event)
+  PASS  C written to slot a, rebooted, C reports from slot a
+  qemu-ab-test: 2026.10.21-7845dfb8-qemu -> -b -> -bad (rolled back) -> -c passed
+  ```

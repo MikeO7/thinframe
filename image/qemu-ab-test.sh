@@ -6,20 +6,24 @@
 # Bundles B, BAD, C are the built system tar with /etc/thinframe.system-version rewritten
 # (BAD also loses /sbin/init and /bin/sh). Result: image/out/qemu-ab-test.txt.
 set -euo pipefail
-RES="$(cd "$(dirname "$0")" && pwd)/out/qemu-ab-test.txt"
+# BOARD=virt runs the same test on the QEMU=1 image under -M virt (M2; see qemu-lib.sh).
 # shellcheck source=SCRIPTDIR/qemu-lib.sh
 . "$(dirname "$0")/qemu-lib.sh"
-A="$(cat "$HERE/out/system-version" 2>/dev/null || true)"
-if [ -z "$A" ] || [ ! -f "$HERE/out/system-$A.tar" ]; then echo "STOP: no image/out/system-<ver>.tar; run image/build.sh rootfs" >&2; exit 1; fi
+RES="$OUT/qemu-ab-test.txt"
+A="$(cat "$OUT/system-version" 2>/dev/null || true)"
+# The QEMU=1 build writes no system-version: take its newest bundle (names are ours, ls is fine).
+# shellcheck disable=SC2012
+[ -n "$A" ] || { A="$(ls -t "$OUT"/system-*.tar 2>/dev/null | head -1)"; A="${A##*/system-}"; A="${A%.tar}"; }
+if [ -z "$A" ] || [ ! -f "$OUT/system-$A.tar" ]; then echo "STOP: no system-<ver>.tar in $OUT; build the image first" >&2; exit 1; fi
 B="$A-b"; BAD="$A-bad"; C="$A-c"
 TFCTL="$HERE/work/tfctl/tfctl"
 
 echo "== bundles $B $BAD $C from system-$A.tar"
 rm -rf "$W/bundles" && mkdir -p "$W/bundles"
-cp "$HERE/out/system-$A.tar" "$W/bundles/"
+cp "$OUT/system-$A.tar" "$W/bundles/"
 docker run --rm -v thinframe-br:/br -v "$W/bundles":/b -e A="$A" -e B="$B" -e BAD="$BAD" -e C="$C" \
 	thinframe-br bash -euo pipefail -c '
-	DFS=$(ls /br/output/host/sbin/debugfs)
+	DFS=$(ls /br/output*/host/sbin/debugfs | head -1)
 	mk() {	# version [break]
 		d=/b/$1; mkdir -p $d && tar -xf /b/system-$A.tar -C $d
 		zstd -q -d $d/rootfs.ext4.zst -o $d/rootfs.ext4 && rm $d/rootfs.ext4.zst

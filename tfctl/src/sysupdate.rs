@@ -90,7 +90,7 @@ fn boot_rw(p: &Paths, disk: Option<&Path>) -> io::Result<()> {
         return Ok(());
     }
     let dev = disk
-        .map(|d| format!("{}p1", d.display()))
+        .map(|d| slot::part_n(d, 1).to_string_lossy().into_owned())
         .unwrap_or_else(|| "/dev/mmcblk0p1".into());
     sh("mount", &["-t", "vfat", "-o", "rw", &dev, "/boot"])
 }
