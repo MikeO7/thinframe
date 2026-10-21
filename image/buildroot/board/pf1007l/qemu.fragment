@@ -9,3 +9,7 @@ BR2_PACKAGE_GDB_DEBUGGER=y
 # BR2_STRIP_strip is not set
 BR2_TARGET_ROOTFS_EXT2_SIZE="400M"
 BR2_TARGET_ENABLE_ROOT_LOGIN=y
+# On-screen Wi-Fi setup (TASK 17): mac80211_hwsim radios (linux-qemu.fragment) with hostapd as the
+# access points, started by qemu-overlay/etc/init.d/S35simwifi. The overlay goes after the frame's.
+BR2_PACKAGE_HOSTAPD=y
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_THINFRAME_PATH)/../rootfs $(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/qemu-overlay"

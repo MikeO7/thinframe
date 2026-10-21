@@ -48,6 +48,7 @@ mod sys;
 mod sysupdate;
 mod update;
 mod wifi;
+mod wifisetup;
 mod ws;
 
 fn usage() -> ExitCode {

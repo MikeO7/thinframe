@@ -315,3 +315,36 @@ the Mac by tfctl/tools/fontgen, a separate crate with its own workspace. Its cra
 rasterize the TTF, miniz_oxide to deflate) never reach the frame binary, which still has no
 dependencies. The animation redraws only what moves: angle and radius per pixel are computed once,
 and each frame picks a ray colour per background pixel and blends the static layer over it.
+
+## Wi-Fi setup on the frame's screen
+
+A frame with a radio and no connection shows a Wi-Fi page before the PAIR page (TASK 17). That way
+no one has to type a password into `flash.sh`, and moving house only takes a tap. **[V in QEMU]**
+- **Where the page lives.** Pairing posts to the server. Before Wi-Fi works there is no server, so
+  the agent serves the page itself, from a small HTTP listener in tfctl on 127.0.0.1:8091.
+  - It binds loopback only and checks the Host header, which defeats DNS rebinding.
+  - It answers only while the setup page is on screen. A dashboard page cannot reach it once the
+    frame is online.
+  - It is std only, about 150 lines; no crate.
+- **No D-Bus client.** tfctl drives iwd through `iwctl` and parses its tables, colour escapes
+  included, as status.rs already does for RSSI.
+  - The join is `iwctl --passphrase P station wlan0 connect SSID`, after
+    `known-networks SSID forget`. A stale profile from provision.txt would otherwise win over the
+    new password.
+  - iwd writes the profile to /var/lib/iwd (bound to /data), so it survives updates.
+  - The password sits in iwctl's argv for the seconds the join takes. Only root runs anything on
+    the frame. **[U]** acceptable.
+- **When it shows.**
+  - Nothing is configured: at once.
+  - A network is configured but has not come up: after 45 s, which gives iwd's autoconnect time
+    at boot. The page then names the missing network.
+  - Until then the status page says "joining <ssid>".
+  - No `wlan0` at all (the Mac, a QEMU without hwsim): never.
+- **What it joins.** psk and open networks only. Enterprise (8021x) and WEP are listed but cannot be
+  tapped; they need a profile by hand (`tfctl wifi` or an iwd file). Hidden networks: not yet.
+- **The keyboard.** It is about 30 lines of JS in the page: letters, shift, digits and symbols. The
+  password shows as you type (a hide key masks it), because typing blind on a frame helps no one.
+- **Sim.** The QEMU image alone adds `mac80211_hwsim` and hostapd, with access points
+  "Groovy Wifi" (WPA2) and "Cafe" (open). S35simwifi starts them. It is a shell init script, but
+  it lives in the qemu-overlay that only qemu.fragment includes, so no frame image carries it.
+

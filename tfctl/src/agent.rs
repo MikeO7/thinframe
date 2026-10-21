@@ -4,7 +4,8 @@
 //! Down: reconnect with backoff 1..60 s, poll GET /config over HTTP meanwhile; after 3
 //! consecutive failures the kiosk shows FALLBACK_URL until the server answers again.
 //! Runs as a thread inside `tfctl kiosk`; `tfctl agent` runs it alone for debugging.
-//! Without FRAME_TOKEN it pairs first (pair.rs).
+//! Without Wi-Fi it shows the setup page first (wifisetup.rs); without FRAME_TOKEN it pairs
+//! next (pair.rs).
 use crate::config::Config;
 use crate::http::{self, Url};
 use crate::json::{self, Value};
@@ -36,6 +37,11 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
     loop {
         if sys::term_requested() {
             return Ok(());
+        }
+        // Wi-Fi first, then pairing, then the server (TASK 17).
+        if a.needs_wifi() {
+            thread::sleep(a.wifi_step());
+            continue;
         }
         if a.needs_pairing() {
             thread::sleep(a.pair_step());
@@ -100,6 +106,13 @@ pub struct Agent {
     pub(crate) pair_nonce: Option<String>,
     /// The pairing page is on screen.
     pub(crate) pair_page_up: bool,
+    /// Wi-Fi first (wifisetup.rs): the radio, the setup page's state once it ran, since when the
+    /// station is down, whether setup (not just waiting) is due, and whether its page is up.
+    pub(crate) radio: Arc<dyn crate::wifi::Radio>,
+    pub(crate) wifi_ui: Option<crate::wifisetup::Shared>,
+    pub(crate) wifi_down_since: Option<Instant>,
+    pub(crate) wifi_setup: bool,
+    pub(crate) wifi_page_up: bool,
 }
 
 impl Agent {
@@ -127,6 +140,11 @@ impl Agent {
             tried: Vec::new(),
             pair_nonce: None,
             pair_page_up: false,
+            radio: Arc::new(crate::wifi::Iwctl),
+            wifi_ui: None,
+            wifi_down_since: None,
+            wifi_setup: false,
+            wifi_page_up: false,
         })
     }
 

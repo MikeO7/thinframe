@@ -7,6 +7,8 @@
 #                              one finger on a virtio multitouch screen, like the frame's panel
 # Env: SERVER_URL (as the guest sees it; default http://10.0.2.2:8080 = this Mac's :8080),
 #      FRAME_ID (sim-qemu), FRAME_TOKEN (set it empty to pair with the PAIR button),
+#      WIFI_SSID/WIFI_PSK (provisioned network; unset = pick one on the Wi-Fi setup page. The sim
+#      image has "Groovy Wifi" (password "far out man") and the open "Cafe"; see S35simwifi),
 #      SHOT_INTERVAL_S (10), SSHP (2222), RUN_FOR_S,
 #      KEEP_SHOTS=1 (also keep each shot as sim/out/seq/<seconds since start>.png),
 #      SHOW=1 (watch it live in Screen Sharing over VNC on localhost; a click is a mouse click).
@@ -42,6 +44,7 @@ cp -c "$Q/thinframe-sd.img" "$W/sim.img" 2>/dev/null || cp "$Q/thinframe-sd.img"
 truncate -s 4G "$W/sim.img"
 {
 	printf 'SERVER_URL=%s\nFRAME_ID=%s\nFRAME_TOKEN=%s\n' "$SERVER_URL" "$FRAME_ID" "$FRAME_TOKEN"
+	[ -z "${WIFI_SSID:-}" ] || printf 'WIFI_SSID=%s\nWIFI_PSK=%s\n' "$WIFI_SSID" "${WIFI_PSK:-}"
 	[ ! -f "$KEY.pub" ] || printf 'SSH_PUBKEY=%s\n' "$(cat "$KEY.pub")"
 } > "$W/provision.txt"
 docker run --rm -v "$W":/w thinframe-br mcopy -o -i /w/sim.img@@4M /w/provision.txt ::/

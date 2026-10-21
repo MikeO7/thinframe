@@ -170,6 +170,19 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
   brings the button back. Evidence in docs/log.md (2026-10-20, docs/img/pair-qemu-*.png).
 - [ ] On the frame: the same with a finger on the real panel (touch axes, TASK 6).
 
+## 17. Wi-Fi first, on the frame's screen
+- [ ] tfctl: a frame with a radio and no connection (nothing configured, or the configured network
+      not up within 45 s) shows a touch page before pairing: networks in range (iwctl scan), a
+      password page with an on-screen keyboard, joining, connected. Served on 127.0.0.1:8091 by the
+      agent, only while it is on screen. A wrong password comes back to the keyboard with the error.
+      (tfctl/src/wifisetup.rs, radio in wifi.rs.) flash.sh: the Wi-Fi prompt may be left empty.
+- [ ] Sim: the QEMU image has mac80211_hwsim radios, "Groovy Wifi" (WPA2) and "Cafe" (open)
+      (qemu-overlay/etc/init.d/S35simwifi).
+- [ ] Gate: in QEMU, a frame flashed with neither Wi-Fi nor token shows the Wi-Fi page, a wrong
+      password is refused, the right one joins, then PAIR shows, one tap pairs, the dashboard loads,
+      and a reboot goes straight to the dashboard. Evidence in docs/log.md.
+- [ ] On the frame: the same with the AIC8800 and a real router (TASK 7).
+
 ## 11. Auto-update from the container (frame side)
 - [x] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
       `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs
