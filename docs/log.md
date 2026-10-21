@@ -259,3 +259,16 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   So the list page now reloads every 20 s once networks are shown (3 s while still looking), and the
   PAIR page's step marker got the same pill as the Wi-Fi page. Both changed after this run (unit
   tests only, not re-run in QEMU).
+
+## 2026-10-21 TASK 17 re-run: saved networks, the late tweaks
+- Image rebuilt from main (61e9314); fresh frameserver with auth on; no token.
+- **Run A: provision.txt with "Groovy Wifi" and a wrong password.** iwd stayed `State connecting`.
+  After the 45 s grace cog showed the setup page with "Can't reach Groovy Wifi. Pick a network:"
+  (docs/img/wifi-qemu-7-cant-reach.jpg) [V]. Tapped Groovy Wifi and typed "far out man", then Join.
+  The join forgot the stale profile first: `Groovy Wifi.psk` no longer holds `wrongpass1`. The station
+  joined, and only then came `POST /api/pair` (20:15:06) and the PAIR page. Its step marker now has the
+  pill and reads clearly over the stripes (docs/img/wifi-qemu-6-pair-pill.jpg) [V].
+- **Run B: provision.txt with the right password.** Splash "warming up", then straight to PAIR
+  (`POST /api/pair` 20:16:55). The Wi-Fi page never showed: iwd joined inside the grace period [V].
+- The list page's 20 s reload (set after the first run) was on screen through Run A. The tap on a
+  network row went through, painted about 30 s later under TCG [V].
