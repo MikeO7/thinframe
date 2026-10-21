@@ -1,0 +1,893 @@
+//! On-screen Wi-Fi setup (TASK 17): Wi-Fi first, then pairing (pair.rs). When the frame has a
+//! radio but no connection (nothing configured, or the configured network has not come up within
+//! GRACE), cog shows a touch page served by this module on 127.0.0.1:PORT: the networks in range,
+//! then a password page with an on-screen keyboard. The page posts back here; we join with iwctl
+//! (wifi.rs). Once the station is connected the agent moves on to pairing or the dashboard.
+//! The server binds loopback only, checks the Host header, and answers only while setup is on
+//! screen, so a dashboard page can never change the network.
+use crate::agent::Agent;
+use crate::kiosk::KioskCmd;
+use crate::pair::esc;
+use crate::wifi::{self, Net, Radio};
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+pub const PORT: u16 = 8091;
+/// How long a configured network gets to come up before the setup page offers another.
+pub const GRACE: Duration = Duration::from_secs(45);
+const RESCAN: Duration = Duration::from_secs(20);
+const STEP: Duration = Duration::from_secs(2);
+const FONT: &str = "/usr/share/fonts/thinframe/Shrikhand-Regular.ttf";
+
+#[derive(Default)]
+pub struct Setup {
+    /// On screen; the server answers 404 otherwise.
+    pub active: bool,
+    pub nets: Vec<Net>,
+    pub scanned: Option<Instant>,
+    /// A join is running for this network.
+    pub joining: Option<String>,
+    pub joined: Option<String>,
+    /// The last network tried, and why it failed.
+    pub last: Option<String>,
+    pub error: Option<String>,
+    /// The configured network that did not come up.
+    pub missing: Option<String>,
+    pub frame_id: String,
+    pub backdrop: Option<String>,
+}
+
+pub type Shared = Arc<Mutex<Setup>>;
+
+fn lock(st: &Shared) -> std::sync::MutexGuard<'_, Setup> {
+    st.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// What the agent should do about Wi-Fi this round.
+#[derive(Debug, PartialEq)]
+pub enum Phase {
+    /// No radio, or connected: carry on with pairing and the server.
+    Online,
+    /// A configured network is still coming up: wait, the status page says "joining".
+    Waiting,
+    /// Show the setup page.
+    Setup,
+}
+
+pub fn phase(
+    present: bool,
+    connected: bool,
+    configured: bool,
+    down_for: Duration,
+    page_up: bool,
+) -> Phase {
+    if !present || connected {
+        Phase::Online
+    } else if page_up || !configured || down_for >= GRACE {
+        Phase::Setup
+    } else {
+        Phase::Waiting
+    }
+}
+
+// ---- HTTP (loopback, one request per connection) ----
+
+pub struct Req {
+    pub method: String,
+    pub path: String,
+    pub query: Vec<(String, String)>,
+    pub host: String,
+    pub form: Vec<(String, String)>,
+}
+
+pub struct Resp {
+    pub status: u16,
+    pub ctype: &'static str,
+    pub body: Vec<u8>,
+    pub location: Option<String>,
+}
+
+fn html(body: String) -> Resp {
+    Resp {
+        status: 200,
+        ctype: "text/html; charset=utf-8",
+        body: body.into_bytes(),
+        location: None,
+    }
+}
+
+fn see_other(to: &str) -> Resp {
+    Resp {
+        status: 303,
+        ctype: "text/plain",
+        body: Vec::new(),
+        location: Some(to.into()),
+    }
+}
+
+fn not_found() -> Resp {
+    Resp {
+        status: 404,
+        ctype: "text/plain",
+        body: b"not found".to_vec(),
+        location: None,
+    }
+}
+
+/// application/x-www-form-urlencoded and query strings.
+pub fn form_decode(s: &str) -> Vec<(String, String)> {
+    let dec = |v: &str| {
+        let b = v.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            match b[i] {
+                b'+' => out.push(b' '),
+                b'%' if i + 2 < b.len() => {
+                    match std::str::from_utf8(&b[i + 1..i + 3])
+                        .ok()
+                        .and_then(|h| u8::from_str_radix(h, 16).ok())
+                    {
+                        Some(x) => {
+                            out.push(x);
+                            i += 2;
+                        }
+                        None => out.push(b'%'),
+                    }
+                }
+                c => out.push(c),
+            }
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    s.split('&')
+        .filter(|kv| !kv.is_empty())
+        .map(|kv| {
+            let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+            (dec(k), dec(v))
+        })
+        .collect()
+}
+
+/// Percent-encode for a query value.
+pub fn pct(s: &str) -> String {
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+fn field<'a>(kv: &'a [(String, String)], k: &str) -> Option<&'a str> {
+    kv.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str())
+}
+
+fn read_req(s: &mut TcpStream) -> io::Result<Req> {
+    s.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut r = BufReader::new(s.try_clone()?);
+    let mut line = String::new();
+    r.read_line(&mut line)?;
+    let mut parts = line.split_whitespace();
+    let method = parts.next().unwrap_or("").to_string();
+    let target = parts.next().unwrap_or("/").to_string();
+    let (mut host, mut len) = (String::new(), 0usize);
+    loop {
+        let mut h = String::new();
+        if r.read_line(&mut h)? == 0 || h.trim().is_empty() {
+            break;
+        }
+        if let Some((k, v)) = h.split_once(':') {
+            match k.trim().to_ascii_lowercase().as_str() {
+                "host" => host = v.trim().to_string(),
+                "content-length" => len = v.trim().parse().unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
+    if len > 4096 {
+        return Err(io::Error::other("body too large"));
+    }
+    let mut body = vec![0; len];
+    r.read_exact(&mut body)?;
+    let (path, q) = target.split_once('?').unwrap_or((&target, ""));
+    Ok(Req {
+        method,
+        path: path.to_string(),
+        query: form_decode(q),
+        host,
+        form: form_decode(&String::from_utf8_lossy(&body)),
+    })
+}
+
+fn write_resp(s: &mut TcpStream, r: &Resp) -> io::Result<()> {
+    let reason = match r.status {
+        200 => "OK",
+        303 => "See Other",
+        400 => "Bad Request",
+        _ => "Not Found",
+    };
+    let mut head = format!(
+        "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\
+         Cache-Control: no-store\r\nConnection: close\r\n",
+        r.status,
+        r.ctype,
+        r.body.len()
+    );
+    if let Some(l) = &r.location {
+        head.push_str(&format!("Location: {l}\r\n"));
+    }
+    head.push_str("\r\n");
+    s.write_all(head.as_bytes())?;
+    s.write_all(&r.body)
+}
+
+/// Bind `addr` (127.0.0.1:PORT on the frame, :0 in tests) and serve in a thread; returns the port.
+pub fn start(st: Shared, radio: Arc<dyn Radio>, addr: &str) -> io::Result<u16> {
+    let l = TcpListener::bind(addr)?;
+    let port = l.local_addr()?.port();
+    thread::Builder::new()
+        .name("wifisetup".into())
+        .spawn(move || {
+            for mut s in l.incoming().flatten() {
+                let resp = match read_req(&mut s) {
+                    Ok(req) => respond(&st, &radio, port, &req),
+                    Err(_) => continue,
+                };
+                let _ = write_resp(&mut s, &resp);
+            }
+        })?;
+    Ok(port)
+}
+
+pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Resp {
+    // DNS rebinding: only our own name for loopback.
+    let host_ok = [format!("127.0.0.1:{port}"), format!("localhost:{port}")].contains(&req.host);
+    if !host_ok || !lock(st).active {
+        return not_found();
+    }
+    match (req.method.as_str(), req.path.as_str()) {
+        ("GET", "/wifi") => {
+            let mut s = lock(st);
+            if field(&req.query, "list").is_some() {
+                s.error = None;
+            }
+            html(match (&s.joining, &s.joined, &s.error, &s.last) {
+                (Some(j), _, _, _) => render_joining(&s, j),
+                (_, Some(j), _, _) => render_joined(&s, j),
+                (_, _, Some(_), Some(l)) => {
+                    let net = s.nets.iter().find(|n| &n.ssid == l).cloned();
+                    render_password(&s, l, net.as_ref())
+                }
+                _ => render_list(&s),
+            })
+        }
+        ("GET", "/wifi/net") => {
+            let Some(ssid) = field(&req.query, "ssid") else {
+                return see_other("/wifi");
+            };
+            let mut s = lock(st);
+            s.error = None;
+            let net = s.nets.iter().find(|n| n.ssid == ssid).cloned();
+            html(render_password(&s, ssid, net.as_ref()))
+        }
+        ("POST", "/wifi/scan") => {
+            lock(st).scanned = None;
+            see_other("/wifi")
+        }
+        ("POST", "/wifi/join") => {
+            let ssid = field(&req.form, "ssid").unwrap_or("").to_string();
+            let psk = field(&req.form, "psk").unwrap_or("").to_string();
+            let open = {
+                let s = lock(st);
+                s.nets
+                    .iter()
+                    .any(|n| n.ssid == ssid && n.security == "open")
+            };
+            let mut s = lock(st);
+            s.last = Some(ssid.clone());
+            if ssid.is_empty() || ssid.len() > 32 {
+                s.error = Some("Pick a network first.".into());
+                return see_other("/wifi");
+            }
+            if !open && !(8..=63).contains(&psk.len()) {
+                s.error = Some("Wi-Fi passwords are 8 to 63 characters.".into());
+                return see_other("/wifi");
+            }
+            if s.joining.is_some() {
+                return see_other("/wifi");
+            }
+            s.joining = Some(ssid.clone());
+            s.error = None;
+            drop(s);
+            let (st, radio) = (st.clone(), radio.clone());
+            let _ = thread::Builder::new()
+                .name("wifijoin".into())
+                .spawn(move || {
+                    let r = radio.join(&ssid, (!open).then_some(psk.as_str()));
+                    let mut s = lock(&st);
+                    s.joining = None;
+                    match r {
+                        Ok(()) => {
+                            eprintln!("tfctl: wifi setup: joined {ssid}");
+                            s.joined = Some(ssid);
+                        }
+                        Err(e) => {
+                            eprintln!("tfctl: wifi setup: join {ssid}: {e}");
+                            s.error = Some(format!("That didn't work ({e}). Check the password."));
+                        }
+                    }
+                });
+            see_other("/wifi")
+        }
+        ("GET", "/font.ttf") => file(FONT, "font/ttf"),
+        ("GET", "/backdrop.png") => match lock(st).backdrop.clone() {
+            Some(p) => file(&p, "image/png"),
+            None => not_found(),
+        },
+        _ => not_found(),
+    }
+}
+
+fn file(path: &str, ctype: &'static str) -> Resp {
+    match std::fs::read(path) {
+        Ok(body) => Resp {
+            status: 200,
+            ctype,
+            body,
+            location: None,
+        },
+        Err(_) => not_found(),
+    }
+}
+
+// ---- pages (1280x800 landscape after cog's rotation; sized in vh/vw like pair.rs) ----
+
+const CSS: &str = "@font-face{font-family:Shrikhand;src:url(/font.ttf)}\
+html,body{margin:0;height:100%;overflow:hidden;background:#f4dcaa BG}\
+body{color:#5b3a1e;font:3.4vh Shrikhand,Georgia,serif}\
+.card{position:absolute;left:4vw;top:7vh;width:56vw;max-height:80vh;box-sizing:border-box;padding:2.2vh 2.4vw 2.6vh;\
+background:#f4dcaa;border:.6vh solid #5b3a1e;border-radius:3vh;box-shadow:1.2vh 1.2vh 0 #b8452a}\
+.wide{width:92vw;top:4vh;max-height:none}.low{top:40vh;width:54vw}\
+h1{margin:0 0 .2em;font-size:6.4vh;font-weight:400;color:#b8452a;line-height:1.1}p{margin:.2em 0 .6em}\
+.steps{position:absolute;right:3vw;top:2.4vh;font-size:3vh;background:#f4dcaa;border:.4vh solid #5b3a1e;\
+border-radius:999px;padding:.1em .8em}.steps b{color:#b8452a;font-weight:400}\
+.err{color:#f4dcaa;background:#b8452a;border-radius:1.5vh;padding:.3em .7em;font:2.8vh 'DejaVu Sans',sans-serif}\
+ul{list-style:none;margin:0 0 1.4vh;padding:0;max-height:52vh;overflow-y:auto}\
+li a{display:flex;align-items:center;gap:1.2vw;color:inherit;text-decoration:none;padding:1.4vh 1vw;\
+border-bottom:.35vh dashed #d9662b}li:last-child a{border:0}li a:active{background:#eecb8d}\
+.name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.dim{opacity:.45}\
+.sig{display:flex;align-items:flex-end;gap:.25vw;height:3.4vh}.sig i{width:.6vw;background:#5b3a1e;opacity:.25}\
+.sig i.on{opacity:1}.sig i:nth-child(1){height:25%}.sig i:nth-child(2){height:50%}.sig i:nth-child(3){height:75%}\
+.sig i:nth-child(4){height:100%}.lock{font:2.6vh 'DejaVu Sans',sans-serif;opacity:.7}.lock svg{height:3vh;display:block}\
+button,.btn{font:4.6vh Shrikhand,Georgia,serif;color:#f4dcaa;background:#d9662b;border:0;border-radius:999px;\
+padding:.1em 1.1em;box-shadow:0 .9vh 0 #5b3a1e;text-decoration:none;display:inline-block}\
+button:active,.btn:active{transform:translateY(.7vh);box-shadow:0 .2vh 0 #5b3a1e}\
+button:disabled{opacity:.4}.ghost{background:#eecb8d;color:#5b3a1e}\
+small{position:absolute;left:4.8vw;bottom:3vh;font-size:3vh}\
+.dots span{animation:b 1.2s infinite}.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}\
+@keyframes b{0%,60%,100%{opacity:.2}30%{opacity:1}}";
+
+fn page(s: &Setup, step: &str, body: &str, refresh: Option<u32>, script: &str) -> String {
+    let bg = if s.backdrop.is_some() {
+        "url(/backdrop.png) center/cover no-repeat"
+    } else {
+        ""
+    };
+    let meta = refresh
+        .map(|r| format!("<meta http-equiv=\"refresh\" content=\"{r};url=/wifi\">"))
+        .unwrap_or_default();
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">{meta}<title>thinframe</title>\
+         <style>{}</style></head><body><div class=\"steps\">{step}</div>{body}\
+         <small>frame {}</small>{script}</body></html>",
+        CSS.replace("BG", bg),
+        esc(&s.frame_id)
+    )
+}
+
+/// A padlock drawn in SVG: the frame has no emoji font.
+const LOCK: &str = "<svg viewBox=\"0 0 10 12\"><rect x=\"1\" y=\"5\" width=\"8\" height=\"7\" rx=\"1\" fill=\"#5b3a1e\"/>\
+<path d=\"M3 5V3.5a2 2 0 0 1 4 0V5\" fill=\"none\" stroke=\"#5b3a1e\" stroke-width=\"1.3\"/></svg>";
+
+const STEP1: &str = "<b>1 Wi-Fi</b> &middot; 2 pair";
+
+fn bars(n: &Net) -> String {
+    let b = n.bars();
+    let i: String = (1..=4)
+        .map(|k| {
+            if k <= b {
+                "<i class=\"on\"></i>"
+            } else {
+                "<i></i>"
+            }
+        })
+        .collect();
+    format!("<span class=\"sig\">{i}</span>")
+}
+
+pub fn render_list(s: &Setup) -> String {
+    let mut body = String::from("<main class=\"card\"><h1>Let's get online</h1>");
+    match (&s.missing, &s.error) {
+        (_, Some(e)) => body.push_str(&format!("<p class=\"err\">{}</p>", esc(e))),
+        (Some(m), _) => body.push_str(&format!(
+            "<p class=\"err\">Can't reach {}. Pick a network:</p>",
+            esc(m)
+        )),
+        _ => body.push_str("<p>Tap your Wi-Fi network.</p>"),
+    }
+    if s.nets.is_empty() {
+        body.push_str(
+            "<p class=\"dots\">Looking for networks<span>.</span><span>.</span><span>.</span></p>",
+        );
+    } else {
+        body.push_str("<ul>");
+        for n in s.nets.iter().take(12) {
+            let lock = if n.security == "open" { "" } else { LOCK };
+            if n.supported() {
+                body.push_str(&format!(
+                    "<li><a href=\"/wifi/net?ssid={}\"><span class=\"name\">{}</span>\
+                     <span class=\"lock\">{lock}</span>{}</a></li>",
+                    pct(&n.ssid),
+                    esc(&n.ssid),
+                    bars(n)
+                ));
+            } else {
+                body.push_str(&format!(
+                    "<li><a class=\"dim\"><span class=\"name\">{}</span>\
+                     <span class=\"lock\">{}</span>{}</a></li>",
+                    esc(&n.ssid),
+                    esc(&n.security),
+                    bars(n)
+                ));
+            }
+        }
+        body.push_str("</ul>");
+    }
+    body.push_str(
+        "<form method=\"post\" action=\"/wifi/scan\"><button class=\"ghost\">Scan again</button></form></main>",
+    );
+    // Reload to show scan results: often while still looking, rarely once there is a list, so a
+    // slow panel never swallows a tap in a reload.
+    let refresh = if s.nets.is_empty() { 3 } else { 20 };
+    page(s, STEP1, &body, Some(refresh), "")
+}
+
+/// The keyboard: four layers, special keys by name. Small on purpose (no library).
+const KEYBOARD_JS: &str = r##"<script>
+var L={a:["qwertyuiop","asdfghjkl","zxcvbnm"],A:["QWERTYUIOP","ASDFGHJKL","ZXCVBNM"],
+n:["1234567890","-/:;()$&@\"",".,?!'"],s:["[]{}#%^*+=","_\\|~<>€£¥•",".,?!'"]};
+var layer="a",pw="",shown=true,kb=document.getElementById("kb"),out=document.getElementById("pw"),
+go=document.getElementById("go"),min=+kb.dataset.min;
+function key(label,cls,fn){var b=document.createElement("button");b.type="button";b.textContent=label;
+if(cls)b.className=cls;b.onclick=fn;return b}
+function draw(){kb.innerHTML="";var rows=L[layer];
+rows.forEach(function(r,i){var d=document.createElement("div");
+if(i==2){if(layer=="a"||layer=="A")d.appendChild(key("⇧","k2"+(layer=="A"?" on":""),function(){layer=layer=="a"?"A":"a";draw()}));
+else d.appendChild(key(layer=="n"?"#+=":"123","k2",function(){layer=layer=="n"?"s":"n";draw()}))}
+r.split("").forEach(function(c){d.appendChild(key(c,"",function(){if(pw.length<63)pw+=c;show()}))});
+if(i==2)d.appendChild(key("⌫","k2",function(){pw=pw.slice(0,-1);show()}));kb.appendChild(d)});
+var d=document.createElement("div");
+d.appendChild(key(layer=="a"||layer=="A"?"123":"abc","k2",function(){layer=layer=="a"||layer=="A"?"n":"a";draw()}));
+d.appendChild(key("space","sp",function(){if(pw.length<63)pw+=" ";show()}));
+d.appendChild(key(shown?"hide":"show","k2",function(){shown=!shown;show();draw()}));kb.appendChild(d)}
+function show(){out.className=pw.length?"field":"field hint";out.textContent=pw.length?(shown?pw:pw.replace(/./g,"•")):"password";
+document.getElementById("psk").value=pw;go.disabled=pw.length<min}
+draw();show();
+</script>"##;
+
+pub fn render_password(s: &Setup, ssid: &str, net: Option<&Net>) -> String {
+    let open = net.is_some_and(|n| n.security == "open");
+    let err = s
+        .error
+        .as_deref()
+        .map(|e| format!("<p class=\"err\">{}</p>", esc(e)))
+        .unwrap_or_default();
+    let form_head = format!(
+        "<form method=\"post\" action=\"/wifi/join\" class=\"row\">\
+         <input type=\"hidden\" name=\"ssid\" value=\"{}\"><input type=\"hidden\" name=\"psk\" id=\"psk\">\
+         <a class=\"btn ghost\" href=\"/wifi?list\">back</a>",
+        esc(ssid)
+    );
+    if open {
+        let body = format!(
+            "<main class=\"card\"><h1>{}</h1>{err}<p>An open network: no password.</p>\
+             {form_head} <button>Join</button></form></main>",
+            esc(ssid)
+        );
+        return page(s, STEP1, &body, None, "");
+    }
+    let css = "<style>.wide h1{font-size:5vh}.top{display:flex;align-items:center;gap:2vw}\
+        .field{flex:1;font:4.4vh 'DejaVu Sans Mono',monospace;background:#fff6e0;border:.4vh solid #5b3a1e;\
+        border-radius:1.5vh;padding:.25em .5em;white-space:pre;overflow:hidden}\
+        .row{display:flex;gap:1.5vw;align-items:center;margin:0}\
+        #kb{margin:1.6vh 0 0}#kb div{display:flex;justify-content:center;gap:.6vw;margin-bottom:1.2vh}\
+        #kb button{font:4.4vh 'DejaVu Sans Mono',monospace;min-width:7.6vw;height:9.6vh;padding:0;border-radius:1.6vh;\
+        background:#fff6e0;color:#5b3a1e;box-shadow:0 .6vh 0 #b8452a}\
+        #kb button.k2{background:#eecb8d;min-width:10.5vw;font:3.4vh Shrikhand,Georgia,serif}\
+        #kb button.on{background:#d9662b;color:#f4dcaa}#kb button.sp{min-width:44vw;font:3.4vh Shrikhand,Georgia,serif}\
+        small,.steps{display:none}.hint{opacity:.35}</style>";
+    let body = format!(
+        "{css}<main class=\"card wide\"><div class=\"top\"><h1>{}</h1>{err}</div>\
+         <div class=\"top\"><div class=\"field\" id=\"pw\"></div>{form_head}\
+         <button id=\"go\" disabled>Join</button></form></div>\
+         <div id=\"kb\" data-min=\"8\"></div></main>",
+        esc(ssid)
+    );
+    page(s, STEP1, &body, None, KEYBOARD_JS)
+}
+
+fn render_joining(s: &Setup, ssid: &str) -> String {
+    let body = format!(
+        "<main class=\"card low\"><h1 class=\"dots\">Joining<span>.</span><span>.</span><span>.</span></h1>\
+         <p>{}</p><p style=\"font:2.8vh 'DejaVu Sans',sans-serif\">This can take half a minute.</p></main>",
+        esc(ssid)
+    );
+    page(s, STEP1, &body, Some(2), "")
+}
+
+fn render_joined(s: &Setup, ssid: &str) -> String {
+    let body = format!(
+        "<main class=\"card low\"><h1>Far out!</h1><p>Connected to {}.</p>\
+         <p class=\"dots\">Next: pairing<span>.</span><span>.</span><span>.</span></p></main>",
+        esc(ssid)
+    );
+    page(s, "1 Wi-Fi &middot; <b>2 pair</b>", &body, Some(3), "")
+}
+
+// ---- the agent's side ----
+
+impl Agent {
+    /// Wi-Fi comes first: true while the agent must not try the server yet.
+    pub(crate) fn needs_wifi(&mut self) -> bool {
+        let radio = self.radio.clone();
+        if !radio.present() {
+            return false;
+        }
+        let connected = radio.connected();
+        let down_for = if connected {
+            self.wifi_down_since = None;
+            Duration::ZERO
+        } else {
+            self.wifi_down_since
+                .get_or_insert_with(Instant::now)
+                .elapsed()
+        };
+        let configured = wifi::configured_ssid(Path::new(wifi::IWD_DIR));
+        match phase(
+            true,
+            connected,
+            configured.is_some(),
+            down_for,
+            self.wifi_page_up,
+        ) {
+            Phase::Online => {
+                if self.wifi_page_up {
+                    self.leave_wifi_setup();
+                }
+                false
+            }
+            Phase::Waiting => {
+                self.wifi_setup = false;
+                true
+            }
+            Phase::Setup => {
+                self.wifi_setup = true;
+                if let Some(ui) = &self.wifi_ui {
+                    lock(ui).missing = configured.filter(|_| down_for >= GRACE);
+                }
+                true
+            }
+        }
+    }
+
+    /// One round of waiting for Wi-Fi; returns how long to sleep.
+    pub(crate) fn wifi_step(&mut self) -> Duration {
+        if !self.wifi_setup {
+            if self.on_fallback {
+                self.write_status_page();
+            }
+            return STEP;
+        }
+        let ui = match &self.wifi_ui {
+            Some(ui) => ui.clone(),
+            None => {
+                let ui: Shared = Arc::default();
+                if let Err(e) = start(ui.clone(), self.radio.clone(), &format!("127.0.0.1:{PORT}"))
+                {
+                    eprintln!("tfctl: wifi setup: listen on {PORT}: {e}");
+                    return Duration::from_secs(10);
+                }
+                self.wifi_ui = Some(ui.clone());
+                ui
+            }
+        };
+        let rescan = {
+            let s = lock(&ui);
+            s.joining.is_none() && s.scanned.is_none_or(|t| t.elapsed() >= RESCAN)
+        };
+        if rescan {
+            let nets = self.radio.scan();
+            let mut s = lock(&ui);
+            if !nets.is_empty() || s.nets.is_empty() {
+                s.nets = nets;
+            }
+            s.scanned = Some(Instant::now());
+        }
+        if !self.wifi_page_up {
+            let bg = crate::pair::page_path().with_file_name("backdrop.png");
+            let backdrop = crate::splash::write_backdrop(&self.cfg, &bg.to_string_lossy())
+                .ok()
+                .flatten();
+            {
+                let mut s = lock(&ui);
+                s.active = true;
+                s.frame_id = self.cfg.frame_id.clone();
+                s.backdrop = backdrop;
+                s.joined = None;
+            }
+            eprintln!("tfctl: wifi setup: on screen");
+            self.event("wifi", "showing the Wi-Fi setup page");
+            self.wifi_page_up = true;
+            self.on_fallback = true;
+            let _ = self.send(KioskCmd::SetUrl(format!("http://127.0.0.1:{PORT}/wifi")));
+        }
+        STEP
+    }
+
+    fn leave_wifi_setup(&mut self) {
+        eprintln!("tfctl: wifi setup: connected, moving on");
+        self.event("wifi", "Wi-Fi connected from the setup page");
+        if let Some(ui) = &self.wifi_ui {
+            let mut s = lock(ui);
+            s.active = false;
+            s.error = None;
+            s.last = None;
+        }
+        self.wifi_page_up = false;
+        self.wifi_setup = false;
+        // Back to the status page ("reaching the server"); pairing or the dashboard follows.
+        self.write_status_page();
+        if !self.cfg.fallback_url.is_empty() {
+            let _ = self.send(KioskCmd::SetUrl(self.cfg.fallback_url.clone()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct Fake {
+        up: AtomicBool,
+        psk: &'static str,
+    }
+
+    impl Radio for Fake {
+        fn present(&self) -> bool {
+            true
+        }
+        fn connected(&self) -> bool {
+            self.up.load(Ordering::SeqCst)
+        }
+        fn scan(&self) -> Vec<Net> {
+            vec![]
+        }
+        fn join(&self, _ssid: &str, psk: Option<&str>) -> Result<(), String> {
+            if psk == Some(self.psk) || psk.is_none() {
+                self.up.store(true, Ordering::SeqCst);
+                Ok(())
+            } else {
+                Err("Operation failed".into())
+            }
+        }
+    }
+
+    fn net(ssid: &str, security: &str) -> Net {
+        Net {
+            ssid: ssid.into(),
+            security: security.into(),
+            dbm: Some(-50),
+            current: false,
+        }
+    }
+
+    #[test]
+    fn wifi_comes_before_everything_else() {
+        let g = GRACE;
+        let z = Duration::ZERO;
+        assert_eq!(
+            phase(false, false, false, g, false),
+            Phase::Online,
+            "no radio"
+        );
+        assert_eq!(phase(true, true, true, z, true), Phase::Online);
+        assert_eq!(
+            phase(true, false, false, z, false),
+            Phase::Setup,
+            "nothing configured"
+        );
+        assert_eq!(
+            phase(true, false, true, z, false),
+            Phase::Waiting,
+            "give iwd a moment"
+        );
+        assert_eq!(
+            phase(true, false, true, g, false),
+            Phase::Setup,
+            "configured one is gone"
+        );
+        assert_eq!(
+            phase(true, false, true, z, true),
+            Phase::Setup,
+            "page stays up"
+        );
+    }
+
+    #[test]
+    fn decodes_forms() {
+        let f = form_decode("ssid=Groovy+Wifi&psk=far%20out%21%2B&x");
+        assert_eq!(field(&f, "ssid"), Some("Groovy Wifi"));
+        assert_eq!(field(&f, "psk"), Some("far out!+"));
+        assert_eq!(field(&f, "x"), Some(""));
+        assert_eq!(form_decode("a=%zz%4")[0].1, "%zz%4");
+        assert_eq!(form_decode("a=caf%C3%A9")[0].1, "café");
+        assert_eq!(pct("Café & co"), "Caf%C3%A9%20%26%20co");
+        assert_eq!(
+            form_decode(&format!("s={}", pct("a+b c/é")))[0].1,
+            "a+b c/é"
+        );
+    }
+
+    #[test]
+    fn pages_escape_and_link() {
+        let s = Setup {
+            nets: vec![
+                net("<Home>", "psk"),
+                net("Cafe", "open"),
+                net("Corp", "8021x"),
+            ],
+            frame_id: "kitchen".into(),
+            ..Setup::default()
+        };
+        let h = render_list(&s);
+        assert!(h.contains("href=\"/wifi/net?ssid=%3CHome%3E\""));
+        assert!(h.contains("&lt;Home&gt;") && !h.contains("<Home>"));
+        assert!(
+            h.contains("class=\"dim\"><span class=\"name\">Corp"),
+            "8021x listed, not tappable"
+        );
+        assert!(h.contains("<b>1 Wi-Fi</b>"));
+        let p = render_password(&s, "<Home>", s.nets.first());
+        assert!(p.contains("name=\"ssid\" value=\"&lt;Home&gt;\""));
+        assert!(p.contains("id=\"kb\""));
+        let o = render_password(&s, "Cafe", s.nets.get(1));
+        assert!(!o.contains("id=\"kb\"") && o.contains("no password"));
+    }
+
+    fn req(method: &str, target: &str, body: &str, port: u16) -> Req {
+        let (path, q) = target.split_once('?').unwrap_or((target, ""));
+        Req {
+            method: method.into(),
+            path: path.into(),
+            query: form_decode(q),
+            host: format!("127.0.0.1:{port}"),
+            form: form_decode(body),
+        }
+    }
+
+    fn wait_join(st: &Shared) {
+        for _ in 0..100 {
+            if lock(st).joining.is_none() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("join never finished");
+    }
+
+    #[test]
+    fn join_flow_wrong_then_right_password() {
+        let st: Shared = Arc::default();
+        let fake = Arc::new(Fake {
+            up: AtomicBool::new(false),
+            psk: "far out man",
+        });
+        let radio: Arc<dyn Radio> = fake.clone();
+        assert_eq!(
+            respond(&st, &radio, 1, &req("GET", "/wifi", "", 1)).status,
+            404,
+            "inactive"
+        );
+        {
+            let mut s = lock(&st);
+            s.active = true;
+            s.nets = vec![net("Groovy Wifi", "psk"), net("Cafe", "open")];
+        }
+        let mut bad_host = req("GET", "/wifi", "", 1);
+        bad_host.host = "evil.example:1".into();
+        assert_eq!(respond(&st, &radio, 1, &bad_host).status, 404, "rebinding");
+
+        let short = respond(
+            &st,
+            &radio,
+            1,
+            &req("POST", "/wifi/join", "ssid=Groovy+Wifi&psk=short", 1),
+        );
+        assert_eq!(short.status, 303);
+        assert!(lock(&st).error.as_deref().unwrap().contains("8 to 63"));
+
+        respond(
+            &st,
+            &radio,
+            1,
+            &req(
+                "POST",
+                "/wifi/join",
+                "ssid=Groovy+Wifi&psk=wrong+password",
+                1,
+            ),
+        );
+        wait_join(&st);
+        let again =
+            String::from_utf8(respond(&st, &radio, 1, &req("GET", "/wifi", "", 1)).body).unwrap();
+        assert!(
+            again.contains("Check the password") && again.contains("id=\"kb\""),
+            "back on the keyboard"
+        );
+        assert!(!fake.connected());
+
+        respond(
+            &st,
+            &radio,
+            1,
+            &req("POST", "/wifi/join", "ssid=Groovy+Wifi&psk=far+out+man", 1),
+        );
+        wait_join(&st);
+        assert!(fake.connected());
+        let done =
+            String::from_utf8(respond(&st, &radio, 1, &req("GET", "/wifi", "", 1)).body).unwrap();
+        assert!(done.contains("Connected to Groovy Wifi"));
+    }
+
+    #[test]
+    fn open_network_needs_no_password_and_server_speaks_http() {
+        let st: Shared = Arc::default();
+        {
+            let mut s = lock(&st);
+            s.active = true;
+            s.nets = vec![net("Cafe", "open")];
+        }
+        let fake = Arc::new(Fake {
+            up: AtomicBool::new(false),
+            psk: "x",
+        });
+        let port = start(st.clone(), fake.clone(), "127.0.0.1:0").unwrap();
+        let mut c = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let body = "ssid=Cafe&psk=";
+        write!(
+            c,
+            "POST /wifi/join HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+             Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut out = String::new();
+        c.read_to_string(&mut out).unwrap();
+        assert!(
+            out.starts_with("HTTP/1.1 303") && out.contains("Location: /wifi\r\n"),
+            "{out}"
+        );
+        wait_join(&st);
+        assert!(fake.connected());
+    }
+}

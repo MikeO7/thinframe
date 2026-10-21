@@ -95,7 +95,8 @@ main() {
 	say "thinframe flasher"
 	ask() { local in; if [ "${3:-}" ]; then read -r -s -p "$2: " in </dev/tty; echo; else read -r -p "$2${!1:+ [${!1}]}: " in </dev/tty; fi
 		printf -v "$1" '%s' "${in:-${!1:-}}"; case "${!1}" in *'"'*|*$'\n'*) stop "no quotes or newlines in answers";; esac; }
-	ask WIFI_SSID "Wi-Fi network"; ask WIFI_PSK "Wi-Fi password" secret
+	ask WIFI_SSID "Wi-Fi network (Enter to pick it on the frame's screen)"
+	if [ -n "$WIFI_SSID" ]; then ask WIFI_PSK "Wi-Fi password" secret; else WIFI_PSK=; fi
 	ask SERVER_URL "Server (e.g. http://nas.local:8080)"; ask FRAME_ID "Frame name (e.g. kitchen)"
 	ask FRAME_TOKEN "Server token (Enter to pair with the button on the frame)" secret
 	(umask 077; printf 'WIFI_SSID=%q\nSERVER_URL=%q\nFRAME_ID=%q\n' "$WIFI_SSID" "$SERVER_URL" "$FRAME_ID" > "$STATE/answers")
@@ -112,7 +113,7 @@ main() {
 	[ "$ans" = "$dev" ] || stop "confirmation did not match"
 	[ "${1:-}" = "--settings-only" ] || write_card "$dev"
 	put_provision "$dev"
-	say "Done. Card in the frame, power on; without a token, press PAIR on its screen. Then open $SERVER_URL/admin"
+	say "Done. Card in the frame, power on. On its screen: pick Wi-Fi if asked, then press PAIR. Then open $SERVER_URL/admin"
 }
 
 [ "${FLASH_SOURCE_ONLY:-}" = 1 ] || main "$@"

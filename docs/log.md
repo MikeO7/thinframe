@@ -229,3 +229,33 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   under TCG; the same on the Mac takes 41 ms to build the scene and 5.7 ms per animation frame (release
   profile). The A33 figures are not measured yet [U]; the kiosk logs "20 frames, N ms each" once a
   splash has animated that long.
+
+## 2026-10-21 TASK 17 Wi-Fi first, then pairing, end to end in QEMU
+- Found first: the image had **no iwctl**. Buildroot builds iwd's client only with readline, so
+  `tfctl wifi`, the RSSI in `tfctl status` and any on-screen setup could never have worked on the frame.
+  pf1007l_defconfig now sets `BR2_PACKAGE_READLINE=y`; /usr/bin/iwctl is 148 KB [V in the QEMU build].
+  Also, Buildroot 2025.02's S40iwd has no `restart`, so `tfctl wifi` now runs stop + start [V source].
+- Setup: QEMU image with mac80211_hwsim (three radios), hostapd serving "Groovy Wifi" (WPA2,
+  "far out man") and "Cafe" (open), udhcpd on each (qemu-overlay, S35simwifi). Serial log:
+  `wlan1: AP-ENABLED`, `wlan2: AP-ENABLED` [V]. frameserver with auth on, fresh store; card flashed with
+  neither Wi-Fi nor token.
+- Real iwctl 3.0 output in the guest (`get-networks rssi-dbms`): colour escapes, rows like
+  `      Groovy Wifi                       psk                 -3000   `. tfctl's parser matches it [V].
+- Boot: cog opened `http://127.0.0.1:8091/wifi`; both networks listed, Groovy Wifi with a lock
+  (docs/img/wifi-qemu-1-networks.jpg) [V]. No pairing request reached the server yet [V].
+- Tap on Groovy Wifi: password page with the on-screen keyboard. Typed a wrong password, Join:
+  iwd/hostapd refused it and the page came back to the keyboard with "That didn't work (Operation
+  failed). Check the password." (docs/img/wifi-qemu-2-wrong-password.jpg) [V].
+- Typed "far out man" (docs/img/wifi-qemu-3-password.jpg), Join: wlan0 `State connected`,
+  `Connected network Groovy Wifi`; iwd wrote `/var/lib/iwd/Groovy Wifi.psk` (on /data) [V].
+  Only then did the server see `POST /api/pair` (19:17:38) and the PAIR page appear, step marker
+  "1 Wi-Fi · 2 pair" (docs/img/wifi-qemu-4-pair.jpg) [V].
+- Tap PAIR: `POST /pair/sim-qemu/accept` 19:18:50, dashboard `GET /frame/sim-qemu` 19:19:06 [V].
+- `reboot`: no Wi-Fi page and no pairing request; iwd rejoined Groovy Wifi by itself, the socket came
+  back and the dashboard loaded (`GET /frame/sim-qemu` 19:24:50,
+  docs/img/wifi-qemu-5-dashboard-after-reboot.jpg) [V].
+- Seen on the way: under TCG a tap shows on screen seconds later (software GL), so taps queue up.
+  libinput in the guest reports each tap at once and in the right place (`libinput debug-events`) [V].
+  So the list page now reloads every 20 s once networks are shown (3 s while still looking), and the
+  PAIR page's step marker got the same pill as the Wi-Fi page. Both changed after this run (unit
+  tests only, not re-run in QEMU).

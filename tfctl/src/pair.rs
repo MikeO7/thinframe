@@ -27,7 +27,7 @@ pub enum Ask {
     Refused,
 }
 
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -82,8 +82,9 @@ pub fn render(
          button{{font:7vh Shrikhand,Georgia,serif;color:#f4dcaa;background:#d9662b;border:0;\
          border-radius:999px;padding:.15em 1.4em;box-shadow:0 1vh 0 #5b3a1e}}\
          button:active{{transform:translateY(.8vh);box-shadow:0 .2vh 0 #5b3a1e}}\
-         small{{position:absolute;left:5.8vw;bottom:4vh;font-size:3.4vh}}</style></head>\
-         <body><main>{body}</main><small>{who}</small></body></html>"
+         small{{position:absolute;left:5.8vw;bottom:4vh;font-size:3.4vh}}\
+         .steps{{position:absolute;right:3vw;top:2.4vh;font-size:3vh;background:#f4dcaa;border:.4vh solid #5b3a1e;border-radius:999px;padding:.1em .8em}}.steps b{{color:#b8452a;font-weight:400}}</style></head>\
+         <body><div class=\"steps\">1 Wi-Fi &middot; <b>2 pair</b></div><main>{body}</main><small>{who}</small></body></html>"
     )
 }
 
