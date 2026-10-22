@@ -99,8 +99,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] `tfctl update` (tfctl/src/update.rs) fetches the main tarball with busybox wget, applies
       `image/rootfs/` and `www/`, replaces `/usr/bin/tfctl` from the latest GitHub release asset
       if newer, restarts the service. Logs to `/var/log/tf-update.log`.
-- [ ] `scripts/deploy.sh host` pushes the working tree (not Git) for fast iteration.
-- Gate: edit `www/index.html` on the Mac, `deploy.sh`, page changes within 5 s.
+- [ ] Fast iteration goes through the server, not a push script (the root is read-only): cross-build
+      tfctl, `scripts/make-artifacts.sh VERSION tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl`
+      stages `tfctl-armv7` + `overlay.tar.gz` in `server/artifacts/`, rebuild the frameserver
+      container; the agent sees the new `software_version` and installs it (TASK 11). Page changes
+      need no frame step: they live on the server (`/admin`, `server/internal/widgets/`).
+- Gate: change `image/rootfs/` or tfctl on the Mac, stage, rebuild the container; the frame
+  heartbeats the new version within one poll, with no ssh.
 
 ## 10. Thin client (frame side)
 - [x] `tfctl agent` (tfctl/src/agent.rs): WebSocket client (RFC 6455 over TcpStream, text frames,

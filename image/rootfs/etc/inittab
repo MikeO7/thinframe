@@ -1,6 +1,8 @@
 # BusyBox init. Root is read-only; writable state lives on /data (see fstab).
 ::sysinit:/bin/mount -t proc proc /proc
 ::sysinit:/bin/mkdir -p /dev/pts /dev/shm
+# e2fsck /data while it is still unmounted (a power cut can leave it dirty), then mount it.
+::sysinit:/usr/bin/tfctl boot fsck
 ::sysinit:/bin/mount -a
 ::sysinit:/bin/mkdir -p /run/lock/subsys
 ::sysinit:/bin/hostname -F /etc/hostname

@@ -7,7 +7,9 @@
 use crate::config::Config;
 use crate::update::{self, Paths, StartCheck};
 use crate::{agent, screen, splash, sys};
-use std::io;
+use std::fs;
+use std::io::{self, Write};
+use std::os::unix::fs::FileExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -57,6 +59,30 @@ const FAST_FAIL: Duration = Duration::from_secs(60);
 const FAST_FAIL_LIMIT: u32 = 5;
 /// No cog binary: hold the splash instead of looping on spawn errors.
 const MISSING_DELAY: Duration = Duration::from_secs(3600);
+
+/// Where inittab sends our stderr and cog's (`>>`, O_APPEND). /var/log is the 64 MB tmpfs.
+const LOG: &str = "/var/log/thinframe.log";
+const LOG_MAX: u64 = 1 << 20;
+const LOG_KEEP: u64 = 256 << 10;
+
+/// Over `max` bytes: keep the last `keep` in place. Truncated, not replaced: the inittab shell's
+/// fd and cog's stay on this inode, and with O_APPEND their next write lands at the new end.
+pub fn cap_log(path: &str, max: u64, keep: u64) -> io::Result<()> {
+    let mut f = match fs::OpenOptions::new().read(true).append(true).open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let len = f.metadata()?.len();
+    if len <= max {
+        return Ok(());
+    }
+    let keep = keep.min(len);
+    let mut tail = vec![0u8; keep as usize];
+    f.read_exact_at(&mut tail, len - keep)?;
+    f.set_len(0)?;
+    f.write_all(&tail)
+}
 
 pub fn run(cfg: &Config) -> io::Result<()> {
     sys::trap_term();
@@ -195,6 +221,9 @@ impl Kiosk {
         }
         if !self.splash.as_mut().is_some_and(|s| s.hand_over()) {
             self.splash = None;
+        }
+        if let Err(e) = cap_log(LOG, LOG_MAX, LOG_KEEP) {
+            eprintln!("tfctl: kiosk: log cap: {e}");
         }
         match self.command().spawn() {
             Ok(child) => {
@@ -437,6 +466,36 @@ mod tests {
         );
         reap_group(pgid);
         assert!(sys::send_group(pgid, 0).is_err(), "group should be empty");
+    }
+
+    #[test]
+    fn log_is_cut_to_its_tail_in_place() {
+        let p = std::env::temp_dir().join(format!("tfctl-cap-{}.log", std::process::id()));
+        let path = p.to_str().unwrap();
+        assert!(cap_log(path, 10, 4).is_ok(), "missing file is fine");
+        // The writer holds an O_APPEND fd across the cut, like inittab's `>>`.
+        let mut w = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&p)
+            .unwrap();
+        w.write_all(b"0123456789").unwrap();
+        cap_log(path, 10, 4).unwrap();
+        assert_eq!(
+            fs::read(&p).unwrap(),
+            b"0123456789",
+            "at the limit: untouched"
+        );
+        w.write_all(b"abcdef").unwrap();
+        cap_log(path, 10, 4).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"cdef");
+        w.write_all(b"!").unwrap();
+        assert_eq!(
+            fs::read(&p).unwrap(),
+            b"cdef!",
+            "writer appends at the new end"
+        );
+        fs::remove_file(&p).unwrap();
     }
 
     #[test]

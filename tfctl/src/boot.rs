@@ -6,6 +6,13 @@
 //!  4. hostname = FRAME_ID, so the router's DHCP table names the frame
 //!  5. udhcpd on the USB-C link, so the Mac gets 192.168.7.1
 //!  6. touch firmware from the frame's own Android eMMC when the image has none (`touchfw`)
+//!
+//! `tfctl boot fsck` is a separate, earlier step: the inittab line between `mount proc` and
+//! `mount -a`. /data (p4) is never mounted at that point, so `e2fsck -p` can repair it after a
+//! power cut; if preen mode gives up (exit bit 4), one `e2fsck -y` pass follows. Then `mount -a`
+//! mounts /data and the bind mounts over it in fstab order, before rcS starts iwd and dropbear,
+//! which read their state from those binds. The device is p4 of the disk `slot::find_disk`
+//! returns (our MBR signature only), so the eMMC is never named.
 use crate::config;
 use crate::provision;
 use crate::slot;
@@ -60,6 +67,45 @@ pub fn run(conf: &str) -> io::Result<()> {
     }
     step("touch firmware", touchfw::ensure());
     Ok(())
+}
+
+/// `tfctl boot fsck`: check the data partition before `mount -a` mounts it. Never fails the boot:
+/// whatever e2fsck says, `mount -a` runs next and tries.
+pub fn fsck_data() -> io::Result<()> {
+    let cands = slot::DISKS.map(Path::new);
+    let disk = slot::find_disk(&cands).ok_or_else(|| io::Error::other("no thinframe disk"))?;
+    let p4 = slot::part_n(&disk, 4).to_string_lossy().to_string();
+    let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
+    if is_mounted(&mounts, &p4) {
+        eprintln!("tfctl: boot: fsck: {p4} is mounted, skipped");
+        return Ok(());
+    }
+    let code = e2fsck("-p", &p4)?;
+    eprintln!("tfctl: boot: fsck: e2fsck -p {p4}: exit {code}");
+    if needs_forced_pass(code) {
+        let code = e2fsck("-y", &p4)?;
+        eprintln!("tfctl: boot: fsck: e2fsck -y {p4}: exit {code}");
+    }
+    Ok(())
+}
+
+/// e2fsck's exit status (-1 when killed by a signal). Output goes to the console.
+fn e2fsck(mode: &str, dev: &str) -> io::Result<i32> {
+    let st = Command::new("e2fsck").args([mode, dev]).status()?;
+    Ok(st.code().unwrap_or(-1))
+}
+
+/// After `e2fsck -p`: bit 4 means errors left uncorrected (preen refused), so answer yes to all.
+/// 0 to 3 are clean or fixed; 8 and up alone are operational errors that `-y` would not change.
+pub fn needs_forced_pass(code: i32) -> bool {
+    code >= 0 && code & 4 != 0
+}
+
+/// Whether `dev` is the source of any line in /proc/mounts.
+pub fn is_mounted(mounts: &str, dev: &str) -> bool {
+    mounts
+        .lines()
+        .any(|l| l.split_whitespace().next() == Some(dev))
 }
 
 fn provision_rw() -> io::Result<()> {
@@ -189,6 +235,25 @@ mod tests {
         let mut empty = m;
         empty[P4 + 4] = 0;
         assert_eq!(p4_new_len(&empty, 31_116_288), None);
+    }
+
+    #[test]
+    fn forced_pass_only_when_preen_left_errors() {
+        for code in [0, 1, 2, 3, 8, 16, 32, 128, -1] {
+            assert!(!needs_forced_pass(code), "{code}");
+        }
+        for code in [4, 5, 6, 12] {
+            assert!(needs_forced_pass(code), "{code}");
+        }
+    }
+
+    #[test]
+    fn mounted_matches_the_source_column_only() {
+        let m = "/dev/root / ext4 ro 0 0\n/dev/vda4 /data ext4 rw,noatime 0 0\n";
+        assert!(is_mounted(m, "/dev/vda4"));
+        assert!(!is_mounted(m, "/dev/vda1"));
+        assert!(!is_mounted(m, "/data"));
+        assert!(!is_mounted("", "/dev/mmcblk0p4"));
     }
 
     #[test]

@@ -5,6 +5,7 @@
 //! Subcommands (see TASKS.md for which are done):
 //!   tfctl kiosk      run cog on DRM, restart on crash, run the agent thread (inittab respawn)
 //!   tfctl boot       per-boot setup from S90thinframe: provision, grow /data, hostname, USB DHCP
+//!   tfctl boot fsck  from inittab before `mount -a`: e2fsck the data partition
 //!   tfctl agent      control socket to the server alone (debugging; kiosk commands are logged)
 //!   tfctl update [--force]  software update from the server's config (the agent does this itself)
 //!   tfctl provision [--boot-dir D]  first boot: apply /boot/provision.txt, delete it (TASK 14)
@@ -57,7 +58,7 @@ mod ws;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: tfctl <kiosk|boot|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
+        "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
          wifi SSID PSK|status|bench [TAPS]|set KEY VALUE>"
     );
     ExitCode::from(2)
@@ -87,6 +88,7 @@ fn main() -> ExitCode {
     };
     let result = match args.first().map(String::as_str) {
         Some("kiosk") => kiosk::run(&cfg),
+        Some("boot") if args.get(1).is_some_and(|a| a == "fsck") => boot::fsck_data(),
         Some("boot") => boot::run(&conf),
         Some("agent") => agent_alone(&cfg),
         Some("update") => update::run(&cfg, args.get(1).is_some_and(|a| a == "--force")),
