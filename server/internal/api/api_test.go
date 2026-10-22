@@ -316,3 +316,28 @@ func TestTouchSurvivesHeartbeat(t *testing.T) {
 		t.Fatalf("admin does not show the touch latency")
 	}
 }
+
+// Deleting a frame must drop its live socket: it was authenticated against the record just removed.
+func TestDeleteFrameKicksSocket(t *testing.T) {
+	s, ts := newTest(t, "tok")
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/frames/sim/ws"
+	c, _, err := websocket.Dial(context.Background(), url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer tok"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.CloseNow() }()
+	readMsg(t, c) // config on connect
+	if !s.Hub.Online("sim") {
+		t.Fatal("sim should be online")
+	}
+	if resp, _ := do(t, "DELETE", ts.URL+"/api/frames/sim", "tok", nil); resp.StatusCode != 204 {
+		t.Fatalf("delete: %d", resp.StatusCode)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for s.Hub.Online("sim") {
+		if time.Now().After(deadline) {
+			t.Fatal("deleted frame still online")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
