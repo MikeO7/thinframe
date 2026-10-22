@@ -1,8 +1,9 @@
 //! System (OS) update, A/B (TASK 12). `system-<ver>.tar` = {zImage, rootfs.ext4.zst,
 //! version.json} from `/api/artifacts/`. The standby slot's partition is rewritten with
 //! `zstd -d | dd`, its kernel copied to `/boot/zImage.<slot>`, then `uEnv.txt` gets
-//! `slot=<new> tries=3` and the frame reboots. U-Boot decrements `tries` each boot and flips
-//! back when it hits 0; the agent's first connect on the new slot writes `tries=0`.
+//! `slot=<new> tries=3` and the frame reboots. U-Boot decrements `tries` before it loads the
+//! kernel, and the start that takes it to 0 boots the other slot: tries=3 gives the new slot
+//! two starts (tries left 2, then 1). The agent's first connect on the new slot writes `tries=0`.
 //!
 //! Safety: `dd` only ever targets a partition of the disk whose MBR carries our signature
 //! (`slot::find_disk`), never the eMMC. `uEnv.txt` is rewritten only after the rootfs and
@@ -17,10 +18,18 @@ use std::process::{Command, Stdio};
 
 /// Headroom the download + extraction needs on /data.
 const MIN_FREE_KB: u64 = 300 * 1024;
+/// U-Boot's `setexpr` prints its result in hex while `test -gt` reads decimal, so a count
+/// above 9 would be misread after the first decrement ("10" - 1 = "f", and "f" -gt 0 is false).
 const TRIES: u32 = 3;
+const _: () = assert!(TRIES >= 2 && TRIES <= 9);
 
 pub fn uenv_path(p: &Paths) -> std::path::PathBuf {
     p.boot.join("uEnv.txt")
+}
+
+/// The slot state U-Boot will act on: `uEnv.txt`, or `uEnv.bak` when that names no slot.
+pub fn uenv(p: &Paths) -> io::Result<UEnv> {
+    UEnv::load_effective(&uenv_path(p))
 }
 
 /// Slot the running root came from: kernel cmdline first, `uEnv.txt` as the fallback.
@@ -28,7 +37,7 @@ pub fn running_slot(p: &Paths) -> Option<Slot> {
     fs::read_to_string(&p.cmdline)
         .ok()
         .and_then(|c| slot::from_cmdline(&c))
-        .or_else(|| UEnv::load(&uenv_path(p)).ok()?.slot)
+        .or_else(|| uenv(p).ok()?.slot)
 }
 
 pub fn system_version(p: &Paths) -> Option<String> {
@@ -133,7 +142,7 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
     }
     // While U-Boot still counts tries for this slot, the other one is the only image known to
     // boot; overwriting it now could leave no good slot at all.
-    if let Ok(u) = UEnv::load(&uenv_path(p)) {
+    if let Ok(u) = uenv(p) {
         if u.tries > 0 && u.slot == Some(current) {
             return Err(io::Error::other(format!(
                 "slot {} is not confirmed yet (tries={}); refusing to overwrite the other slot",
@@ -186,8 +195,8 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
         boot_rw(p)?;
         let res = (|| {
             fs::copy(&zimage, p.boot.join(format!("zImage.{}", standby.name())))?;
-            let uenv = UEnv::load(&uenv_path(p)).unwrap_or_else(|_| UEnv::parse(""));
-            uenv.save(&uenv_path(p), standby, TRIES)
+            let u = uenv(p).unwrap_or_else(|_| UEnv::parse(""));
+            u.save(&uenv_path(p), standby, TRIES)
         })();
         boot_ro(p);
         res
@@ -204,13 +213,23 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
 
 /// `rollback` action: boot the other slot next time. It gets the same retry counter as a fresh
 /// update: if it cannot reach the server, U-Boot comes back here instead of looping on it;
-/// `confirm_slot` zeroes the counter once it has connected.
+/// `confirm_slot` zeroes the counter once it has connected. Refused while the other slot has
+/// no kernel on PFBOOT (a fresh card: slot b was never written), since there is nothing there
+/// to roll back to; U-Boot would only spend tries on the extlinux fallback label.
 pub fn rollback(p: &Paths) -> io::Result<Slot> {
     let current =
         running_slot(p).ok_or_else(|| io::Error::other("cannot tell which slot is running"))?;
     let target = current.other();
+    let kernel = p.boot.join(format!("zImage.{}", target.name()));
+    if !kernel.is_file() {
+        return Err(io::Error::other(format!(
+            "slot {} was never installed ({} missing); nothing to roll back to",
+            target.name(),
+            kernel.display()
+        )));
+    }
     boot_rw(p)?;
-    let res = UEnv::load(&uenv_path(p))
+    let res = uenv(p)
         .unwrap_or_else(|_| UEnv::parse(""))
         .save(&uenv_path(p), target, TRIES);
     boot_ro(p);
@@ -236,13 +255,13 @@ pub fn mark_attempt(p: &Paths, version: &str) -> io::Result<()> {
 /// On every agent connect: if U-Boot is still counting tries for the slot we booted from,
 /// the slot works; write `tries=0` and report it.
 pub fn confirm_slot(p: &Paths) -> Option<(String, String)> {
-    let uenv = UEnv::load(&uenv_path(p)).ok()?;
+    let u = uenv(p).ok()?;
     let running = running_slot(p)?;
-    if uenv.tries == 0 || uenv.slot != Some(running) {
+    if u.tries == 0 || u.slot != Some(running) {
         return None;
     }
     boot_rw(p).ok()?;
-    let res = uenv.save(&uenv_path(p), running, 0);
+    let res = u.save(&uenv_path(p), running, 0);
     boot_ro(p);
     res.ok()?;
     Some((
@@ -313,6 +332,12 @@ mod tests {
         let base = tmp_base("rbk");
         let p = fake_card(&base);
         assert_eq!(confirm_slot(&p), None, "tries=0: nothing to confirm");
+        // Fresh card: slot b was never written, so there is nothing to roll back to.
+        let e = rollback(&p).unwrap_err().to_string();
+        assert!(e.contains("never installed"), "{e}");
+        let u = UEnv::load(&uenv_path(&p)).unwrap();
+        assert_eq!((u.slot, u.tries), (Some(Slot::A), 0), "uEnv untouched");
+        fs::write(p.boot.join("zImage.b"), b"kernel").unwrap();
         assert_eq!(rollback(&p).unwrap(), Slot::B);
         let u = UEnv::load(&uenv_path(&p)).unwrap();
         assert_eq!((u.slot, u.tries), (Some(Slot::B), TRIES));
@@ -327,6 +352,14 @@ mod tests {
         fs::write(&p.cmdline, "root=PARTUUID=50463037-02").unwrap();
         u.save(&uenv_path(&p), Slot::B, 1).unwrap();
         assert_eq!(confirm_slot(&p), None);
+        // uEnv.txt lost (power cut mid-rename): U-Boot boots from uEnv.bak, and so does the
+        // confirm, which writes a fresh uEnv.txt.
+        fs::write(&p.cmdline, "root=PARTUUID=50463037-03").unwrap();
+        fs::write(uenv_path(&p).with_extension("bak"), "slot=b\ntries=2\n").unwrap();
+        fs::remove_file(uenv_path(&p)).unwrap();
+        assert_eq!(confirm_slot(&p).unwrap().0, "slot-confirmed");
+        let u = UEnv::load(&uenv_path(&p)).unwrap();
+        assert_eq!((u.slot, u.tries), (Some(Slot::B), 0));
         fs::remove_dir_all(&base).unwrap();
     }
 
