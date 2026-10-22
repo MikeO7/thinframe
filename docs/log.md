@@ -412,15 +412,3 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   collector moves single readings by about 50 MB.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
-
-## 2026-10-22 Audit chunk 8: update paths
-- `sysupdate::write_rootfs` kept the zstd pipe's read end inside the `dd` Command after `output()`
-  returned, so a dd that quit early (ENOSPC, device would not open) left zstd blocked on a full
-  pipe and the sysupdate thread waiting forever with `busy=true`; every later system update was
-  refused as "already running" until tfctl restarted. The Command is dropped as soon as dd exits,
-  and zstd is killed when dd failed.
-- `update::record_start_at` used `saturating_sub`, so a start logged with a real clock looked
-  "recent" on the next cold boot, when the A33 (no RTC battery) is back in 1970. A power cut right
-  after a good software update then rolled the healthy binary back. Starts after `now` no longer
-  count. `starts_from_before_a_reboot_are_not_recent` [V].
-- `cargo test`: 118 passed. clippy clean.
