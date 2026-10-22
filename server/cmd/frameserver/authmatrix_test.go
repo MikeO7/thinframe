@@ -249,6 +249,9 @@ const (
 func rows() []row {
 	layout, _ := json.Marshal(store.DefaultLayout())
 	ensure := func(id string) func(*tenv) { return func(e *tenv) { _, _ = e.srv.Store.Ensure(id) } }
+	report := func(id string) func(*tenv) {
+		return func(e *tenv) { _, _ = e.srv.SaveReport(id, []byte("==== tfctl\nmatrix\n")) }
+	}
 	return []row{
 		// public
 		{pattern: "GET /", method: "GET", path: "/", class: public, ok: http.StatusFound},
@@ -273,12 +276,16 @@ func rows() []row {
 		{pattern: "PUT /api/frames/{id}/layout", method: "PUT", path: "/api/frames/kitchen/layout", ghost: "/api/frames/ghost/layout", class: bearer, ok: 200, body: string(layout), ctype: jsonT},
 		{pattern: "POST /api/frames/{id}/heartbeat", method: "POST", path: "/api/frames/kitchen/heartbeat", ghost: "/api/frames/ghost/heartbeat", class: frame, ok: 200, body: `{"ip":"10.0.0.2"}`, ctype: jsonT},
 		{pattern: "POST /api/frames/{id}/actions", method: "POST", path: "/api/frames/kitchen/actions", ghost: "/api/frames/ghost/actions", class: bearer, ok: 202, body: `{"name":"reload-page"}`, ctype: jsonT},
+		{pattern: "POST /api/frames/{id}/report", method: "POST", path: "/api/frames/kitchen/report", ghost: "/api/frames/ghost/report", class: frame, ok: 201, body: "==== tfctl\nreport\n", ctype: "text/plain"},
+		{pattern: "GET /api/frames/{id}/reports", method: "GET", path: "/api/frames/kitchen/reports", ghost: "/api/frames/ghost/reports", class: bearer, ok: 200},
+		{pattern: "GET /api/frames/{id}/reports/{name}", method: "GET", path: "/api/frames/kitchen/reports/latest", ghost: "/api/frames/ghost/reports/latest", class: bearer, ok: 200, prep: report("kitchen")},
 		// A plain GET is not an upgrade: 426 once authorized (TestWebSocketAuth dials for real).
 		{pattern: "GET /api/frames/{id}/ws", method: "GET", path: "/api/frames/kitchen/ws", ghost: "/api/frames/ghost/ws", class: frame, ok: http.StatusUpgradeRequired},
 		{pattern: "GET /api/release", method: "GET", path: "/api/release", class: anyFrame, ok: 200},
 		{pattern: "GET /api/artifacts/{name}", method: "GET", path: "/api/artifacts/tfctl-armv7", ghost: "/api/artifacts/nope", class: anyFrame, ok: 200},
 		// admin
 		{pattern: "GET /admin", method: "GET", path: "/admin", class: admin, ok: 200},
+		{pattern: "GET /admin/{id}/reports/{name}", method: "GET", path: "/admin/kitchen/reports/latest", ghost: "/admin/ghost/reports/latest", class: admin, ok: 200, prep: report("kitchen")},
 		{pattern: "POST /admin/{id}/config", method: "POST", path: "/admin/adminf/config", ghost: "/admin/ghost/config", class: admin, ok: 303, body: "rotation=1&brightness=50&name=A&screen_off=&screen_on=&url=&tags=", ctype: form},
 		{pattern: "POST /admin/{id}/layout", method: "POST", path: "/admin/adminf/layout", ghost: "/admin/ghost/layout", class: admin, ok: 303, body: "layout=" + url.QueryEscape(string(layout)), ctype: form},
 		{pattern: "POST /admin/{id}/action", method: "POST", path: "/admin/adminf/action", ghost: "/admin/ghost/action", class: admin, ok: 303, body: "name=reload-page", ctype: form},

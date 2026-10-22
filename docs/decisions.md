@@ -454,3 +454,17 @@ and without it the frame cannot be tapped, so Wi-Fi setup and PAIR (TASK 17) wou
   unbound `silead` device again (`/sys/bus/i2c/drivers_probe`). It does this on every boot, because
   udev loads `silead` before /data is mounted.
 - **Cost.** No crate. It reuses png.rs's inflate and sha256.rs. +13 KB, so tfctl is 863 KB.
+
+## Remote debugging: reports, a log that survives the boot, debug mode
+The frame has no root login and its log lived on tmpfs, so the only view of a bad boot was a
+serial cable. Three small things fix that without a logging daemon or a second shell script:
+`tfctl boot` writes every step line to `/dev/kmsg` as well as the console (dmesg keeps it for
+the whole boot); a thread in `tfctl kiosk` copies new log bytes to `/data/thinframe/log/current.log`
+every 15 s and rotates it to `previous.log` on a new boot id (bounded at 512 KB, the only card
+writes logging causes); and a `report` action posts one bounded text file with versions, config,
+uEnv, mounts, processes, dmesg, Wi-Fi state and both logs to `POST /api/frames/<id>/report`, which
+the server keeps (last 20) and serves to `/admin`, the API and MCP (`list_reports`, `get_report`).
+Debug mode (`debug` in the frame config, `DEBUG=1` in the conf) adds socket traffic, config
+writes and cog's command line to the log, runs cog with `G_MESSAGES_DEBUG=all`, and sends a
+report on the first contact of every tfctl process. The token stays out of all of it (it is not
+in the conf). Cost: 11.7 KB of binary (995,284 bytes, 4.7 KB under the limit). [V] in QEMU.

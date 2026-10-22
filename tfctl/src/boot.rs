@@ -51,8 +51,18 @@ fn sh(cmd: &str, args: &[&str]) -> io::Result<()> {
 
 fn step(name: &str, r: io::Result<()>) {
     match r {
-        Ok(()) => eprintln!("tfctl: boot: {name}: ok"),
-        Err(e) => eprintln!("tfctl: boot: {name}: {e}"),
+        Ok(()) => note(&format!("{name}: ok")),
+        Err(e) => note(&format!("{name}: {e}")),
+    }
+}
+
+/// A boot line goes to the console and to the kernel log: /var/log is not up yet (and is
+/// tmpfs anyway), dmesg keeps it for the whole boot, and the report (report.rs) carries dmesg.
+pub fn note(line: &str) {
+    eprintln!("tfctl: boot: {line}");
+    if let Ok(mut k) = fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        use std::io::Write;
+        let _ = writeln!(k, "<6>tfctl: boot: {line}");
     }
 }
 
@@ -89,20 +99,20 @@ pub fn fsck_data() -> io::Result<()> {
             })
             .and_then(|()| std::os::unix::fs::symlink(&target, link));
         if let Err(e) = r {
-            eprintln!("tfctl: boot: link {link} -> {}: {e}", target.display());
+            note(&format!("link {link} -> {}: {e}", target.display()));
         }
     }
     let p4 = slot::part_n(&disk, 4).to_string_lossy().to_string();
     let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
     if is_mounted(&mounts, &p4) {
-        eprintln!("tfctl: boot: fsck: {p4} is mounted, skipped");
+        note(&format!("fsck: {p4} is mounted, skipped"));
         return Ok(());
     }
     let code = e2fsck("-p", &p4)?;
-    eprintln!("tfctl: boot: fsck: e2fsck -p {p4}: exit {code}");
+    note(&format!("fsck: e2fsck -p {p4}: exit {code}"));
     if needs_forced_pass(code) {
         let code = e2fsck("-y", &p4)?;
-        eprintln!("tfctl: boot: fsck: e2fsck -y {p4}: exit {code}");
+        note(&format!("fsck: e2fsck -y {p4}: exit {code}"));
     }
     Ok(())
 }
@@ -230,10 +240,7 @@ fn grow_data() -> io::Result<()> {
     fs::File::open(&p4)?.read_exact_at(&mut sb, 1024)?;
     if ext4_lags_partition(&sb, part_sectors) {
         sh("resize2fs", &[&p4.to_string_lossy()])?;
-        eprintln!(
-            "tfctl: boot: data partition now {} MiB",
-            part_sectors / 2048
-        );
+        note(&format!("data partition now {} MiB", part_sectors / 2048));
     }
     Ok(())
 }

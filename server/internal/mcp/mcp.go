@@ -123,6 +123,7 @@ func register(m *sdk.Server, s *api.Server) {
 		SplashText *string  `json:"splash_text,omitempty" jsonschema:"one line under the boot logo; shown from the next boot"`
 		SplashBG   *string  `json:"splash_bg,omitempty" jsonschema:"boot splash background #rrggbb"`
 		SplashPNG  *string  `json:"splash_png,omitempty" jsonschema:"boot logo as base64 PNG, at most 48 KiB; empty stops sending it (the frame keeps its last logo)"`
+		Debug      *bool    `json:"debug,omitempty" jsonschema:"true: tfctl logs everything (socket traffic, config writes, cog with G_MESSAGES_DEBUG=all) and posts a report on every connect"`
 	}
 	sdk.AddTool(m, tool("set_frame_config", "Set frame config", "Change one or more config fields on a frame. Pushed to the frame immediately if it is online.", safeWrite),
 		func(_ context.Context, _ *sdk.CallToolRequest, in setCfgIn) (*sdk.CallToolResult, map[string]any, error) {
@@ -157,6 +158,9 @@ func register(m *sdk.Server, s *api.Server) {
 			if in.SplashPNG != nil {
 				patch["splash_png"] = *in.SplashPNG
 			}
+			if in.Debug != nil {
+				patch["debug"] = *in.Debug
+			}
 			if len(patch) == 0 {
 				return nil, nil, fmt.Errorf("nothing to change")
 			}
@@ -170,7 +174,7 @@ func register(m *sdk.Server, s *api.Server) {
 
 	type actIn struct {
 		ID      string `json:"id,omitempty" jsonschema:"frame id; omit with confirm=true to target every frame"`
-		Name    string `json:"name" jsonschema:"one of: reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot, bench"`
+		Name    string `json:"name" jsonschema:"one of: reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot, bench, report (the frame posts a debug report: versions, config, mounts, processes, dmesg, this and the previous boot's log; read it with get_report)"`
 		Arg     string `json:"arg,omitempty" jsonschema:"argument, e.g. on|off for screen"`
 		Confirm bool   `json:"confirm,omitempty" jsonschema:"required true when id is omitted (applies to all frames)"`
 	}
@@ -251,6 +255,35 @@ func register(m *sdk.Server, s *api.Server) {
 				fmt.Fprintf(&sb, "%s %-10s %s\n", e.At.Format("2006-01-02 15:04:05"), e.Kind, e.Text)
 			}
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: sb.String()}}}, map[string]any{"events": ev}, nil
+		})
+
+	type reportIn struct {
+		ID   string `json:"id" jsonschema:"frame id"`
+		Name string `json:"name,omitempty" jsonschema:"report file name from list_reports; omitted = the newest"`
+		Tail int    `json:"tail,omitempty" jsonschema:"return only the last N bytes (a full report can be 300 KB)"`
+	}
+	sdk.AddTool(m, tool("list_reports", "List reports", "Debug reports a frame has posted (newest first). A frame posts one on the report action, and on every connect while its debug config is true.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, in idIn) (*sdk.CallToolResult, map[string]any, error) {
+			list, err := s.ListReports(in.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, map[string]any{"reports": list}, nil
+		})
+	sdk.AddTool(m, tool("get_report", "Get report", "The text of one debug report (newest by default): tfctl versions and slot, thinframe.conf, uEnv, mounts, df, ps, dmesg, iwctl, this boot's log and the previous boot's log.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, in reportIn) (*sdk.CallToolResult, map[string]any, error) {
+			name := in.Name
+			if name == "" {
+				name = "latest"
+			}
+			b, err := s.ReadReport(in.ID, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if in.Tail > 0 && in.Tail < len(b) {
+				b = b[len(b)-in.Tail:]
+			}
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(b)}}}, map[string]any{"bytes": len(b)}, nil
 		})
 
 	sdk.AddTool(m, tool("release_status", "Release status", "Which tfctl/system versions this server carries and which frames are behind.", readOnly),

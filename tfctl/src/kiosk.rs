@@ -61,7 +61,7 @@ const FAST_FAIL_LIMIT: u32 = 5;
 const MISSING_DELAY: Duration = Duration::from_secs(3600);
 
 /// Where inittab sends our stderr and cog's (`>>`, O_APPEND). /var/log is the 64 MB tmpfs.
-const LOG: &str = "/var/log/thinframe.log";
+pub const LOG: &str = "/var/log/thinframe.log";
 const LOG_MAX: u64 = 1 << 20;
 const LOG_KEEP: u64 = 256 << 10;
 
@@ -94,6 +94,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     }
     let (tx, rx) = mpsc::channel();
     let mut k = Kiosk::new(cfg);
+    crate::logmirror::start(LOG, crate::logmirror::DIR);
     if !cfg.server_url.is_empty() {
         match agent::Agent::new(cfg, tx.clone(), &cfg.path) {
             Ok(mut a) => {
@@ -206,6 +207,14 @@ impl Kiosk {
         c.env("XDG_RUNTIME_DIR", runtime_dir)
             .env("LIBSEAT_BACKEND", "seatd")
             .stdin(Stdio::null());
+        if crate::dbg::on() {
+            c.env("G_MESSAGES_DEBUG", "all");
+            let args: Vec<String> = c
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            crate::dbg::log("cog", &args.join(" "));
+        }
         // Own process group: WebKit's helper processes join it, so a restart can kill them all.
         c.process_group(0);
         c

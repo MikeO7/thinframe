@@ -56,7 +56,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
-	opts := api.Options{Token: os.Getenv("FRAME_TOKEN"), Version: Version, Artifacts: artifacts.New(env("ARTIFACTS_DIR", "/artifacts"))}
+	opts := api.Options{Token: os.Getenv("FRAME_TOKEN"), Version: Version, Artifacts: artifacts.New(env("ARTIFACTS_DIR", "/artifacts")),
+		Reports: filepath.Join(dataDir, "reports")}
 	if dir := os.Getenv("PHOTOS_DIR"); dir != "" {
 		ph, err := photos.New(photos.Folder{Root: dir}, filepath.Join(dataDir, "cache"))
 		if err != nil {

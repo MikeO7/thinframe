@@ -7,10 +7,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/MikeO7/thinframe/server/internal/api"
 	"github.com/coder/websocket"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -320,5 +323,62 @@ func TestGracefulShutdown(t *testing.T) {
 		case <-time.After(3 * time.Second):
 			t.Fatalf("%s client still open after Shutdown", name)
 		}
+	}
+}
+
+// TestReports: a frame's report is stored, listed newest first, served as text, pruned past
+// MaxReports, limited in size, and refused for unknown frames and bad names.
+func TestReports(t *testing.T) {
+	e := newEnv(t)
+	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
+	asFrame := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+frameTok) }
+	code, _, body := e.send(t, "POST", "/api/frames/kitchen/report", "==== tfctl\nhello\n", "text/plain", asFrame)
+	if code != http.StatusCreated {
+		t.Fatalf("post: %d %s", code, body)
+	}
+	code, _, body = e.send(t, "GET", "/api/frames/kitchen/reports/latest", "", "", bearer)
+	if code != 200 || body != "==== tfctl\nhello\n" {
+		t.Fatalf("latest: %d %q", code, body)
+	}
+	code, _, body = e.send(t, "GET", "/api/frames/kitchen/reports", "", "", bearer)
+	if code != 200 || !strings.Contains(body, `"name":"`) {
+		t.Fatalf("list: %d %s", code, body)
+	}
+	// Unknown frame: 404; a report never creates a frame.
+	if code, _, _ = e.send(t, "POST", "/api/frames/nobody/report", "x", "text/plain", bearer); code != http.StatusNotFound {
+		t.Fatalf("unknown frame: %d", code)
+	}
+	// A name that is not a report stamp: 400 (the mux itself redirects "..", never serving it).
+	if code, _, _ = e.send(t, "GET", "/api/frames/kitchen/reports/passwd", "", "", bearer); code != http.StatusBadRequest {
+		t.Fatalf("bad name: %d", code)
+	}
+	// Over the limit: 413.
+	big := strings.Repeat("x", api.MaxReport+1)
+	if code, _, _ = e.send(t, "POST", "/api/frames/kitchen/report", big, "text/plain", asFrame); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("too large: %d", code)
+	}
+	// Pruning keeps MaxReports (names are per second, so write files directly with old stamps).
+	dir := filepath.Join(filepath.Dir(e.srv.Store.Dir()), "reports", "kitchen")
+	for i := 0; i < api.MaxReports+5; i++ {
+		name := time.Date(2020, 1, 1, 0, 0, i, 0, time.UTC).Format("20060102T150405Z") + ".txt"
+		must(t, os.WriteFile(filepath.Join(dir, name), []byte("old"), 0o644))
+	}
+	if _, err := e.srv.SaveReport("kitchen", []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	list, err := e.srv.ListReports("kitchen")
+	must(t, err)
+	if len(list) != api.MaxReports {
+		t.Fatalf("kept %d reports, want %d", len(list), api.MaxReports)
+	}
+	// The report shows up as an event on the frame.
+	f, err := e.srv.Store.Get("kitchen")
+	must(t, err)
+	found := false
+	for _, ev := range f.Events {
+		found = found || ev.Kind == "report"
+	}
+	if !found {
+		t.Fatal("no report event")
 	}
 }

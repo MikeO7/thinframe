@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ type Options struct {
 	Calendar  CalendarSource // may be nil
 	Version   string
 	PageStale time.Duration // hung-page timeout; 0 = 3 minutes
+	Reports   string        // where frame reports are kept; "" = <data>/reports next to the store
 }
 
 // Server holds the dependencies and implements every operation once.
@@ -69,6 +71,9 @@ func New(st *store.Store, opts Options) *Server {
 		page: pageWatch{last: map[string]time.Time{}}, pair: pairings{open: map[string]*pairReq{}}, pageStale: 3 * time.Minute, pageCheck: 30 * time.Second}
 	if opts.PageStale > 0 {
 		s.pageStale = opts.PageStale
+	}
+	if s.opts.Reports == "" {
+		s.opts.Reports = filepath.Join(filepath.Dir(st.Dir()), "reports")
 	}
 	s.Hub.OnClose = func(id string) {
 		_, _ = st.Update(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
@@ -124,6 +129,9 @@ func (s *Server) Routes() http.Handler {
 	handle("PUT /api/frames/{id}/layout", s.auth(http.HandlerFunc(s.handlePutLayout)))
 	handle("POST /api/frames/{id}/heartbeat", s.authFrame(http.HandlerFunc(s.handleHeartbeat)))
 	handle("POST /api/frames/{id}/actions", s.auth(http.HandlerFunc(s.handlePostAction)))
+	handle("POST /api/frames/{id}/report", s.authFrame(http.HandlerFunc(s.handlePostReport)))
+	handle("GET /api/frames/{id}/reports", s.auth(http.HandlerFunc(s.handleListReports)))
+	handle("GET /api/frames/{id}/reports/{name}", s.auth(http.HandlerFunc(s.handleGetReport)))
 	handle("GET /api/frames/{id}/ws", s.authFrame(http.HandlerFunc(s.handleWS)))
 	handle("GET /api/release", s.authAnyFrame(http.HandlerFunc(s.handleRelease)))
 	if s.opts.Artifacts != nil {
@@ -132,6 +140,7 @@ func (s *Server) Routes() http.Handler {
 	// Admin: HTTP Basic (password = FRAME_TOKEN) when set; POSTs also refuse cross-origin forms.
 	cop := http.NewCrossOriginProtection()
 	handle("GET /admin", s.authAdmin(http.HandlerFunc(s.handleAdmin)))
+	handle("GET /admin/{id}/reports/{name}", s.authAdmin(http.HandlerFunc(s.handleGetReport)))
 	handle("POST /admin/{id}/config", cop.Handler(s.authAdmin(adminForm(s.handleAdminConfig))))
 	handle("POST /admin/{id}/layout", cop.Handler(s.authAdmin(adminForm(s.handleAdminLayout))))
 	handle("POST /admin/{id}/action", cop.Handler(s.authAdmin(adminForm(s.handleAdminAction))))
@@ -333,6 +342,12 @@ func applyConfig(c *store.Config, name *string, patch map[string]any) error {
 				err = checkSplashPNG(str)
 			}
 			c.SplashPNG = str
+		case "debug":
+			b, ok := asBool(v)
+			if !ok {
+				return fmt.Errorf("%w: debug must be true or false", ErrInvalid)
+			}
+			c.Debug = b
 		default:
 			return fmt.Errorf("%w: unknown config field %q", ErrInvalid, k)
 		}
@@ -381,7 +396,7 @@ func (s *Server) SetLayout(id string, l store.Layout) (store.Frame, error) {
 }
 
 // ValidActions lists what a frame understands.
-var ValidActions = []string{"reboot", "restart-kiosk", "reload-page", "screen", "update-software", "update-system", "rollback", "screenshot", "bench"}
+var ValidActions = []string{"reboot", "restart-kiosk", "reload-page", "screen", "update-software", "update-system", "rollback", "screenshot", "bench", "report"}
 
 // Act queues an action and pushes it if the frame is online.
 func (s *Server) Act(id, name string, args map[string]string) (store.Action, error) {
@@ -418,6 +433,7 @@ func (s *Server) ConfigFor(f store.Frame) map[string]any {
 		"screen_off": c.ScreenOff, "screen_on": c.ScreenOn, "page_version": c.PageVersion,
 		"tags": c.Tags, "name": f.Name,
 		"splash_text": c.SplashText, "splash_bg": c.SplashBG, "splash_png": c.SplashPNG,
+		"debug": c.Debug,
 	}
 	if s.opts.Artifacts != nil {
 		v := s.opts.Artifacts.Versions()
@@ -475,6 +491,24 @@ func newID() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// asBool accepts a JSON bool or the strings an HTML form sends ("on", "1", "true", "", "0", "false").
+func asBool(v any) (bool, bool) {
+	switch b := v.(type) {
+	case bool:
+		return b, true
+	case nil:
+		return false, true
+	case string:
+		switch strings.ToLower(b) {
+		case "on", "1", "true", "yes":
+			return true, true
+		case "", "0", "false", "no", "off":
+			return false, true
+		}
+	}
+	return false, false
 }
 
 func asInt(v any) (int, bool) {
