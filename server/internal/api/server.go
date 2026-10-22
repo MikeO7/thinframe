@@ -5,6 +5,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -56,6 +57,10 @@ type Server struct {
 	pair pairings
 	// patterns: what Routes registered.
 	patterns []string
+	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
+	// does not wait for hijacked connections, so a process that exits right after Shutdown
+	// could cut the "disconnected" event short; Drain waits for them.
+	sockets sync.WaitGroup
 }
 
 // New wires a Server.
@@ -69,6 +74,20 @@ func New(st *store.Store, opts Options) *Server {
 		_, _ = st.Update(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
 	}
 	return s
+}
+
+// Drain waits until every control socket handler has returned (their bookkeeping is done)
+// or ctx ends. Call it after http.Server.Shutdown, which cancels their contexts but
+// returns without waiting for hijacked connections.
+func (s *Server) Drain(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() { s.sockets.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Routes returns the full mux. Every pattern it registers is recorded for Patterns.

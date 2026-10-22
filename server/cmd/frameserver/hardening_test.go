@@ -303,6 +303,14 @@ func TestGracefulShutdown(t *testing.T) {
 	if d := time.Since(start); d > shutdownTimeout/2 {
 		t.Fatalf("Shutdown took %s", d)
 	}
+	// The socket handler's bookkeeping (the "disconnected" event) finishes before we return,
+	// as it does in main: Shutdown alone leaves hijacked handlers running.
+	if err := e.srv.Drain(sctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if e.srv.Hub.Online("kitchen") {
+		t.Fatal("kitchen still online after Drain")
+	}
 	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("Serve: %v", err)
 	}
