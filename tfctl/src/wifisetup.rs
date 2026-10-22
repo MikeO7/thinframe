@@ -36,6 +36,8 @@ pub struct Setup {
     pub joined: Option<String>,
     /// The last network tried, and why it failed.
     pub last: Option<String>,
+    /// The security of the row that was tapped for `last` ("psk", "open").
+    pub last_sec: Option<String>,
     pub error: Option<String>,
     /// The configured network that did not come up.
     pub missing: Option<String>,
@@ -175,19 +177,83 @@ fn field<'a>(kv: &'a [(String, String)], k: &str) -> Option<&'a str> {
     kv.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str())
 }
 
+/// The scanned network `ssid` with security `sec`; without `sec`, a secured entry wins over an
+/// open one of the same name, so a typed password is never thrown away.
+pub fn find_net(nets: &[Net], ssid: &str, sec: Option<&str>) -> Option<Net> {
+    let mut same = nets.iter().filter(|n| n.ssid == ssid);
+    match sec {
+        Some(sec) => same.find(|n| n.security == sec),
+        None => {
+            let all: Vec<&Net> = same.collect();
+            all.iter()
+                .find(|n| n.security != "open")
+                .or(all.first())
+                .copied()
+        }
+    }
+    .cloned()
+}
+
+/// Request line plus headers, in bytes.
+const MAX_HEAD: u64 = 8192;
+const MAX_HEADERS: usize = 50;
+/// The whole request, however slowly it trickles in.
+const REQ_DEADLINE: Duration = Duration::from_secs(5);
+
+/// A socket whose reads all end by one deadline: each read gets only the time that is left.
+struct Deadline<'a> {
+    s: &'a TcpStream,
+    end: Instant,
+}
+
+impl Read for Deadline<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let left = self.end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "request too slow"));
+        }
+        self.s.set_read_timeout(Some(left))?;
+        let mut s = self.s;
+        s.read(buf)
+    }
+}
+
 fn read_req(s: &mut TcpStream) -> io::Result<Req> {
-    s.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut r = BufReader::new(s.try_clone()?);
+    read_req_within(s, REQ_DEADLINE)
+}
+
+fn read_req_within(s: &TcpStream, limit: Duration) -> io::Result<Req> {
+    let too_big = || io::Error::new(io::ErrorKind::InvalidData, "request head too large");
+    let mut r = BufReader::new(Deadline {
+        s,
+        end: Instant::now() + limit,
+    });
+    let mut head = (&mut r).take(MAX_HEAD);
     let mut line = String::new();
-    r.read_line(&mut line)?;
+    head.read_line(&mut line)?;
+    if !line.ends_with('\n') {
+        return Err(too_big());
+    }
     let mut parts = line.split_whitespace();
     let method = parts.next().unwrap_or("").to_string();
     let target = parts.next().unwrap_or("/").to_string();
     let (mut host, mut len) = (String::new(), 0usize);
+    let mut count = 0;
     loop {
         let mut h = String::new();
-        if r.read_line(&mut h)? == 0 || h.trim().is_empty() {
+        head.read_line(&mut h)?;
+        if head.limit() == 0 && !h.ends_with('\n') {
+            return Err(too_big());
+        }
+        if h.trim().is_empty() {
             break;
+        }
+        count += 1;
+        if count > MAX_HEADERS {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "too many headers",
+            ));
         }
         if let Some((k, v)) = h.split_once(':') {
             match k.trim().to_ascii_lowercase().as_str() {
@@ -268,7 +334,7 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
                 (Some(j), _, _, _) => render_joining(&s, j),
                 (_, Some(j), _, _) => render_joined(&s, j),
                 (_, _, Some(_), Some(l)) => {
-                    let net = s.nets.iter().find(|n| &n.ssid == l).cloned();
+                    let net = find_net(&s.nets, l, s.last_sec.as_deref());
                     render_password(&s, l, net.as_ref())
                 }
                 _ => render_list(&s),
@@ -280,7 +346,7 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
             };
             let mut s = lock(st);
             s.error = None;
-            let net = s.nets.iter().find(|n| n.ssid == ssid).cloned();
+            let net = find_net(&s.nets, ssid, field(&req.query, "sec"));
             html(render_password(&s, ssid, net.as_ref()))
         }
         ("POST", "/wifi/scan") => {
@@ -290,19 +356,21 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
         ("POST", "/wifi/join") => {
             let ssid = field(&req.form, "ssid").unwrap_or("").to_string();
             let psk = field(&req.form, "psk").unwrap_or("").to_string();
-            let open = {
-                let s = lock(st);
-                s.nets
-                    .iter()
-                    .any(|n| n.ssid == ssid && n.security == "open")
-            };
             let mut s = lock(st);
+            // The tapped row's security comes with the form; an old form without it falls back
+            // to the scan, where a secured entry wins. A typed password always means psk.
+            let sec = match field(&req.form, "sec") {
+                Some(v) => Some(v.to_string()),
+                None => find_net(&s.nets, &ssid, None).map(|n| n.security),
+            };
+            let open = psk.is_empty() && sec.as_deref() == Some("open");
             s.last = Some(ssid.clone());
-            if ssid.is_empty() || ssid.len() > 32 {
+            s.last_sec = Some(if open { "open" } else { "psk" }.into());
+            if !wifi::valid_ssid(&ssid) {
                 s.error = Some("Pick a network first.".into());
                 return see_other("/wifi");
             }
-            if !open && !(8..=63).contains(&psk.len()) {
+            if !open && !wifi::valid_psk(&psk) {
                 s.error = Some("Wi-Fi passwords are 8 to 63 characters.".into());
                 return see_other("/wifi");
             }
@@ -446,9 +514,10 @@ pub fn render_list(s: &Setup) -> String {
             let lock = if n.security == "open" { "" } else { LOCK };
             if n.supported() {
                 body.push_str(&format!(
-                    "<li><a href=\"/wifi/net?ssid={}\"><span class=\"name\">{}</span>\
+                    "<li><a href=\"/wifi/net?ssid={}&amp;sec={}\"><span class=\"name\">{}</span>\
                      <span class=\"lock\">{lock}</span>{}</a></li>",
                     pct(&n.ssid),
+                    pct(&n.security),
                     esc(&n.ssid),
                     bars(n)
                 ));
@@ -473,10 +542,11 @@ pub fn render_list(s: &Setup) -> String {
     page(s, STEP1, &body, Some(refresh), "")
 }
 
-/// The keyboard: four layers, special keys by name. Small on purpose (no library).
+/// The keyboard: four layers, special keys by name. Small on purpose (no library). Every key is
+/// printable ASCII (WPA passphrases are nothing else), so 63 UTF-16 units here are 63 bytes.
 const KEYBOARD_JS: &str = r##"<script>
 var L={a:["qwertyuiop","asdfghjkl","zxcvbnm"],A:["QWERTYUIOP","ASDFGHJKL","ZXCVBNM"],
-n:["1234567890","-/:;()$&@\"",".,?!'"],s:["[]{}#%^*+=","_\\|~<>€£¥•",".,?!'"]};
+n:["1234567890","-/:;()$&@\"",".,?!'"],s:["[]{}#%^*+=","_\\|~<>`",".,?!'"]};
 var layer="a",pw="",shown=true,kb=document.getElementById("kb"),out=document.getElementById("pw"),
 go=document.getElementById("go"),min=+kb.dataset.min;
 function key(label,cls,fn){var b=document.createElement("button");b.type="button";b.textContent=label;
@@ -505,9 +575,11 @@ pub fn render_password(s: &Setup, ssid: &str, net: Option<&Net>) -> String {
         .unwrap_or_default();
     let form_head = format!(
         "<form method=\"post\" action=\"/wifi/join\" class=\"row\">\
-         <input type=\"hidden\" name=\"ssid\" value=\"{}\"><input type=\"hidden\" name=\"psk\" id=\"psk\">\
+         <input type=\"hidden\" name=\"ssid\" value=\"{}\"><input type=\"hidden\" name=\"sec\" value=\"{}\">\
+         <input type=\"hidden\" name=\"psk\" id=\"psk\">\
          <a class=\"btn ghost\" href=\"/wifi?list\">back</a>",
-        esc(ssid)
+        esc(ssid),
+        if open { "open" } else { "psk" }
     );
     if open {
         let body = format!(
@@ -778,7 +850,7 @@ mod tests {
             ..Setup::default()
         };
         let h = render_list(&s);
-        assert!(h.contains("href=\"/wifi/net?ssid=%3CHome%3E\""));
+        assert!(h.contains("href=\"/wifi/net?ssid=%3CHome%3E&amp;sec=psk\""));
         assert!(h.contains("&lt;Home&gt;") && !h.contains("<Home>"));
         assert!(
             h.contains("class=\"dim\"><span class=\"name\">Corp"),
@@ -803,7 +875,10 @@ mod tests {
         };
         let l = render_list(&s);
         assert!(l.contains("/poppins-light.ttf") && !l.contains("Shrikhand"));
-        assert!(l.contains("url(/backdrop.png)") && l.contains("href=\"/wifi/net?ssid=Home\""));
+        assert!(
+            l.contains("url(/backdrop.png)")
+                && l.contains("href=\"/wifi/net?ssid=Home&amp;sec=psk\"")
+        );
         let p = render_password(&s, "Home", s.nets.first());
         assert!(p.contains("id=\"kb\"") && p.contains("rgba(255,255,255,.66)"));
         assert!(!p.contains("#fff6e0"), "no seventies keys");
@@ -985,5 +1060,195 @@ mod tests {
         );
         wait_join(&st);
         assert!(fake.connected());
+    }
+
+    /// Records what each join was asked for.
+    #[derive(Default)]
+    struct Rec(Mutex<Vec<(String, Option<String>)>>);
+
+    impl Radio for Rec {
+        fn present(&self) -> bool {
+            true
+        }
+        fn connected(&self) -> bool {
+            false
+        }
+        fn scan(&self) -> Vec<Net> {
+            vec![]
+        }
+        fn join(&self, ssid: &str, psk: Option<&str>) -> Result<(), String> {
+            let mut v = self.0.lock().unwrap();
+            v.push((ssid.into(), psk.map(str::to_string)));
+            Ok(())
+        }
+    }
+
+    fn post_join(st: &Shared, radio: &Arc<dyn Radio>, body: &str) {
+        {
+            let mut s = lock(st);
+            s.joined = None;
+            s.error = None;
+        }
+        respond(st, radio, 1, &req("POST", "/wifi/join", body, 1));
+        wait_join(st);
+    }
+
+    #[test]
+    fn same_name_open_and_secured_never_drops_the_password() {
+        let nets = vec![net("Same", "open"), net("Same", "psk"), net("Lone", "open")];
+        assert_eq!(find_net(&nets, "Same", None).unwrap().security, "psk");
+        assert_eq!(
+            find_net(&nets, "Same", Some("open")).unwrap().security,
+            "open"
+        );
+        assert_eq!(find_net(&nets, "Lone", None).unwrap().security, "open");
+        assert!(find_net(&nets, "Lone", Some("psk")).is_none());
+
+        let st: Shared = Arc::default();
+        {
+            let mut s = lock(&st);
+            s.active = true;
+            s.nets = nets.clone();
+        }
+        let list = render_list(&lock(&st));
+        assert!(list.contains("href=\"/wifi/net?ssid=Same&amp;sec=open\""));
+        assert!(list.contains("href=\"/wifi/net?ssid=Same&amp;sec=psk\""));
+        let p = String::from_utf8(
+            respond(
+                &st,
+                &(Arc::new(Rec::default()) as Arc<dyn Radio>),
+                1,
+                &req("GET", "/wifi/net?ssid=Same&sec=psk", "", 1),
+            )
+            .body,
+        )
+        .unwrap();
+        assert!(p.contains("name=\"sec\" value=\"psk\"") && p.contains("id=\"kb\""));
+
+        let rec = Arc::new(Rec::default());
+        let radio: Arc<dyn Radio> = rec.clone();
+        // Old form, no sec: the secured entry wins and the password is used.
+        post_join(&st, &radio, "ssid=Same&psk=secret+pass");
+        // The open row tapped: no password.
+        post_join(&st, &radio, "ssid=Same&sec=open&psk=");
+        // A password typed even though the form says open: still a psk join.
+        post_join(&st, &radio, "ssid=Same&sec=open&psk=typed+anyway");
+        // Old form for a name that is only open.
+        post_join(&st, &radio, "ssid=Lone&psk=");
+        let got = rec.0.lock().unwrap().clone();
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(
+            got,
+            [
+                ("Same".into(), s("secret pass")),
+                ("Same".into(), None),
+                ("Same".into(), s("typed anyway")),
+                ("Lone".into(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn passwords_are_printable_ascii_only() {
+        // The keyboard offers nothing else.
+        let layers = KEYBOARD_JS
+            .lines()
+            .filter(|l| l.starts_with("var L=") || l.starts_with("n:["))
+            .collect::<String>();
+        assert!(layers.contains("qwertyuiop") && layers.contains("_\\\\|~<>`"));
+        assert!(layers.is_ascii(), "{layers}");
+        assert!(!KEYBOARD_JS.contains('€') && !KEYBOARD_JS.contains('£'));
+
+        let st: Shared = Arc::default();
+        {
+            let mut s = lock(&st);
+            s.active = true;
+            s.nets = vec![net("Home", "psk")];
+        }
+        let rec = Arc::new(Rec::default());
+        let radio: Arc<dyn Radio> = rec.clone();
+        for bad in [
+            "ssid=Home&psk=%E2%82%AC%E2%82%AC%E2%82%AC".to_string(), // 3 x EUR: 9 bytes
+            "ssid=Home&psk=caf%C3%A9caf%C3%A9".to_string(),
+            "ssid=Home&psk=new%0Aline+here".to_string(),
+            "ssid=Home&psk=del%7Fhere+ok".to_string(),
+            format!("ssid=Home&psk={}", "x".repeat(64)),
+        ] {
+            post_join(&st, &radio, &bad);
+            assert!(
+                lock(&st).error.as_deref().unwrap_or("").contains("8 to 63"),
+                "{bad}"
+            );
+        }
+        post_join(&st, &radio, "ssid=Ho%0Ame&psk=goodpassword");
+        assert_eq!(lock(&st).error.as_deref(), Some("Pick a network first."));
+        assert!(rec.0.lock().unwrap().is_empty(), "nothing joined");
+        post_join(&st, &radio, "ssid=Home&psk=%20sp%5Cace~%60%20");
+        assert_eq!(
+            rec.0.lock().unwrap().clone(),
+            [("Home".to_string(), Some(" sp\\ace~` ".to_string()))]
+        );
+    }
+
+    /// A connected pair: (our end, the client's end).
+    fn pair() -> (TcpStream, TcpStream) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let c = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        (l.accept().unwrap().0, c)
+    }
+
+    #[test]
+    fn request_head_is_capped_and_has_one_deadline() {
+        let limit = Duration::from_secs(5);
+        let (s, mut c) = pair();
+        write!(c, "GET /wifi?x=1 HTTP/1.1\r\nHost: a:1\r\n\r\n").unwrap();
+        let r = read_req_within(&s, limit).unwrap();
+        assert_eq!(
+            (r.method.as_str(), r.path.as_str(), r.host.as_str()),
+            ("GET", "/wifi", "a:1")
+        );
+
+        // One long header: refused once 8 KiB is read, without waiting for the rest.
+        let (s, mut c) = pair();
+        let long = format!("GET / HTTP/1.1\r\nX-Long: {}\r\n\r\n", "a".repeat(9000));
+        c.write_all(long.as_bytes()).unwrap();
+        let e = read_req_within(&s, limit).err().unwrap();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
+
+        // Many small headers that fit in 8 KiB but are over 50.
+        let (s, mut c) = pair();
+        let many: String = (0..51).map(|i| format!("X-{i}: y\r\n")).collect();
+        write!(c, "GET / HTTP/1.1\r\n{many}\r\n").unwrap();
+        assert!(read_req_within(&s, limit).is_err());
+        let (s, mut c) = pair();
+        let fifty: String = (0..50).map(|i| format!("X-{i}: y\r\n")).collect();
+        write!(c, "GET / HTTP/1.1\r\n{fifty}\r\n").unwrap();
+        assert!(read_req_within(&s, limit).is_ok());
+
+        // A client trickling a byte at a time: each read is quick, the request is not.
+        let (s, c) = pair();
+        let t = thread::spawn(move || {
+            let mut c = c;
+            for b in b"GET / HTTP/1.1\r\nHost: slowly-slowly-slowly\r\n\r\n" {
+                if c.write_all(&[*b]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(30));
+            }
+        });
+        let start = Instant::now();
+        let e = read_req_within(&s, Duration::from_millis(300))
+            .err()
+            .unwrap();
+        assert!(
+            matches!(
+                e.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ),
+            "{e:?}"
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(s);
+        t.join().unwrap();
     }
 }

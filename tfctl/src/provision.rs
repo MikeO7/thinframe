@@ -161,8 +161,12 @@ fn apply_text(t: &Targets, text: &str) -> io::Result<bool> {
     let file = t.boot_dir.join(FILE);
     let p = parse(text);
     if let (Some(ssid), Some(psk)) = (&p.wifi_ssid, &p.wifi_psk) {
-        if psk.len() < 8 || psk.len() > 63 {
-            eprintln!("tfctl: provision: WIFI_PSK must be 8..63 chars, skipping Wi-Fi");
+        if !wifi::valid_ssid(ssid) {
+            eprintln!("tfctl: provision: WIFI_SSID has control characters or is over 32 bytes, skipping Wi-Fi");
+        } else if !wifi::valid_psk(psk) {
+            eprintln!(
+                "tfctl: provision: WIFI_PSK must be 8..63 printable ASCII chars, skipping Wi-Fi"
+            );
         } else {
             wifi::write_profile(&t.iwd_dir, ssid, psk)?;
             eprintln!("tfctl: provision: wifi profile for {ssid}");
@@ -340,6 +344,39 @@ mod tests {
         let c = config::load(t.conf.to_str().unwrap()).unwrap();
         assert_eq!((c.token.as_str(), c.frame_id.as_str()), ("abc", "frame"));
         assert!(run(&["--bogus".into()]).is_err());
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn wifi_with_control_characters_or_non_ascii_is_skipped() {
+        let base = std::env::temp_dir().join(format!("tfctl-prov3-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let t = Targets::under(&base);
+        fs::create_dir_all(&t.boot_dir).unwrap();
+        for text in [
+            "WIFI_SSID=Home\nWIFI_PSK=\"tab\there\"\n",
+            "WIFI_SSID=Home\nWIFI_PSK=\"del\x7fhere12\"\n",
+            "WIFI_SSID=Home\nWIFI_PSK=pässwörd12\n",
+            "WIFI_SSID=\"Ho\x1bme\"\nWIFI_PSK=goodpassword\n",
+        ] {
+            fs::write(t.boot_dir.join(FILE), text).unwrap();
+            assert!(apply(&t).unwrap());
+            assert!(!t.iwd_dir.exists(), "rejected: {text:?}");
+        }
+        // Backslashes and edge spaces are fine; the profile escapes them for iwd.
+        fs::write(
+            t.boot_dir.join(FILE),
+            "WIFI_SSID=Home\nWIFI_PSK=\" back\\slash \"\n",
+        )
+        .unwrap();
+        assert!(apply(&t).unwrap());
+        assert_eq!(
+            fs::read_to_string(t.iwd_dir.join("Home.psk")).unwrap(),
+            wifi::profile(" back\\slash ")
+        );
+        assert!(fs::read_to_string(t.iwd_dir.join("Home.psk"))
+            .unwrap()
+            .contains("Passphrase=\\sback\\\\slash\\s\n"));
         fs::remove_dir_all(&base).unwrap();
     }
 }
