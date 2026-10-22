@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -189,8 +190,13 @@ func Open(dir string) (*Store, error) {
 			return nil, err
 		}
 		var f Frame
-		if err := json.Unmarshal(b, &f); err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Name(), err)
+		if err := json.Unmarshal(b, &f); err != nil || f.ID == "" {
+			// A torn or empty file after a power cut must not keep every frame dark: set it
+			// aside and carry on; the frame recreates itself on its next heartbeat.
+			bad := filepath.Join(s.dir, e.Name()+".bad")
+			log.Printf("store: %s: %v; moved to %s", e.Name(), err, filepath.Base(bad))
+			_ = os.Rename(filepath.Join(s.dir, e.Name()), bad)
+			continue
 		}
 		s.frames[f.ID] = &f
 	}
@@ -238,21 +244,35 @@ func (s *Store) Update(id string, fn func(*Frame)) (Frame, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f, ok := s.frames[id]
-	if !ok {
+	var f Frame
+	if cur, ok := s.frames[id]; ok {
+		f = clone(*cur)
+	} else {
 		now := time.Now().UTC()
-		f = &Frame{ID: id, Config: DefaultConfig(), Layout: DefaultLayout(), FirstSeen: now, LastSeen: now}
-		s.frames[id] = f
+		f = Frame{ID: id, Config: DefaultConfig(), Layout: DefaultLayout(), FirstSeen: now, LastSeen: now}
 	}
-	fn(f)
+	fn(&f)
 	if len(f.History) > 50 {
 		f.History = f.History[len(f.History)-50:]
 	}
 	if len(f.Events) > 200 {
 		f.Events = f.Events[len(f.Events)-200:]
 	}
-	return clone(*f), s.save(f)
+	if len(f.Pending) > MaxPending {
+		f.Pending = f.Pending[len(f.Pending)-MaxPending:]
+	}
+	// fn ran on a copy: memory takes the change only once it is on disk, so a failed save
+	// (full disk) never leaves the server believing something the next restart will not.
+	if err := s.save(&f); err != nil {
+		return Frame{}, err
+	}
+	s.frames[id] = &f
+	return clone(f), nil
 }
+
+// MaxPending caps the actions queued for an offline frame; older ones are dropped. It matches
+// the hub's send buffer, so a reconnect replays all of them.
+const MaxPending = 32
 
 // Delete removes a frame and its file.
 func (s *Store) Delete(id string) error {
@@ -272,10 +292,31 @@ func (s *Store) save(f *Frame) error {
 	}
 	final := filepath.Join(s.dir, f.ID+".json")
 	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	// Durable rename: the bytes reach the disk before the name does, and the directory entry
+	// is flushed after, so a power cut leaves either the old file or the whole new one.
+	w, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, final)
+	if _, err := w.Write(b); err != nil {
+		_ = w.Close()
+		return err
+	}
+	if err := w.Sync(); err != nil {
+		_ = w.Close()
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		return err
+	}
+	if d, err := os.Open(s.dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 func clone(f Frame) Frame {

@@ -412,3 +412,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   collector moves single readings by about 50 MB.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
+
+## 2026-10-22 Audit chunk 7: store durability
+- `store.save` wrote and renamed with no fsync; `Open` failed on any frame file that did not parse,
+  and `main` treats that as fatal, so one torn file after a power cut kept the container restarting
+  with every frame dark. `Update` changed memory before saving, so a full disk left the server
+  acting on state the next restart would not have. Now: file fsync, rename, directory fsync; a bad
+  file is moved to `<id>.json.bad` and logged; `Update` runs on a copy and commits to memory only
+  after the save; `Pending` is capped at 32 (the hub's replay buffer). Three new tests [V].
+- `go test -race ./...`, `go vet`: clean.
