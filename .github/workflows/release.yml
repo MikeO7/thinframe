@@ -9,11 +9,17 @@ on:
     - cron: '17 4 * * 1'      # Mondays 04:17 UTC (TASK S8: frames stay patched within a week)
   workflow_dispatch:
 concurrency: { group: release, cancel-in-progress: false }
+# Read-only token by default; tag, server-image and publish raise what they need. The 5 h image
+# job runs upstream build scripts and must not hold a write token.
+permissions: { contents: read }
 jobs:
   # Tag first, while GITHUB_SHA is still the tip of main. GITHUB_TOKEN may not create a ref on a
   # commit whose workflow files differ from main (it lacks the workflows permission), so tagging
   # after the 5 h build failed with a 403 once a workflow change had merged meanwhile (2026-10-20).
   tag:
+    # Only main or a v* tag may become releases/latest: a manual run from a feature branch is
+    # skipped here, and every other job needs this one.
+    if: github.ref == 'refs/heads/main' || github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions: { contents: write }
     outputs: { version: "${{ steps.ver.outputs.version }}" }
