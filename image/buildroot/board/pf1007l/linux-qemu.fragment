@@ -13,6 +13,8 @@ CONFIG_HW_RANDOM_VIRTIO=y
 CONFIG_SERIAL_AMBA_PL011=y
 CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
 CONFIG_RTC_DRV_PL031=y
+# The virt machine's PCI watchdog (qemu-lib.sh adds -device i6300esb), so tfctl's petting runs.
+CONFIG_I6300ESB_WDT=y
 # Simulated Wi-Fi radios for the on-screen setup (TASK 17, S35simwifi).
 CONFIG_WLAN=y
 CONFIG_MAC80211=m

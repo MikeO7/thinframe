@@ -100,7 +100,7 @@ start_qemu() {
 			-global virtio-mmio.force-legacy=false -bios "$OUT/u-boot.bin" -serial "file:$W/serial.log" \
 			-drive "file=$IMG,format=raw,if=none,id=disk" -device virtio-blk-device,drive=disk \
 			-netdev "user,id=net,hostfwd=tcp:127.0.0.1:$SSHP-:22" -device virtio-net-device,netdev=net \
-			> "$W/qemu.out" 2>&1 & PIDS+=($!)
+			-device i6300esb -watchdog-action reset > "$W/qemu.out" 2>&1 & PIDS+=($!)
 		return
 	fi
 	qemu-system-arm -M orangepi-pc -m 1G -smp 4 -display none -monitor none "$@" \

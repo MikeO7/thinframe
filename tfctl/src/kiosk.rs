@@ -86,6 +86,7 @@ pub fn cap_log(path: &str, max: u64, keep: u64) -> io::Result<()> {
 
 pub fn run(cfg: &Config) -> io::Result<()> {
     sys::trap_term();
+    crate::watchdog::start();
     // TASK 11 rollback: two fast crashes after an update put tfctl.prev back; exit so the
     // respawn runs it.
     if let StartCheck::RolledBack(v) = update::record_start(&Paths::system()) {

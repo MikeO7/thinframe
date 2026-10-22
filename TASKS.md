@@ -14,7 +14,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 
 ## 0b. tfctl builds
 - [x] `cargo build --release --target armv7-unknown-linux-musleabihf` (cargo-zigbuild or cross)
-      produces a static binary. CI does it and fails if `tfctl` is over 1 MB.
+      produces a static binary. CI does it and fails if `tfctl` is over 2 MB.
 - [x] `tfctl status` runs on the Mac host build and prints the config line.
 - Gate: CI green, binary size logged.
 

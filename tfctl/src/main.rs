@@ -55,6 +55,7 @@ mod sys;
 mod sysupdate;
 mod touchfw;
 mod update;
+mod watchdog;
 mod wifi;
 mod wifisetup;
 mod ws;

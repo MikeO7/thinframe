@@ -64,6 +64,10 @@ CONFIG_DEVTMPFS_MOUNT=y
 CONFIG_STMMAC_ETH=y
 CONFIG_STMMAC_PLATFORM=y
 CONFIG_DWMAC_SUN8I=y
+# Hardware watchdog (tfctl watchdog.rs pets it): a hung kernel reboots itself in 16 s.
+CONFIG_WATCHDOG=y
+CONFIG_WATCHDOG_CORE=y
+CONFIG_SUNXI_WATCHDOG=y
 # Memory and CPU: no swap (decisions.md), PSI on, governors for TASK 13.
 # CONFIG_SWAP is not set
 CONFIG_PSI=y
