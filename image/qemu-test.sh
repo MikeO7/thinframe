@@ -22,6 +22,7 @@ check "data partition mounted, bound over dropbear and iwd; conf is a link into 
 	r 'for m in /data /etc/dropbear /var/lib/iwd; do grep -q " $m " /proc/mounts || exit 1; done; test "$(readlink /etc/thinframe.conf)" = /data/etc/thinframe.conf'
 check "data partition grew to the card (> 1500 MiB)" r 'test "$(df -m /data | awk "NR==2 {print \$2}")" -gt 1500'
 check "provision.txt applied and deleted" r 'grep -q "FRAME_ID=\"\?'"$ID"'" /etc/thinframe.conf && test ! -e /boot/provision.txt'
+check "token in a root-only file, not in the conf" r 'ls -l /data/etc/thinframe.token | grep -q "^-rw-------" && ! grep -q "^FRAME_TOKEN=.[^\"]" /etc/thinframe.conf'
 check "hostname is the frame id" r 'test "$(hostname)" = '"$ID"
 check "tfctl kiosk runs under init" r 'ps -o args | grep -q "^/usr/bin/tfctl kiosk"'  # BusyBox here has no pgrep
 check "cog and WPE WebKit are installed" r 'command -v cog && ls /usr/lib/libWPEWebKit-*.so*'
