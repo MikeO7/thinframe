@@ -201,10 +201,12 @@ func TestWebSocketAuth(t *testing.T) {
 					t.Fatalf("dial: %v", err)
 				}
 				conn.CloseNow()
+				waitOffline(t, e, "kitchen")
 				return
 			}
 			if err == nil {
 				conn.CloseNow()
+				waitOffline(t, e, "kitchen")
 				t.Fatal("dial succeeded")
 			}
 			if resp == nil || resp.StatusCode != 401 {
@@ -227,6 +229,22 @@ func TestWebSocketAuth(t *testing.T) {
 			break
 		}
 	}
+	conn.CloseNow()
+	waitOffline(t, e, "kitchen")
+}
+
+// waitOffline blocks until the hub has finished with id's socket. The server's handler keeps
+// running after the client hangs up (it logs "disconnected" to the frame's file from OnClose);
+// a test that ends first races that write against t.TempDir's cleanup.
+func waitOffline(t *testing.T, e *tenv, id string) {
+	t.Helper()
+	for i := 0; i < 500; i++ {
+		if !e.srv.Hub.Online(id) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s still online after the client closed", id)
 }
 
 // TestGracefulShutdown: Shutdown with an open control socket and an open SSE stream returns
