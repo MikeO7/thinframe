@@ -5,7 +5,7 @@
 #   sim/qemu/run.sh            boot and keep shooting until Ctrl-C (or RUN_FOR_S seconds)
 #   sim/qemu/run.sh tap X Y    touch the running guest at panel pixel X,Y (0..799, 0..1279):
 #                              one finger on a virtio multitouch screen, like the frame's panel
-# Env: SERVER_URL (as the guest sees it; default http://10.0.2.2:8080 = this Mac's :8080),
+# Env: SERVER_URL (required, as the guest sees it: http://10.0.2.2:PORT = this Mac's PORT),
 #      FRAME_ID (sim-qemu), FRAME_TOKEN (set it empty to pair with the PAIR button),
 #      WIFI_SSID/WIFI_PSK (provisioned network; unset = pick one on the Wi-Fi setup page. The sim
 #      image has "Groovy Wifi" (password "far out man") and the open "Cafe"; see S35simwifi),
@@ -16,7 +16,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 Q="$ROOT/image/out/qemu"; W="$ROOT/sim/qemu/work"; OUT="$ROOT/sim/out"
-SERVER_URL="${SERVER_URL:-http://10.0.2.2:8080}"; FRAME_ID="${FRAME_ID:-sim-qemu}"
+FRAME_ID="${FRAME_ID:-sim-qemu}"
 FRAME_TOKEN="${FRAME_TOKEN-dev-token-change-me}"; SHOT_INTERVAL_S="${SHOT_INTERVAL_S:-10}"
 SSHP="${SSHP:-2222}"; KEY="$ROOT/image/secrets/frame_id_ed25519"
 PW=800; PH=1280
@@ -34,6 +34,7 @@ if [ "${1:-}" = tap ]; then	# one finger on the virtio multitouch screen, like t
 	exit 0
 fi
 
+[ -n "${SERVER_URL:-}" ] || { echo "STOP: set SERVER_URL (e.g. SERVER_URL=http://10.0.2.2:18080 for a test frameserver on this Mac's :18080)" >&2; exit 1; }
 for f in thinframe-sd.img zImage; do
 	[ -f "$Q/$f" ] || { echo "STOP: no image/out/qemu/$f; run QEMU=1 image/build.sh rootfs" >&2; exit 1; }
 done
