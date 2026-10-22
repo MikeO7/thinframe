@@ -503,3 +503,9 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   request; the Wi-Fi passphrase is on the `iwctl --passphrase` command line during a join; `/data`
   mounts without fsck; `/api/data/photo/next` is unauthenticated and its cache never shrinks;
   `scripts/deploy.sh` targets another OS. Listed for the owner in the PR thread of 2026-10-22.
+
+## 2026-10-22 flash.sh: pipe readers drain their input
+- On Linux `tests/flash-test.sh` failed 40 of 40 runs: `awk ... exit` and `grep -q` in `list_cards`
+  closed the pipe before `diskutil` (the shim, and the real one) finished writing, `printf` got
+  EPIPE, and under `pipefail` the listing came back empty. Every reader now reads to the end
+  (`awk ... END`, `grep -c`). Ubuntu 24.04 in Docker: old 40/40 failures, new 0/40 [V].
