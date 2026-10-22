@@ -10,7 +10,7 @@
 //
 //	PORT          default 8080
 //	DATA_DIR      default /data
-//	FRAME_TOKEN   bearer token for /api and /mcp; empty disables auth (LAN dev only)
+//	FRAME_TOKEN   bearer token for /api and /mcp, Basic password for /admin; empty disables auth (LAN dev only)
 //	PHOTOS_DIR    folder photo source; unset = photo widget shows nothing
 //	ARTIFACTS_DIR default /artifacts; tfctl-armv7, overlay.tar.gz, system-*.tar, versions.json
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter
@@ -81,7 +81,7 @@ func main() {
 		}
 	}
 	if opts.Token == "" {
-		log.Printf("WARNING: FRAME_TOKEN empty, /api and /mcp are open to the network")
+		log.Printf("WARNING: FRAME_TOKEN empty, /api, /admin and /mcp are open to the network")
 	}
 	if d, err := time.ParseDuration(os.Getenv("PAGE_STALE")); err == nil && d > 0 {
 		opts.PageStale = d
@@ -91,7 +91,7 @@ func main() {
 	mux.Handle("/mcp", mcp.Handler(srv, Version))
 	mux.Handle("/", srv.Routes())
 
-	hs := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	hs := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second} // no WriteTimeout: SSE
 	go func() {
 		log.Printf("frameserver %s listening on %s (data %s)", Version, hs.Addr, dataDir)
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

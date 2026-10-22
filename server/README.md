@@ -21,6 +21,9 @@ opens. A paired frame cannot be paired again until you press "forget pairing" on
 Endpoints: `POST /api/pair`, `POST /pair/{id}/accept`, `GET /api/pair/{id}?nonce=` (no auth; see
 docs/decisions.md "One-press pairing").
 
+`/admin` asks for a password when `FRAME_TOKEN` is set: any user name, the token as password
+(HTTP Basic). Its forms refuse cross-origin posts. Without a token it is open, like `/api`.
+
 ## Data adapters
 The page never calls a third party. The server fetches, caches for 10 minutes, and the page reads
 `/api/stream/<id>` (SSE, pushed on connect and every 10 minutes) or the JSON endpoints:
