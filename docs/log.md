@@ -413,17 +413,6 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
 
-## 2026-10-22 Audit chunk 10: tfctl hardening
-- `touchfw::pointer` indexed `secs[sec]` with a section index from the module file; a corrupt
-  `gslX680new.ko` aborted `tfctl boot`. Now a checked lookup.
-- `drm::write` used `chunks(w)` and copied `w*4` bytes from a possibly short last row. `chunks_exact`.
-- `http`: the path (frame id, artifact name) and the token went into the request line unchecked; a
-  server-supplied name with CR LF injected a header. Bytes at or below space, or 0x7f, are refused
-  (`request_values_reject_control_characters_and_spaces`).
-- `maybe_auto_update` returns once a software update set `exit`, so a process about to restart no
-  longer starts a system update (an orphaned dd, then a second one).
-- `provision::apply` removes `provision.txt` (passphrase and token on FAT) on every exit path.
-- `cargo test`: 118 passed. clippy clean.
 ## 2026-10-22 Audit chunk 1: server hub and pairing
 - `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
   frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
