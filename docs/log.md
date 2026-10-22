@@ -509,3 +509,40 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   closed the pipe before `diskutil` (the shim, and the real one) finished writing, `printf` got
   EPIPE, and under `pipefail` the listing came back empty. Every reader now reads to the end
   (`awk ... END`, `grep -c`). Ubuntu 24.04 in Docker: old 40/40 failures, new 0/40 [V].
+
+## 2026-10-22 Audit round 2 (PRs #67 to #77)
+- Six open findings fixed with defaults instead of waiting: `/admin` needs HTTP Basic (password =
+  `FRAME_TOKEN`) and refuses cross-origin posts, `SetConfig` saves all or nothing, 64 KiB admin forms,
+  server `IdleTimeout` (#70); pairing is bound to the requester's source IP, same-IP replace only,
+  4 open requests per IP (#68); photo cache snaps to the four panel sizes, one generator per key,
+  `CreateTemp`, eviction at 500 files, cursors capped (#69); Wi-Fi join writes the 0600 profile first
+  and connects with no `--passphrase`, profile values escaped for iwd, printable-ASCII 8..63
+  passphrases, keyboard without `€£¥•`, scan parsed by header columns, open and secured networks
+  with one name kept apart, setup HTTP capped at 8 KiB / 50 headers / one 5 s deadline (#76);
+  software update extracts the overlay before the swap, keeps `thinframe.version.prev`, marks a
+  rolled-back version `software-failed`, reboots an unconfirmed slot after 10 min without server
+  contact, `uEnv.bak`, `update-software` refused while a system update runs (#71); `/data` is
+  `e2fsck -p`'d by `tfctl boot fsck` from inittab before `mount -a`, with `/etc/e2fsck.conf`
+  `broken_system_clock` for the RTC-less frame, kiosk log capped at 1 MiB, `scripts/deploy.sh`
+  deleted and TASK 8 points at the artifact feed (#72).
+- Dashboard audit (12 more findings): ICS unfolding was quadratic under the cache lock and feeds
+  had no negative caching (#75: builder, 64 KiB lines, 2000 events, 1 to 10 min backoff, fetch
+  outside the lock, TZID, DTEND); iframe widgets accept only absolute http(s) URLs, sandbox without
+  `allow-same-origin`, and an unset `src` no longer renders `#ZgotmplZ` (the dashboard inside
+  itself) (#73); the photo swap shows the preloaded element, `will-change` only on the photo (#73);
+  SSE broker drops empty maps, `/alive` and `/api/stream` reject invalid ids (#77); simframe
+  WebDriver calls time out, `sim/qemu/run.sh` requires `SERVER_URL`, `tests/e2e-native.sh` fails
+  when its server is not the one answering (#74). CI runs once per PR push (#67).
+- QEMU journey on the integrated build (image from d788c87 = main + #70, #72 to #76): 40 of 41
+  PASS [V]. The Wi-Fi page joined through the new profile path, PAIR, `/admin` with Basic auth,
+  the fsck'd boot, update, rollback (now with tries) and reboot all passed.
+- The one FAIL was "under 300 MB used with the page up": 336 MB in all three samples. Probing with
+  `free -m` and per-process RSS showed two modes with identical code: main read 282 MB
+  (WPEWebProcess 258) and then 395 (373) on a second boot; the integrated build 394; #73's tree
+  391 and 392 with its CSS reverted. Rendered pages from main and #73 differ only in CSS and JS
+  that does not run in the window, and the harness has no photos or server state. So the swing is
+  QEMU's (llvmpipe keeps its buffers in the WebProcess; CmaFree hit 0 in the high mode), not a
+  regression. The QEMU check is now 420 MB; the frame's memory budget stays measured on the panel
+  (TASK 13 gate unchanged). Screens: image/out/qemu/journey/.
+- armv7 tfctl with everything merged: 975,204 bytes (about 25 KB under the 1 MB limit; the next
+  feature needs to shed weight first). `cargo test` 139 passed; `go test -race ./...` clean.
