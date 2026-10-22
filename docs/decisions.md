@@ -172,6 +172,12 @@ upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edg
   verified by sha256 from the signed-in config response before install. Outbound HTTPS from the
   frame is unnecessary: the container fetches the world, the frame only talks to the container.
 - Secrets never in the image: host key, token and Wi-Fi PSK live on `data` and are provisioned once.
+- The token is not in `thinframe.conf`. The conf is world-readable on purpose: `frame` (the only
+  ssh user, no root login) runs `tfctl status`, and the real-image test greps it. The token lives
+  next to it in `/data/etc/thinframe.token`, mode 0600, root only; `FRAME_TOKEN` in the conf is
+  read only as a leftover from an older tfctl and moved out on the next save. cog runs as `frame`,
+  so a compromised web process cannot read the server's admin secret. A rollback to a tfctl older
+  than this reads an empty token and pairs again (one press at the frame); nothing else is lost. [V]
 
 ## Two containers
 `frameserver` is production: one binary, one volume, no build tools. `simframe` is development
