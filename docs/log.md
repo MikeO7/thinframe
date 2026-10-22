@@ -413,13 +413,6 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
 
-## 2026-10-22 Audit chunk 4: PNG decode limits
-- `png::decode` accepted any image up to 4096 x 4096. The IHDR is 13 bytes and deflate reaches
-  1000:1, so a 48 KiB `splash_png` from the server could declare 3500 x 3500 and cost about 256 MB
-  to decode on the frame while cog runs. `decode` now refuses more than 1280 x 1280 pixels on the
-  header alone (`rejects_images_larger_than_the_panel`); `inflate` reserves the exact output;
-  `store_logo` refuses base64 past 48 KiB before decoding [V].
-- `cargo test`: 118 passed. clippy clean.
 ## 2026-10-22 Audit chunk 1: server hub and pairing
 - `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
   frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
