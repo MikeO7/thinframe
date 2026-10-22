@@ -264,7 +264,9 @@ pub fn record_start_at(p: &Paths, now: u64) -> StartCheck {
         .iter()
         .rev()
         .take(2)
-        .filter(|t| now.saturating_sub(**t) <= CRASH_WINDOW_S)
+        // A start logged after `now` is from before a reboot: the A33 has no RTC battery and
+        // comes up in 1970, so with saturating_sub every earlier start would look recent.
+        .filter(|&&t| t <= now && now - t <= CRASH_WINDOW_S)
         .count();
     starts.push(now);
     let keep = starts.len().saturating_sub(STARTS_KEEP);
@@ -545,6 +547,25 @@ pub(crate) mod tests {
         assert!(drain_events(&p).is_empty());
         let log = fs::read_to_string(p.data.join("starts")).unwrap();
         assert_eq!(log.lines().count(), 6);
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Power cut after a good update: the next boot has no RTC and `now` is tiny, so the earlier
+    /// starts lie in the future. They are not a crash loop.
+    #[test]
+    fn starts_from_before_a_reboot_are_not_recent() {
+        let base = tmp_base("rtc");
+        let p = Paths::under(&base);
+        fs::create_dir_all(p.root.join("usr/bin")).unwrap();
+        fs::create_dir_all(&p.data).unwrap();
+        fs::write(p.binary(), b"new").unwrap();
+        fs::write(p.binary().with_extension("prev"), b"old").unwrap();
+        fs::write(p.marker(), "9.9\n").unwrap();
+        assert_eq!(record_start_at(&p, 1_760_000_000), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, 1_760_000_005), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, 20), StartCheck::Normal);
+        assert_eq!(fs::read(p.binary()).unwrap(), b"new");
+        assert!(p.marker().exists());
         fs::remove_dir_all(&base).unwrap();
     }
 }

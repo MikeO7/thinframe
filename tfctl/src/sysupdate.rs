@@ -58,25 +58,32 @@ pub fn write_rootfs(src: &Path, dev: &Path, fsync: bool) -> io::Result<()> {
         .stdout(Stdio::piped())
         .spawn()?;
     let pipe = zstd.stdout.take().unwrap();
-    let mut dd = Command::new("dd");
-    dd.arg(format!("of={}", dev.to_str().unwrap()))
+    let mut cmd = Command::new("dd");
+    cmd.arg(format!("of={}", dev.to_str().unwrap()))
         .arg("bs=4194304")
         .stdin(Stdio::from(pipe))
         .stderr(Stdio::piped());
     if fsync {
-        dd.arg("conv=fsync");
+        cmd.arg("conv=fsync");
     }
-    let dd = dd.output()?;
+    let dd = cmd.output();
+    // The Command owns the pipe's read end. Drop it now, or a dd that quit early (ENOSPC, a
+    // device that will not open) leaves zstd blocked on a full pipe and this thread waits forever.
+    drop(cmd);
+    let dd = dd?;
+    if !dd.status.success() {
+        let _ = zstd.kill();
+    }
     let z = zstd.wait()?;
-    if !z.success() {
-        return Err(io::Error::other(format!("zstd -d {}: {z}", src.display())));
-    }
     if !dd.status.success() {
         return Err(io::Error::other(format!(
             "dd of={}: {}",
             dev.display(),
             String::from_utf8_lossy(&dd.stderr).trim()
         )));
+    }
+    if !z.success() {
+        return Err(io::Error::other(format!("zstd -d {}: {z}", src.display())));
     }
     Ok(())
 }
