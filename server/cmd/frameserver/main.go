@@ -87,7 +87,8 @@ func main() {
 	if d, err := time.ParseDuration(os.Getenv("PAGE_STALE")); err == nil && d > 0 {
 		opts.PageStale = d
 	}
-	hs := newHTTPServer(":"+env("PORT", "8080"), handler(api.New(st, opts)))
+	srv := api.New(st, opts)
+	hs := newHTTPServer(":"+env("PORT", "8080"), handler(srv))
 	go func() {
 		log.Printf("frameserver %s listening on %s (data %s)", Version, hs.Addr, dataDir)
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -101,6 +102,9 @@ func main() {
 	defer cancel()
 	if err := hs.Shutdown(shutdown); err != nil {
 		log.Printf("shutdown: %v", err)
+	}
+	if err := srv.Drain(shutdown); err != nil {
+		log.Printf("shutdown: control sockets: %v", err)
 	}
 }
 
