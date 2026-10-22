@@ -22,13 +22,63 @@ type WeatherSource interface{ Current() (Weather, error) }
 const OpenMeteoURL = "https://api.open-meteo.com/v1/forecast"
 
 // OpenMeteo is a keyless adapter, cached 10 minutes. On a failed fetch it returns
-// the last good reading (zero value if none) together with the error.
+// the last good reading (zero value if none) together with the error, and does not
+// try again until the retry backoff (1 to 10 minutes) has passed.
 type OpenMeteo struct {
 	Lat, Lon float64
 	BaseURL  string // empty = OpenMeteoURL; tests point it at an httptest server
+	feed     refresher[Weather]
+}
+
+// refresher is the fetch policy of the weather and calendar feeds. A good result is
+// kept for ttl. A failure keeps the last good value and blocks refetching for a backoff
+// that starts at 1 minute and doubles up to 10, so a dead upstream is not hammered by
+// every page request. At most one fetch runs at a time, outside the lock: other callers
+// get the cached value at once, or wait for the fetch if nothing was ever fetched.
+type refresher[T any] struct {
 	mu       sync.Mutex
-	last     Weather
-	at       time.Time
+	val      T
+	have     bool
+	err      error     // error of the last fetch; nil after a success
+	next     time.Time // no fetch before this
+	backoff  time.Duration
+	fetching bool
+	done     chan struct{}    // closed when the running fetch ends
+	clock    func() time.Time // nil = time.Now; tests move it
+}
+
+func (r *refresher[T]) now() time.Time {
+	if r.clock != nil {
+		return r.clock()
+	}
+	return time.Now()
+}
+
+func (r *refresher[T]) get(ttl time.Duration, fetch func() (T, error)) (T, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch {
+	case r.fetching && !r.have:
+		done := r.done
+		r.mu.Unlock()
+		<-done
+		r.mu.Lock()
+	case !r.fetching && !r.now().Before(r.next):
+		r.fetching, r.done = true, make(chan struct{})
+		r.mu.Unlock()
+		v, err := fetch()
+		r.mu.Lock()
+		if err == nil {
+			r.val, r.have, r.err, r.backoff = v, true, nil, 0
+			r.next = r.now().Add(ttl)
+		} else {
+			r.backoff = min(max(2*r.backoff, time.Minute), 10*time.Minute)
+			r.err, r.next = err, r.now().Add(r.backoff)
+		}
+		r.fetching = false
+		close(r.done)
+	}
+	return r.val, r.err
 }
 
 var wmo = map[int]string{0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast", 45: "Fog", 48: "Rime fog",
@@ -37,11 +87,10 @@ var wmo = map[int]string{0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "
 
 // Current fetches or returns the cached reading.
 func (o *OpenMeteo) Current() (Weather, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if !o.at.IsZero() && time.Since(o.at) < 10*time.Minute {
-		return o.last, nil
-	}
+	return o.feed.get(10*time.Minute, o.fetch)
+}
+
+func (o *OpenMeteo) fetch() (Weather, error) {
 	base := o.BaseURL
 	if base == "" {
 		base = OpenMeteoURL
@@ -50,11 +99,11 @@ func (o *OpenMeteo) Current() (Weather, error) {
 	cl := http.Client{Timeout: 8 * time.Second}
 	resp, err := cl.Get(url)
 	if err != nil {
-		return o.last, err
+		return Weather{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return o.last, fmt.Errorf("weather: %s", resp.Status)
+		return Weather{}, fmt.Errorf("weather: %s", resp.Status)
 	}
 	var body struct {
 		Current *struct {
@@ -63,15 +112,14 @@ func (o *OpenMeteo) Current() (Weather, error) {
 		} `json:"current"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return o.last, err
+		return Weather{}, err
 	}
 	if body.Current == nil {
-		return o.last, fmt.Errorf("weather: response has no current block")
+		return Weather{}, fmt.Errorf("weather: response has no current block")
 	}
 	d := wmo[body.Current.Code]
 	if d == "" {
 		d = fmt.Sprintf("code %d", body.Current.Code)
 	}
-	o.last, o.at = Weather{TempC: body.Current.T, Desc: d}, time.Now()
-	return o.last, nil
+	return Weather{TempC: body.Current.T, Desc: d}, nil
 }

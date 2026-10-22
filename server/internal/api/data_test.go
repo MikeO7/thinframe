@@ -65,7 +65,7 @@ func TestOpenMeteoErrorsKeepLastReading(t *testing.T) {
 		body   string
 	}{{503, "busy"}, {200, "not json"}, {200, `{}`}} {
 		bad, _, _ := fakeOpenMeteo(t, c.status, c.body)
-		o.BaseURL, o.at = bad.URL, time.Time{} // expire the cache
+		o.BaseURL, o.feed.next = bad.URL, time.Time{} // expire the cache and the retry backoff
 		wx, err := o.Current()
 		if err == nil || wx.TempC != 20 {
 			t.Errorf("%d %q: want error and the last reading, got %+v %v", c.status, c.body, wx, err)
@@ -97,10 +97,179 @@ func TestICSFetchAndCache(t *testing.T) {
 		t.Fatalf("not cached: hits=%d err=%v", hits.Load(), err)
 	}
 	status.Store(404)
-	c.at = time.Time{}
+	c.feed.next = time.Time{}
 	evs, err = c.Upcoming(now, 3)
 	if err == nil || len(evs) != 3 {
 		t.Fatalf("404 should return the cached events and an error: %d %v", len(evs), err)
+	}
+}
+
+// A dead upstream is asked once per retry window (1, 2, 4 ... 10 minutes), and the last
+// good reading is served in between.
+func TestOpenMeteoFailureBackoff(t *testing.T) {
+	var hits atomic.Int32
+	var fail atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		if fail.Load() {
+			w.WriteHeader(503)
+			return
+		}
+		_, _ = w.Write([]byte(`{"current":{"temperature_2m":7,"weather_code":3}}`))
+	}))
+	defer ts.Close()
+	clock := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	o := &OpenMeteo{BaseURL: ts.URL}
+	o.feed.clock = func() time.Time { return clock }
+	if _, err := o.Current(); err != nil {
+		t.Fatal(err)
+	}
+	fail.Store(true)
+	clock = clock.Add(10 * time.Minute) // cache expired
+	want := int32(1)
+	for _, wait := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 10 * time.Minute, 10 * time.Minute} {
+		want++
+		for range 5 {
+			if wx, err := o.Current(); err == nil || wx.Desc != "Overcast" {
+				t.Fatalf("want the last reading and an error, got %+v %v", wx, err)
+			}
+		}
+		clock = clock.Add(wait - time.Second)
+		if _, _ = o.Current(); hits.Load() != want {
+			t.Fatalf("before the %v window ended: hits=%d, want %d", wait, hits.Load(), want)
+		}
+		clock = clock.Add(time.Second)
+	}
+	fail.Store(false)
+	if wx, err := o.Current(); err != nil || hits.Load() != want+1 || wx.Desc != "Overcast" {
+		t.Fatalf("recovery: %+v %v hits=%d", wx, err, hits.Load())
+	}
+}
+
+// While a fetch is slow, other callers neither start a second one nor queue behind it
+// once a cached value exists; before the first value they wait for that one fetch.
+func TestICSSingleFlight(t *testing.T) {
+	var hits atomic.Int32
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		<-release
+		_, _ = w.Write([]byte(sampleICS))
+	}))
+	defer ts.Close()
+	c := &ICS{URL: ts.URL, Loc: time.UTC}
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	waitHit := func(n int32) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); hits.Load() < n; time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("upstream never hit %d times", n)
+			}
+		}
+	}
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			if evs, err := c.Upcoming(now, 3); err != nil || len(evs) != 3 {
+				t.Errorf("first fetch: %d %v", len(evs), err)
+			}
+		})
+	}
+	waitHit(1)
+	time.Sleep(20 * time.Millisecond) // give the others time to (wrongly) start fetches
+	release <- struct{}{}
+	wg.Wait()
+	if hits.Load() != 1 {
+		t.Fatalf("cold start: %d fetches, want 1", hits.Load())
+	}
+
+	c.feed.mu.Lock()
+	c.feed.next = time.Time{} // expire
+	c.feed.mu.Unlock()
+	slow := make(chan struct{})
+	go func() { _, _ = c.Upcoming(now, 3); close(slow) }()
+	waitHit(2)
+	for range 10 { // the fetch is blocked upstream; these must return from cache at once
+		if evs, err := c.Upcoming(now, 3); err != nil || len(evs) != 3 {
+			t.Fatalf("during refresh: %d %v", len(evs), err)
+		}
+	}
+	release <- struct{}{}
+	<-slow
+	if hits.Load() != 2 {
+		t.Fatalf("refresh: %d fetches, want 2", hits.Load())
+	}
+}
+
+// Folded lines are joined in linear time and capped; the event count is capped.
+func TestParseICSHostileFeed(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("BEGIN:VEVENT\r\nDTSTART:20261023T090000Z\r\nSUMMARY:x")
+	for range 200_000 {
+		b.WriteString("\r\n yyyyyyyyyy")
+	}
+	b.WriteString("\r\nEND:VEVENT\r\n")
+	start := time.Now()
+	evs, err := ParseICS(strings.NewReader(b.String()), time.UTC)
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("200k continuation lines took %v", d)
+	}
+	if err != nil || len(evs) != 1 || len(evs[0].Summary) > maxICSLine {
+		t.Fatalf("got %d events (summary %d bytes), %v", len(evs), len(evs[0].Summary), err)
+	}
+
+	b.Reset()
+	for range maxICSEvents + 500 {
+		b.WriteString("BEGIN:VEVENT\r\nDTSTART:20261023T090000Z\r\nSUMMARY:e\r\nEND:VEVENT\r\n")
+	}
+	if evs, err := ParseICS(strings.NewReader(b.String()), time.UTC); err != nil || len(evs) != maxICSEvents {
+		t.Fatalf("event cap: %d, %v", len(evs), err)
+	}
+}
+
+// TZID is honoured: 09:00 New York (EDT, UTC-4) is 14:00 in London (BST, UTC+1).
+// Unknown zones fall back to the configured location.
+func TestParseICSTZID(t *testing.T) {
+	london, err := time.LoadLocation("Europe/London")
+	if err != nil {
+		t.Skip("no tzdata:", err)
+	}
+	feed := "BEGIN:VEVENT\r\nDTSTART;TZID=America/New_York:20261023T090000\r\nSUMMARY:NY\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nDTSTART;VALUE=DATE-TIME;TZID=\"America/New_York\":20261023T100000\r\nSUMMARY:Quoted\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nDTSTART;TZID=Eastern Standard Time:20261023T090000\r\nSUMMARY:Windows\r\nEND:VEVENT\r\n"
+	evs, err := ParseICS(strings.NewReader(feed), london)
+	if err != nil || len(evs) != 3 {
+		t.Fatalf("got %d events, %v", len(evs), err)
+	}
+	if want := time.Date(2026, 10, 23, 13, 0, 0, 0, time.UTC); !evs[0].Start.Equal(want) || evs[0].Start.Hour() != 14 {
+		t.Errorf("NY: %v, want %v (14:00 London)", evs[0].Start, want)
+	}
+	if want := time.Date(2026, 10, 23, 14, 0, 0, 0, time.UTC); !evs[1].Start.Equal(want) {
+		t.Errorf("quoted: %v, want %v", evs[1].Start, want)
+	}
+	if want := time.Date(2026, 10, 23, 9, 0, 0, 0, london); !evs[2].Start.Equal(want) {
+		t.Errorf("unknown zone: %v, want %v", evs[2].Start, want)
+	}
+}
+
+// A timed event that is over no longer shows, even today; one still running does.
+func TestPickDropsFinishedEvents(t *testing.T) {
+	feed := "BEGIN:VEVENT\r\nDTSTART:20261022T080000Z\r\nSUMMARY:Breakfast\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nDTSTART:20261022T110000Z\r\nDTEND:20261022T130000Z\r\nSUMMARY:Workshop\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nDTSTART:20261022T100000Z\r\nDTEND:20261022T113000Z\r\nSUMMARY:Standup\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20261022\r\nSUMMARY:Holiday\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nDTSTART:20261022T180000Z\r\nSUMMARY:Dinner\r\nEND:VEVENT\r\n"
+	evs, err := ParseICS(strings.NewReader(feed), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	var got []string
+	for _, e := range pick(evs, now, 10) {
+		got = append(got, e.Summary)
+	}
+	if strings.Join(got, ",") != "Holiday,Workshop,Dinner" {
+		t.Fatalf("pick at noon: %v", got)
 	}
 }
 
