@@ -79,6 +79,15 @@ fn agent_alone(cfg: &config::Config) -> std::io::Result<()> {
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let conf = config::path();
+    // `boot fsck` runs from inittab before /data (where /etc/thinframe.conf points) is mounted;
+    // it needs no config, so a config error must not stop the check or the device links.
+    if args.first().is_some_and(|a| a == "boot") && args.get(1).is_some_and(|a| a == "fsck") {
+        if let Err(e) = boot::fsck_data() {
+            eprintln!("tfctl: boot: fsck: {e}");
+            return ExitCode::from(1);
+        }
+        return ExitCode::SUCCESS;
+    }
     let cfg = match config::load(&conf) {
         Ok(c) => c,
         Err(e) => {
@@ -86,9 +95,13 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // The zone the server last sent (agent on_hello), for this process and everything it
+    // starts (busybox date for the clock, cog). Still one thread here, so set_var is sound.
+    if !cfg.tz.is_empty() && !cfg.tz.contains("..") && env::var_os("TZ").is_none() {
+        env::set_var("TZ", &cfg.tz);
+    }
     let result = match args.first().map(String::as_str) {
         Some("kiosk") => kiosk::run(&cfg),
-        Some("boot") if args.get(1).is_some_and(|a| a == "fsck") => boot::fsck_data(),
         Some("boot") => boot::run(&conf),
         Some("agent") => agent_alone(&cfg),
         Some("update") => update::run(&cfg, args.get(1).is_some_and(|a| a == "--force")),
