@@ -420,3 +420,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   `uEnv.txt` there. Now every /boot mount resolves the partition from `slot::find_disk` (MBR
   signature) and refuses when no signed disk exists. `card_is_the_signed_disk_or_nothing` [V].
 - `cargo test`: 118 passed. clippy clean.
+## 2026-10-22 Audit chunk 1: server hub and pairing
+- `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
+  frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
+  bare goroutine, so one Wi-Fi flap during an action could kill frameserver. Fixed by sending under the
+  read lock. `TestSendDuringReconnectDoesNotPanic` reproduces `panic: send on closed channel` on the old code [V].
+- `handlePairAccept` handed the token to whatever request was open at the end, not the one it accepted.
+  Now compares the pointer. `handleDeleteFrame` now kicks the live socket and drops the open pair request
+  (`TestDeleteFrameKicksSocket`) [V].
+- `go test -race ./...`, `go vet`: clean.
