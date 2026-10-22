@@ -413,12 +413,6 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
 
-## 2026-10-22 Audit chunk 3: secret files on the frame
-- `/data/etc/thinframe.conf` (holds `FRAME_TOKEN`) was written with the umask mode, 0644, and the
-  iwd profile (the passphrase) was 0644 until the chmod after the write. Both now go through
-  `config::write_private`: created 0600 before the first byte, `sync_all` before the rename.
-  `save_overrides_creates_file` asserts the mode [V].
-- `cargo test`: 117 passed. clippy clean.
 ## 2026-10-22 Audit chunk 1: server hub and pairing
 - `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
   frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
