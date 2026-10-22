@@ -38,6 +38,7 @@ mcp_online() { mcp list_frames '{}' | grep -q '"online":true'; }
 listed() { r 'wget -qO- http://127.0.0.1:8091/wifi' | grep -q 'Groovy Wifi'; }
 acked() { frame | tr -d ' \n' | grep -q "{[^{}]*\"name\":\"$1\"[^{}]*\"ok\":true"; }
 no_event() { ! event "$1"; }
+report_tool_has() { mcp get_report "{\"id\":\"$ID\",\"tail\":4000}" | grep -q -F "$1"; }
 report_has() {	# needles...: the newest stored report has all of them
 	local f; f="$(find "$W/data/reports/$ID" -name '*.txt' 2>/dev/null | sort | tail -1)"; [ -n "$f" ] || return 1
 	for n in "$@"; do grep -q -F "$n" "$f" || return 1; done
@@ -112,7 +113,7 @@ check "reload-page acked by the frame" wait_for 300 acked reload-page
 # Remote debugging: a report lands on the server; debug mode makes tfctl log everything.
 check "MCP frame_action report" mcp_ok frame_action "{\"id\":\"$ID\",\"name\":\"report\"}"
 check "the report is stored and carries dmesg, the conf and this boot's log" wait_for 300 report_has "==== dmesg" "==== thinframe.conf" "tfctl: boot:"
-check "MCP get_report returns it" mcp get_report "{\"id\":\"$ID\",\"tail\":4000}" | grep -q "thinframe.log (this boot)"
+check "MCP get_report returns it" report_tool_has "thinframe.log (this boot)"
 check "MCP set_frame_config debug on" mcp_ok set_frame_config "{\"id\":\"$ID\",\"debug\":true}"
 check "tfctl logs socket traffic in debug mode" wait_for 120 log_has "tfctl: debug: ws rx"
 check "DEBUG persisted in the conf" r 'grep -q "^DEBUG=\"1\"" /etc/thinframe.conf'
