@@ -52,6 +52,9 @@ with the overlay as `dev-<stamp>-<sha>` in the server's artifacts directory (the
 that crash-loops is rolled back by tfctl itself. A native server for that loop:
 `cd server && PORT=8080 DATA_DIR=~/.thinframe/data ARTIFACTS_DIR=~/.thinframe/artifacts FRAME_TOKEN=... go run ./cmd/frameserver`.
 
+A hung kernel or a wedged tfctl reboots itself: tfctl arms the A33's hardware watchdog (16 s)
+and pets it every 5 s; init's respawn re-arms it. Nothing to do at the frame.
+
 On the frame (ssh as `frame`):
 - `tfctl status`: uptime, IP, memory, cog pid, URL.
 - `/var/log/thinframe.log` (RAM): tfctl and cog output. A copy is kept on the card every 15 s:

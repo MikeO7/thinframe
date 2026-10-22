@@ -116,6 +116,7 @@ check "MCP get_report returns it" mcp get_report "{\"id\":\"$ID\",\"tail\":4000}
 check "MCP set_frame_config debug on" mcp_ok set_frame_config "{\"id\":\"$ID\",\"debug\":true}"
 check "tfctl logs socket traffic in debug mode" wait_for 120 log_has "tfctl: debug: ws rx"
 check "DEBUG persisted in the conf" r 'grep -q "^DEBUG=\"1\"" /etc/thinframe.conf'
+check "hardware watchdog armed by tfctl (virt: i6300esb)" r 'test -c /dev/watchdog && grep -q "tfctl: watchdog: /dev/watchdog armed" /var/log/thinframe.log'
 check "the previous boot's log will be kept on /data" r 'test -s /data/thinframe/log/current.log'
 check "MCP set_frame_config debug off" mcp_ok set_frame_config "{\"id\":\"$ID\",\"debug\":false}"
 

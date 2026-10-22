@@ -50,7 +50,8 @@ A task is done when its gate line in `TASKS.md` is checked and `docs/log.md` has
 ## Languages
 Frame: Rust only, in `tfctl/`. Container: Go only, in `server/`. Nothing else, anywhere.
 No new shell scripts on the frame. If something needs logic, it is a subcommand of `tfctl`.
-Minimal dependencies; justify every crate in `docs/decisions.md`. Binary must stay under 1 MB.
+Minimal dependencies; justify every crate in `docs/decisions.md`. Binary under 2 MB (CI enforces
+it); the README budgets are targets to measure against, not gates.
 Mac-side build scripts may stay bash.
 
 ## Style

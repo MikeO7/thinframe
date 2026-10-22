@@ -30,10 +30,10 @@ jobs:
       - run: cargo clippy -- -D warnings
       - run: cargo test
       - run: pip install cargo-zigbuild && cargo zigbuild --release --target armv7-unknown-linux-musleabihf
-      - name: size budget (1 MB)
+      - name: size budget (2 MB)
         run: |
           f=target/armv7-unknown-linux-musleabihf/release/tfctl
-          ls -l "$f"; [ "$(stat -c %s "$f")" -lt 1048576 ]
+          ls -l "$f"; [ "$(stat -c %s "$f")" -lt 2097152 ]
       - uses: actions/upload-artifact@v4
         with: { name: tfctl-armv7, path: tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl }
   server:

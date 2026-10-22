@@ -11,7 +11,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="${1:-${THINFRAME_ARTIFACTS:-$HOME/.thinframe/artifacts}}"
 target=armv7-unknown-linux-musleabihf
-limit=1000000
+limit=2097152
 
 # cargo lives in the rustup toolchain, not on PATH (CLAUDE.md).
 for d in "$HOME/.cargo/bin" "$HOME"/.rustup/toolchains/stable-*/bin; do

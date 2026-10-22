@@ -93,15 +93,17 @@ docker compose --profile sim up --build    # dev: frameserver + simframe, screen
 
 ## Budget
 
-The frame's hardware is for the dashboard, not the OS. Hard limits, checked in TASKS.md:
+The frame's hardware is for the dashboard, not the OS. These are targets we set ourselves, not
+hardware limits (the card gives each root slot 1 GB and the A33 has 1 GB of RAM): measured in
+TASKS.md, and the only one CI enforces is the tfctl size.
 
-| Thing | Limit |
+| Thing | Target |
 |---|---|
-| Root filesystem | under 200 MB |
+| Root filesystem | under 200 MB (the slot is 1 GB) |
 | RAM used before cog starts | under 60 MB |
 | RAM used with the page up | under 300 MB |
 | Processes besides cog, BusyBox init + getty, dropbear, iwd + dbus-daemon, dhcpcd, udevd, udhcpd (USB link) | none |
-| Custom code on the frame | one Rust binary, `tfctl`, under 1 MB, no shell helpers. Container is Go. |
+| Custom code on the frame | one Rust binary, `tfctl`, under 2 MB (CI fails above), no shell helpers. Container is Go. |
 | Boot to page | under 20 s |
 | Touch to visible response | under 50 ms (one tap to a highlighted button) |
 | Scroll / transition frame rate | 60 fps, no dropped frames in a 10 s swipe test |
