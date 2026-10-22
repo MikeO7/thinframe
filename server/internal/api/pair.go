@@ -5,7 +5,9 @@ package api
 // back from the frame's own browser (POST /pair/{id}/accept), which proves someone is standing at
 // the frame. The server then mints a per-frame token, stores only its hash, and hands it over once
 // to the frame's next poll (GET /api/pair/{id}?nonce=). A paired id refuses new requests until the
-// admin page forgets it, so pairing happens once.
+// admin page forgets it, so pairing happens once. The button and the poll must come from the
+// source IP that opened the request (tfctl and cog run on the same frame), so another LAN host can
+// neither accept nor collect a request, nor replace one that is open.
 
 import (
 	"crypto/rand"
@@ -15,6 +17,7 @@ import (
 	"encoding/json"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -24,10 +27,12 @@ import (
 const (
 	pairTTL     = 15 * time.Minute
 	pairMaxOpen = 32
+	pairMaxIP   = 4 // open requests from one source IP
 )
 
 type pairReq struct {
 	nonceHash string
+	ip        string // source IP of the request; accept and poll must come from it
 	created   time.Time
 	token     string // set once accepted, cleared when the frame picks it up
 }
@@ -37,6 +42,14 @@ type pairings struct {
 }
 
 func hashHex(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+
+// sourceIP is the host part of r.RemoteAddr. Proxy headers are ignored on purpose.
+func sourceIP(r *http.Request) string {
+	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return h
+	}
+	return r.RemoteAddr
+}
 
 func sameHash(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
@@ -69,11 +82,23 @@ func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 	for id := range s.pair.open {
 		s.pending(id) // drop expired
 	}
-	if s.pair.open[in.ID] == nil && len(s.pair.open) >= pairMaxOpen {
+	ip := sourceIP(r)
+	old := s.pair.open[in.ID]
+	if old != nil && old.ip != ip {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "another pairing request for this id is open"})
+		return
+	}
+	fromIP := 0
+	for id, p := range s.pair.open {
+		if p.ip == ip && id != in.ID {
+			fromIP++
+		}
+	}
+	if old == nil && (len(s.pair.open) >= pairMaxOpen || fromIP >= pairMaxIP) {
 		http.Error(w, "too many open pairing requests", http.StatusTooManyRequests)
 		return
 	}
-	s.pair.open[in.ID] = &pairReq{nonceHash: hashHex(in.Nonce), created: time.Now()}
+	s.pair.open[in.ID] = &pairReq{nonceHash: hashHex(in.Nonce), ip: ip, created: time.Now()}
 	writeJSON(w, http.StatusAccepted, map[string]any{"state": "waiting", "server_version": s.opts.Version})
 }
 
@@ -83,7 +108,7 @@ func (s *Server) handlePairPoll(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p := s.pending(id)
-	if p == nil || !sameHash(p.nonceHash, hashHex(nonce)) {
+	if p == nil || p.ip != sourceIP(r) || !sameHash(p.nonceHash, hashHex(nonce)) {
 		http.Error(w, "no such pairing request", http.StatusNotFound)
 		return
 	}
@@ -111,7 +136,7 @@ func (s *Server) handlePairAccept(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	p := s.pending(id)
-	if p == nil || !sameHash(p.nonceHash, hashHex(nonce)) {
+	if p == nil || p.ip != sourceIP(r) || !sameHash(p.nonceHash, hashHex(nonce)) {
 		s.mu.Unlock()
 		page(http.StatusNotFound, "This request expired", "The frame will ask again in a moment.")
 		return
