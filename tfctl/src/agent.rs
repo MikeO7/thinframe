@@ -286,6 +286,10 @@ impl Agent {
         }
         let text = String::from_utf8_lossy(&r.body);
         let v = json::parse(&text).map_err(io::Error::other)?;
+        // The server answered: this slot and binary work, the same as a WebSocket connect.
+        // Without it a frame that only ever polls would stay unconfirmed, and two power cuts
+        // later U-Boot would revert a healthy update.
+        self.on_connect();
         self.apply_config(&v);
         self.maybe_auto_update();
         if self.exit {
