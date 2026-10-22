@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -77,5 +79,62 @@ func TestTouchKeepsLastSamples(t *testing.T) {
 	}
 	if len(tc.SamplesMS) != MaxTouchSamples || tc.SamplesMS[0] != 6 || tc.Max() != MaxTouchSamples+5 {
 		t.Fatalf("samples %v", tc.SamplesMS)
+	}
+}
+
+// A torn frame file (power cut mid-write) is set aside, not fatal: the other frames still load.
+func TestOpenSetsAsideCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if _, err := s.Update("good", func(f *Frame) { f.Name = "ok" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frames", "torn.json"), []byte(`{"id":"to`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open failed on a torn file: %v", err)
+	}
+	if f, err := s2.Get("good"); err != nil || f.Name != "ok" {
+		t.Fatalf("good frame lost: %+v %v", f, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "frames", "torn.json.bad")); err != nil {
+		t.Fatal("torn file was not set aside")
+	}
+}
+
+// When the save fails, memory keeps the old state: callers never act on a change that is not on disk.
+func TestUpdateKeepsMemoryWhenSaveFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory modes")
+	}
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if _, err := s.Update("a", func(f *Frame) { f.Name = "before" }); err != nil {
+		t.Fatal(err)
+	}
+	frames := filepath.Join(dir, "frames")
+	if err := os.Chmod(frames, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(frames, 0o755) })
+	if _, err := s.Update("a", func(f *Frame) { f.Name = "after" }); err == nil {
+		t.Fatal("save should fail on a read-only directory")
+	}
+	if f, _ := s.Get("a"); f.Name != "before" {
+		t.Fatalf("memory took a change that is not on disk: %q", f.Name)
+	}
+}
+
+func TestPendingIsCapped(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	f, err := s.Update("a", func(f *Frame) {
+		for i := 0; i < MaxPending+10; i++ {
+			f.Pending = append(f.Pending, Action{Name: "reboot"})
+		}
+	})
+	if err != nil || len(f.Pending) != MaxPending {
+		t.Fatalf("pending %d, err %v", len(f.Pending), err)
 	}
 }
