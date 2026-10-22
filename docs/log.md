@@ -413,13 +413,6 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
 
-## 2026-10-22 Audit chunk 2: no guessed eMMC mount
-- `sysupdate::boot_rw` fell back to mounting `/dev/mmcblk0p1` read-write when `/boot` was not mounted
-  and the caller (`rollback`, `confirm_slot`) passed no disk. On a frame where the SD card is mmcblk1,
-  mmcblk0 is the Android eMMC, so that path broke the "never write the eMMC" rule and then wrote
-  `uEnv.txt` there. Now every /boot mount resolves the partition from `slot::find_disk` (MBR
-  signature) and refuses when no signed disk exists. `card_is_the_signed_disk_or_nothing` [V].
-- `cargo test`: 118 passed. clippy clean.
 ## 2026-10-22 Audit chunk 1: server hub and pairing
 - `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
   frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
