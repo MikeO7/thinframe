@@ -412,3 +412,11 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   collector moves single readings by about 50 MB.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
+
+## 2026-10-22 Audit chunk 2: no guessed eMMC mount
+- `sysupdate::boot_rw` fell back to mounting `/dev/mmcblk0p1` read-write when `/boot` was not mounted
+  and the caller (`rollback`, `confirm_slot`) passed no disk. On a frame where the SD card is mmcblk1,
+  mmcblk0 is the Android eMMC, so that path broke the "never write the eMMC" rule and then wrote
+  `uEnv.txt` there. Now every /boot mount resolves the partition from `slot::find_disk` (MBR
+  signature) and refuses when no signed disk exists. `card_is_the_signed_disk_or_nothing` [V].
+- `cargo test`: 118 passed. clippy clean.
