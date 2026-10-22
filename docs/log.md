@@ -546,3 +546,56 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   (TASK 13 gate unchanged). Screens: image/out/qemu/journey/.
 - armv7 tfctl with everything merged: 975,204 bytes (about 25 KB under the 1 MB limit; the next
   feature needs to shed weight first). `cargo test` 139 passed; `go test -race ./...` clean.
+
+## 2026-10-22 Audit round 3 (PRs #79 to #83)
+"Rock solid" pass over tfctl, the server and the boot path. Each PR merged on green CI; the
+QEMU journey ran on the #81 image with main merged in.
+- PR #79 tfctl robustness [V] (cargo test 142 passed, clippy clean, armv7 977,948 bytes):
+  update.rs binary swap had a window with no /usr/bin/tfctl (two renames); now hard link + one
+  atomic rename, rollback the same. config.rs save_overrides through a dangling symlink wrote the
+  temp file next to the link (EROFS on the frame); now follows the link chain. COG_ROTATION outside
+  0..3 ignored. agent.rs: tz validated (charset, ≤64, no leading /, no ..), time_unix < 2024 ignored.
+  status.rs: RSSI via wifi::iwctl with 5 s limit (unbounded Command::output on the agent thread).
+  boot.rs: resize2fs every boot (grown table + power cut before resize2fs was never repaired).
+- Device-write audit [V]: grep of OpenOptions write(true)/dd/mkfs/sfdisk/fastboot in tfctl: only
+  boot.rs (MBR of slot::find_disk's signature-guarded disk), sysupdate.rs dd (same guard),
+  drm.rs (/dev/dri/card0), bench.rs (input device). touchfw opens the eMMC read-only.
+- PR #80 server auth matrix [V] (go test -race): `authmatrix_test.go` walks every registered
+  pattern (`api.Server.Patterns()`) with no token, a wrong token and the right one; `hardening_test.go`
+  covers the limits. Fixes: `/frame/{id}` no longer creates a frame for any id it is asked for
+  (unknown id renders the default, invalid id 404); `/alive` remembers only known frames; the pair
+  accept form and the beacon are capped at 4 KiB (413); config strings are bounded (text 256,
+  URL 2048, 32 tags; wrong JSON type 400); `store.ErrInvalidID` is a 400; SSE headers flush at
+  once; the HTTP server's BaseContext is cancelled on Shutdown. `TestWebSocketAuth` waits for the
+  hub to drop the frame before the TempDir cleanup (the "disconnected" event was still being written).
+- PR #82 tfctl fuzz [V] (`tfctl/src/fuzz.rs`, 20k iterations per target, `TFCTL_FUZZ_ITERS` /
+  `TFCTL_FUZZ_SEED`): json unpaired surrogate -> U+FFFD, nesting capped at 64, NaN/inf refused and
+  serialised as null; `Url::parse` takes `[v6]:port` and `host_header` brackets it; wifi signal
+  `unsigned_abs`; ws `Assembler` capped at 16 MiB; touchfw offsets with checked arithmetic.
+- PR #81 boot invariants [V in QEMU, see below]: U-Boot `boot.cmd` reads `uEnv.bak` when
+  `uEnv.txt` names no slot and any slot other than b boots a; `UEnv::load_effective` / `save` never
+  overwrite a good .bak with a slotless file; `TRIES` is asserted 2..9 at compile time; `rollback`
+  refuses when `/boot/zImage.<other>` is missing; the unconfirmed-slot reboot counts from
+  `/proc/uptime`; `slot::find_disk_in` skips any mmc whose sysfs `device/type` is `MMC` (the eMMC);
+  `tfctl boot fsck` symlinks `/dev/thinframe-data` (p4) and `/dev/thinframe-boot` (p1) from the
+  signed card and fstab mounts those (no `LABEL=` that could match the eMMC); inittab mounts sysfs
+  first. [U] that an SD card reports `device/type` as `SD` on the frame: check on hardware.
+- Release run 39840728043 (main 9520e9e) failed `image/build.sh test` [V, logs artifact
+  12454904987]: "provision.txt applied and deleted", "splash text and logo ... land on /data",
+  "tfctl status reads its IP from /proc". Serial log shows provisioning ran; the three checks
+  read `/etc/thinframe.conf` as `frame` over ssh and since 48f2d3b (chunk 3) the file was 0600
+  root. Fix PR #83: the token moves to `/data/etc/thinframe.token` (0600), the conf is 0644
+  again, a leftover `FRAME_TOKEN` line is moved out on the next save; `tfctl status` as `frame`
+  gets an empty token instead of an error. Docs: decisions.md, update-and-ssh.md.
+- QEMU journey on the #81 image (84fdfc6 = #81 + main at #79): 41 of 41 PASS [V]. Serial log:
+  `tfctl: boot: fsck: e2fsck -p /dev/vda4: exit 0` on every boot, `slot a, tries left 2` after
+  the update, `slot b, tries left 2` after the rollback, `slot a, tries left 0` once confirmed;
+  `/data` and `/boot` mounted through the card links. Screens in image/out/qemu/journey/.
+  Typing on the on-screen keyboard takes about 25 s per key under TCG; the join step needs
+  its 300 s.
+- armv7 tfctl with #79 to #82 merged: 981,868 bytes (18 KB under the limit). `cargo test` 167
+  passed; `go test -race ./...` clean; shellcheck clean.
+- Left for the owner (from the #81 review): no hardware watchdog, so a hung kernel needs a power
+  cycle; every shipped DTB disables the eMMC, so a release image without staged touch firmware
+  has no touch (docs/decisions.md says otherwise); no fallback when `/data` fails to mount; the
+  `uEnv.bak` path in U-Boot is covered by Rust tests only. [U] until tried on the frame.
