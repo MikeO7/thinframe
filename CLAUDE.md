@@ -21,8 +21,8 @@ If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the ga
 
 - **Never write the eMMC.** No `dd`, `sfdisk`, `mkfs` or `fastboot flash` to `/dev/mmcblk0`
   on the frame, ever. We boot from SD only. The frame must stay recoverable by removing the card.
-- Card writes happen only through `scripts/write-card-macos.sh`, which refuses any disk that is
-  not a removable card of 4 to 64 GB with no mounted system volume.
+- Card writes happen only through `scripts/flash.sh`, which refuses any disk that is not a
+  removable card of 4 to 64 GB with no mounted system volume.
 - No `sudo` on the Mac except inside the card writer.
 - Proprietary files (`gsl_m86_hd.fw`, Android dumps) never enter Git. `.gitignore` covers
   `image/vendor/`, `image/cache/`, `image/work/`, `image/out/`, `image/secrets/`.

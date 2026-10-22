@@ -144,7 +144,9 @@ pub fn inflate(data: &[u8], limit: usize) -> R<Vec<u8>> {
         buf: 0,
         n: 0,
     };
-    let mut out = Vec::new();
+    // Callers pass the exact expected size; reserving it avoids the doubling growth that
+    // would peak at twice the output.
+    let mut out = Vec::with_capacity(limit.min(1 << 24));
     loop {
         let last = b.get(1)?;
         match b.get(2)? {
@@ -236,6 +238,13 @@ fn paeth(a: u8, b: u8, c: u8) -> u8 {
     }
 }
 
+/// Largest image `decode` accepts: a full panel in either orientation (1280 x 1280 covers both).
+pub const MAX_PIXELS: usize = 1280 * 1280;
+const _: () = assert!(
+    1280 * 800 <= MAX_PIXELS,
+    "a full panel backdrop must decode"
+);
+
 pub fn decode(data: &[u8]) -> R<Image> {
     if data.len() < 8 || data[..8] != [0x89, b'P', b'N', b'G', 13, 10, 26, 10] {
         return Err(bad("not a png"));
@@ -262,6 +271,11 @@ pub fn decode(data: &[u8]) -> R<Image> {
     let (depth, ctype, interlace) = (h[8], h[9], h[12]);
     if depth != 8 || interlace != 0 || w == 0 || ht == 0 || w > 4096 || ht > 4096 {
         return Err(bad("unsupported: need 8-bit, non-interlaced, <=4096 px"));
+    }
+    // The header is 13 bytes and deflate reaches 1000:1, so a 48 KiB file can declare an image
+    // that costs 256 MB to decode. Nothing we draw is larger than the panel.
+    if w * ht > MAX_PIXELS {
+        return Err(bad("too large: more pixels than the panel"));
     }
     let bpp = match ctype {
         0 => 1,
@@ -516,6 +530,20 @@ mod tests {
                 0x7771e0fd, 0xebb07670, 0x33940bd5, 0xaa5f973d, 0x91d8619b
             ]
         );
+    }
+
+    #[test]
+    fn rejects_images_larger_than_the_panel() {
+        // A valid 2x2 RGB file with its IHDR width and height rewritten to 4000 x 4000: it is
+        // refused on the header alone, before any pixel memory is reserved.
+        let mut f = encode_rgb(2, 2, &[0; 4]);
+        f[16..20].copy_from_slice(&4000u32.to_be_bytes());
+        f[20..24].copy_from_slice(&4000u32.to_be_bytes());
+        let e = match decode(&f) {
+            Ok(_) => panic!("decoded a 4000x4000 header"),
+            Err(e) => e.to_string(),
+        };
+        assert!(e.contains("too large"), "{e}");
     }
 
     #[test]

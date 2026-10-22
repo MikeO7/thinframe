@@ -88,18 +88,29 @@ pub fn write_rootfs(src: &Path, dev: &Path, fsync: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// Mount PFBOOT read-write at /boot (remount if it is already there). No-op in tests.
-fn boot_rw(p: &Paths, disk: Option<&Path>) -> io::Result<()> {
+/// The card's whole-disk device, found by our MBR signature. Never the eMMC.
+fn card(p: &Paths) -> io::Result<PathBuf> {
+    let disks: Vec<&Path> = p.disks.iter().map(PathBuf::as_path).collect();
+    slot::find_disk(&disks).ok_or_else(|| {
+        io::Error::other("no disk with the thinframe MBR signature; refusing to write")
+    })
+}
+
+/// Mount PFBOOT read-write at /boot (remount if it is already there). When /boot is not
+/// mounted, the partition comes from `card`, so a guess can never land on the eMMC.
+/// No-op in tests.
+fn boot_rw(p: &Paths) -> io::Result<()> {
     if !p.is_real() {
         return Ok(());
     }
     if sh("mount", &["-o", "remount,rw", "/boot"]).is_ok() {
         return Ok(());
     }
-    let dev = disk
-        .map(|d| slot::part_n(d, 1).to_string_lossy().into_owned())
-        .unwrap_or_else(|| "/dev/mmcblk0p1".into());
-    sh("mount", &["-t", "vfat", "-o", "rw", &dev, "/boot"])
+    let dev = slot::part_n(&card(p)?, 1);
+    sh(
+        "mount",
+        &["-t", "vfat", "-o", "rw", &dev.to_string_lossy(), "/boot"],
+    )
 }
 
 fn boot_ro(p: &Paths) {
@@ -121,10 +132,7 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
         )));
     }
     let (file, sha) = arts.get("system")?;
-    let disks: Vec<&Path> = p.disks.iter().map(PathBuf::as_path).collect();
-    let disk = slot::find_disk(&disks).ok_or_else(|| {
-        io::Error::other("no disk with the thinframe MBR signature; refusing to write")
-    })?;
+    let disk = card(p)?;
     let standby = current.other();
     let dev = slot::part_dev(&disk, standby);
     fs::create_dir_all(p.tmp())?;
@@ -164,7 +172,7 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
             standby.name()
         );
         write_rootfs(&rootfs, &dev, p.is_real())?;
-        boot_rw(p, Some(&disk))?;
+        boot_rw(p)?;
         let res = (|| {
             fs::copy(&zimage, p.boot.join(format!("zImage.{}", standby.name())))?;
             let uenv = UEnv::load(&uenv_path(p)).unwrap_or_else(|_| UEnv::parse(""));
@@ -188,7 +196,7 @@ pub fn rollback(p: &Paths) -> io::Result<Slot> {
     let current =
         running_slot(p).ok_or_else(|| io::Error::other("cannot tell which slot is running"))?;
     let target = current.other();
-    boot_rw(p, None)?;
+    boot_rw(p)?;
     let res = UEnv::load(&uenv_path(p))
         .unwrap_or_else(|_| UEnv::parse(""))
         .save(&uenv_path(p), target, 0);
@@ -220,7 +228,7 @@ pub fn confirm_slot(p: &Paths) -> Option<(String, String)> {
     if uenv.tries == 0 || uenv.slot != Some(running) {
         return None;
     }
-    boot_rw(p, None).ok()?;
+    boot_rw(p).ok()?;
     let res = uenv.save(&uenv_path(p), running, 0);
     boot_ro(p);
     res.ok()?;
@@ -260,6 +268,16 @@ mod tests {
         fs::write(&p.disks[0], vec![0u8; 512]).unwrap(); // "eMMC": no signature
         fs::write(&p.disks[1], mbr).unwrap();
         p
+    }
+
+    /// Every /boot mount goes through `card`: with no signed disk it refuses, it never guesses mmcblk0.
+    #[test]
+    fn card_is_the_signed_disk_or_nothing() {
+        let p = fake_card(&tmp_base("card"));
+        assert_eq!(card(&p).unwrap(), p.disks[1]);
+        fs::write(&p.disks[1], vec![0u8; 512]).unwrap();
+        let err = card(&p).unwrap_err().to_string();
+        assert!(err.contains("refusing"), "{err}");
     }
 
     #[test]

@@ -289,7 +289,8 @@ mod linux {
         /// Copy a packed XRGB8888 canvas (width*height) into the pitched buffer.
         pub fn write(&mut self, px: &[u32]) {
             let w = self.mode_size.width as usize;
-            for (y, row) in px.chunks(w).enumerate() {
+            // chunks_exact: a short last row is skipped rather than read past the slice.
+            for (y, row) in px.chunks_exact(w).enumerate() {
                 let off = y * self.pitch as usize;
                 if off + w * 4 > self.size {
                     break;

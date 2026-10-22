@@ -106,6 +106,8 @@ fn request(
     body: Option<&str>,
     timeout: Duration,
 ) -> io::Result<Response> {
+    request_safe(&url.path)?;
+    request_safe(token)?;
     let mut s = connect(url, timeout)?;
     let mut req = format!(
         "{method} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: tfctl\r\n",
@@ -157,10 +159,22 @@ fn request(
 }
 
 /// Streaming GET into a file, hashing on the way: the body never sits in memory (a rootfs
+/// A value that goes into the request line or a header: the frame id (in the path), an
+/// artifact name, the token. A control character or a space would end the line or the field
+/// early and let a server-supplied name inject a header.
+fn request_safe(s: &str) -> io::Result<()> {
+    if s.bytes().any(|b| b <= b' ' || b == 0x7f) {
+        return Err(io::Error::other("control character or space in request"));
+    }
+    Ok(())
+}
+
 /// image is ~150 MB). Returns the body's SHA-256 hex. Non-200 is an error; a body shorter than
 /// Content-Length is an error. No Range resume yet (the server supports it; TODO when Wi-Fi
 /// drops prove to be a problem).
 pub fn download(url: &Url, token: &str, timeout: Duration, dest: &Path) -> io::Result<String> {
+    request_safe(&url.path)?;
+    request_safe(token)?;
     let mut s = connect(url, timeout)?;
     let mut req = format!(
         "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: tfctl\r\n",
@@ -223,6 +237,16 @@ pub fn download(url: &Url, token: &str, timeout: Duration, dest: &Path) -> io::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_values_reject_control_characters_and_spaces() {
+        assert!(request_safe("/api/frames/kitchen/config").is_ok());
+        assert!(request_safe("t0k3n").is_ok());
+        assert!(request_safe("").is_ok());
+        assert!(request_safe("a b").is_err());
+        assert!(request_safe("x\r\nX-Injected: y").is_err());
+        assert!(request_safe("\x7f").is_err());
+    }
 
     /// One-shot HTTP server on localhost for the download test.
     pub fn serve_once(response: Vec<u8>) -> Url {

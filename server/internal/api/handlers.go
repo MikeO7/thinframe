@@ -73,10 +73,17 @@ func (s *Server) handleGetFrame(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteFrame(w http.ResponseWriter, r *http.Request) {
-	if err := s.Store.Delete(r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	if err := s.Store.Delete(id); err != nil {
 		writeErr(w, err)
 		return
 	}
+	// The socket was authenticated against the record just removed; drop it and
+	// any open pairing request so the frame cannot carry on as if nothing happened.
+	s.Hub.Kick(id, "deleted")
+	s.mu.Lock()
+	delete(s.pair.open, id)
+	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 

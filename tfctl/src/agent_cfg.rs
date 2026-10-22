@@ -16,6 +16,9 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
+/// 48 KiB of PNG in base64 (4/3 ratio, padding and a trailing newline allowed).
+const MAX_LOGO_B64: usize = 48 * 1024 * 4 / 3 + 8;
+
 impl Agent {
     pub(crate) fn persist(&self, kv: &[(&str, &str)]) {
         if let Err(e) = config::save_overrides(&self.conf_path, kv) {
@@ -123,7 +126,12 @@ impl Agent {
     }
 
     /// Decode, check it is a PNG we can draw, and write `<data>/splash.png` if it changed.
+    /// The server refuses a `splash_png` over 48 KiB; a frame refuses the same before decoding.
     fn store_logo(&self, b64: &str) -> io::Result<()> {
+        // The server caps splash_png at 48 KiB; refuse anything past that before decoding.
+        if b64.len() > MAX_LOGO_B64 {
+            return Err(io::Error::other("splash_png larger than 48 KiB"));
+        }
         let bytes = b64::decode(b64).ok_or_else(|| io::Error::other("not base64"))?;
         png::decode(&bytes).map_err(|e| io::Error::other(format!("not a usable PNG: {e}")))?;
         let path = self.paths.data.join("splash.png");
@@ -261,6 +269,11 @@ impl Agent {
                     Err(e) => self.event("software-update-failed", &format!("{want}: {e}")),
                 }
             }
+        }
+        if self.exit {
+            // The process restarts in a moment; a system update started now would be
+            // orphaned mid-dd and started again by the new binary.
+            return;
         }
         let want = self.system_version.clone();
         if let Some(have) = sysupdate::system_version(&self.paths) {
