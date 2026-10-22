@@ -137,9 +137,10 @@ pub fn parse(text: &str) -> Config {
         .split_whitespace()
         .map(String::from)
         .collect();
-    if let Some(v) = kv.get("COG_ROTATION") {
-        // Quarter turns: 0..3, like provision.txt and the server config are held to.
-        cfg.rotation = v.parse().ok().filter(|r| *r < 4).unwrap_or(cfg.rotation);
+    if let Some(r) = kv.get("COG_ROTATION").and_then(|v| v.parse::<u8>().ok()) {
+        if r < 4 {
+            cfg.rotation = r;
+        }
     }
     if let Some(v) = kv.get("HEALTH_INTERVAL_S") {
         cfg.health_interval_s = v.parse().unwrap_or(cfg.health_interval_s);
@@ -159,7 +160,7 @@ pub fn parse_rgb(s: &str) -> Option<u32> {
 /// ones that were missing, drop duplicates of a rewritten key. Atomic via rename next to the
 /// real file: on the frame /etc/thinframe.conf is a symlink into /data (the root is read-only).
 pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
-    let real = fs::canonicalize(path).unwrap_or_else(|_| path.into());
+    let real = resolve_target(Path::new(path));
     let path = real.to_str().unwrap_or(path);
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
@@ -169,6 +170,24 @@ pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
     let tmp = format!("{path}.tmp");
     write_private(Path::new(&tmp), apply_overrides(&text, kv).as_bytes())?;
     fs::rename(&tmp, path)
+}
+
+/// Where a write to `path` lands: the symlink target, followed even when it does not exist yet
+/// (a fresh data partition: `/etc/thinframe.conf` on the read-only root points at a file that
+/// `canonicalize` cannot see, and the temp file would land in `/etc`, EROFS).
+fn resolve_target(path: &Path) -> std::path::PathBuf {
+    if let Ok(real) = fs::canonicalize(path) {
+        return real;
+    }
+    let mut cur = path.to_path_buf();
+    for _ in 0..8 {
+        match fs::read_link(&cur) {
+            Ok(t) if t.is_absolute() => cur = t,
+            Ok(t) => cur = cur.parent().unwrap_or(Path::new("/")).join(t),
+            Err(_) => break,
+        }
+    }
+    cur
 }
 
 /// Write a file that may hold a secret (the token, a Wi-Fi passphrase): created mode 0600
@@ -277,6 +296,40 @@ mod tests {
         assert_eq!(load(link.to_str().unwrap()).unwrap().frame_id, "b");
         assert!(!dir.join("etc/thinframe.conf.tmp").exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_overrides_follows_a_symlink_to_a_missing_target() {
+        let dir = std::env::temp_dir().join(format!("tfctl-cfg-dangling-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("data/etc")).unwrap();
+        fs::create_dir_all(dir.join("etc")).unwrap();
+        let real = dir.join("data/etc/thinframe.conf");
+        let link = dir.join("etc/thinframe.conf");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        // Relative link one level further, like `ln -s ../data/etc/thinframe.conf`.
+        let rel = dir.join("etc/rel.conf");
+        std::os::unix::fs::symlink("../data/etc/thinframe.conf", &rel).unwrap();
+        save_overrides(rel.to_str().unwrap(), &[("FRAME_ID", "k")]).unwrap();
+        assert!(
+            real.is_file(),
+            "written at the target, not next to the link"
+        );
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!dir.join("etc/rel.conf.tmp").exists());
+        assert_eq!(load(link.to_str().unwrap()).unwrap().frame_id, "k");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn rotation_outside_0_to_3_is_ignored() {
+        assert_eq!(parse("COG_ROTATION=7\n").rotation, 3);
+        assert_eq!(parse("COG_ROTATION=x\n").rotation, 3);
+        assert_eq!(parse("COG_ROTATION=2\n").rotation, 2);
     }
 
     #[test]

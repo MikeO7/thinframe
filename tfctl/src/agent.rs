@@ -453,7 +453,7 @@ impl Agent {
             set_clock(t);
         }
         if let Some(tz) = v.field_string("tz") {
-            if !tz.is_empty() && !tz.contains("..") && tz != self.cfg.tz {
+            if valid_tz(&tz) && tz != self.cfg.tz {
                 std::env::set_var("TZ", &tz);
                 let zi = format!("/usr/share/zoneinfo/{tz}");
                 if std::path::Path::new(&zi).is_file() {
@@ -466,8 +466,28 @@ impl Agent {
     }
 }
 
+/// A zone name (`Europe/Berlin`) or POSIX TZ string (`CET-1CEST,M3.5.0,M10.5.0/3`) as it goes
+/// into `TZ`, the config file and the `/usr/share/zoneinfo/` path: printable ASCII from a small
+/// set, no `..`, not absolute, at most 64 bytes.
+pub fn valid_tz(tz: &str) -> bool {
+    !tz.is_empty()
+        && tz.len() <= 64
+        && !tz.starts_with('/')
+        && !tz.contains("..")
+        && tz
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"/_+-,.:<>".contains(&b))
+}
+
+/// Seconds since the epoch at 2024-01-01: a hello with an earlier time is not a clock.
+const CLOCK_MIN: i64 = 1_704_067_200;
+
 /// `date -s @N` (busybox); only when off by more than 2 s. No NTP on the frame.
 fn set_clock(t: i64) {
+    if t < CLOCK_MIN {
+        eprintln!("tfctl: agent: ignoring time_unix {t}");
+        return;
+    }
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -502,6 +522,31 @@ mod tests {
         // Too early after start, or the server answered recently.
         assert!(!should_reboot_unconfirmed(2, true, T - 1, T - 1));
         assert!(!should_reboot_unconfirmed(2, true, T * 10, T - 1));
+    }
+
+    #[test]
+    fn tz_values_are_zone_names_or_posix_strings() {
+        for ok in [
+            "UTC",
+            "Europe/Berlin",
+            "America/Argentina/Buenos_Aires",
+            "Etc/GMT+3",
+            "CET-1CEST,M3.5.0,M10.5.0/3",
+            "<+07>-7",
+        ] {
+            assert!(valid_tz(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "/etc/passwd",
+            "../../etc/passwd",
+            "Europe/Berlin\n",
+            "a b",
+            "x;y",
+            &"a".repeat(65),
+        ] {
+            assert!(!valid_tz(bad), "{bad:?}");
+        }
     }
 
     #[test]
