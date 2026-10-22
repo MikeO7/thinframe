@@ -264,7 +264,7 @@ pub struct Iwctl;
 const JOIN_TIMEOUT: Duration = Duration::from_secs(40);
 
 /// Run `iwctl args`, killing it after `limit`; (success, stdout + stderr).
-fn iwctl(args: &[&str], limit: Duration) -> io::Result<(bool, String)> {
+pub fn iwctl(args: &[&str], limit: Duration) -> io::Result<(bool, String)> {
     let mut child = Command::new("iwctl")
         .args(args)
         .stdin(Stdio::null())

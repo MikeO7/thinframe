@@ -462,7 +462,7 @@ impl Agent {
             // symlink into /usr/share/zoneinfo, so a copy onto it would overwrite a zone file.
             // musl reads zone names in TZ from /usr/share/zoneinfo; `main` sets TZ from the
             // config at start, so the zone holds across reboots before the first hello.
-            if !tz.is_empty() && !tz.contains("..") {
+            if valid_tz(&tz) {
                 if std::env::var("TZ").ok().as_deref() != Some(tz.as_str()) {
                     std::env::set_var("TZ", &tz);
                 }
@@ -481,8 +481,28 @@ pub fn uptime_s(text: &str) -> Option<u64> {
     first.split('.').next()?.parse().ok()
 }
 
+/// A zone name (`Europe/Berlin`) or POSIX TZ string (`CET-1CEST,M3.5.0,M10.5.0/3`) as it goes
+/// into `TZ`, the config file and the `/usr/share/zoneinfo/` path: printable ASCII from a small
+/// set, no `..`, not absolute, at most 64 bytes.
+pub fn valid_tz(tz: &str) -> bool {
+    !tz.is_empty()
+        && tz.len() <= 64
+        && !tz.starts_with('/')
+        && !tz.contains("..")
+        && tz
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"/_+-,.:<>".contains(&b))
+}
+
+/// Seconds since the epoch at 2024-01-01: a hello with an earlier time is not a clock.
+const CLOCK_MIN: i64 = 1_704_067_200;
+
 /// `date -s @N` (busybox); only when off by more than 2 s. No NTP on the frame.
 fn set_clock(t: i64) {
+    if t < CLOCK_MIN {
+        eprintln!("tfctl: agent: ignoring time_unix {t}");
+        return;
+    }
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -525,6 +545,31 @@ mod tests {
         assert_eq!(uptime_s("700 1"), Some(700));
         assert_eq!(uptime_s(""), None);
         assert_eq!(uptime_s("x.1 2"), None);
+    }
+
+    #[test]
+    fn tz_values_are_zone_names_or_posix_strings() {
+        for ok in [
+            "UTC",
+            "Europe/Berlin",
+            "America/Argentina/Buenos_Aires",
+            "Etc/GMT+3",
+            "CET-1CEST,M3.5.0,M10.5.0/3",
+            "<+07>-7",
+        ] {
+            assert!(valid_tz(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "/etc/passwd",
+            "../../etc/passwd",
+            "Europe/Berlin\n",
+            "a b",
+            "x;y",
+            &"a".repeat(65),
+        ] {
+            assert!(!valid_tz(bad), "{bad:?}");
+        }
     }
 
     #[test]

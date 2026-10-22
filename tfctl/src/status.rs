@@ -4,7 +4,6 @@ use crate::config::Config;
 use crate::json::Value;
 use std::fs;
 use std::io;
-use std::process::Command;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -28,13 +27,6 @@ fn read(path: &str) -> Option<String> {
     fs::read_to_string(path).ok()
 }
 
-fn spawn(cmd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(cmd).args(args).output().ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
 pub fn collect() -> Status {
     let mut st = Status {
         uptime_s: read("/proc/uptime").and_then(|t| parse_uptime(&t)),
@@ -44,7 +36,14 @@ pub fn collect() -> Status {
         temp_c: read("/sys/class/thermal/thermal_zone0/temp")
             .and_then(|t| t.trim().parse::<f64>().ok())
             .map(|m| m / 1000.0),
-        wifi_rssi: spawn("iwctl", &["station", "wlan0", "show"]).and_then(|o| parse_rssi(&o)),
+        // Bounded: a wedged iwd must not hang the heartbeat (this runs on the agent thread).
+        wifi_rssi: crate::wifi::iwctl(
+            &["station", crate::wifi::STATION, "show"],
+            std::time::Duration::from_secs(5),
+        )
+        .ok()
+        .filter(|(ok, _)| *ok)
+        .and_then(|(_, o)| parse_rssi(&o)),
         cog_pid: find_pid("cog"),
         ..Status::default()
     };

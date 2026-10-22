@@ -97,7 +97,7 @@ fn main() -> ExitCode {
     };
     // The zone the server last sent (agent on_hello), for this process and everything it
     // starts (busybox date for the clock, cog). Still one thread here, so set_var is sound.
-    if !cfg.tz.is_empty() && !cfg.tz.contains("..") && env::var_os("TZ").is_none() {
+    if agent::valid_tz(&cfg.tz) && env::var_os("TZ").is_none() {
         env::set_var("TZ", &cfg.tz);
     }
     let result = match args.first().map(String::as_str) {
