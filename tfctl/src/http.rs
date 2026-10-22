@@ -238,6 +238,16 @@ pub fn download(url: &Url, token: &str, timeout: Duration, dest: &Path) -> io::R
 mod tests {
     use super::*;
 
+    #[test]
+    fn request_values_reject_control_characters_and_spaces() {
+        assert!(request_safe("/api/frames/kitchen/config").is_ok());
+        assert!(request_safe("t0k3n").is_ok());
+        assert!(request_safe("").is_ok());
+        assert!(request_safe("a b").is_err());
+        assert!(request_safe("x\r\nX-Injected: y").is_err());
+        assert!(request_safe("\x7f").is_err());
+    }
+
     /// One-shot HTTP server on localhost for the download test.
     pub fn serve_once(response: Vec<u8>) -> Url {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
