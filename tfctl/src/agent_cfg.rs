@@ -167,6 +167,10 @@ impl Agent {
                 }
             }
             "update-software" => {
+                // The respawn that follows would orphan the system update mid-dd.
+                if self.busy.load(Ordering::SeqCst) {
+                    return Err(io::Error::other("a system update is already running"));
+                }
                 let ver = self.want(v, &self.software_version)?;
                 update::software(&self.cfg, &self.artifacts, &ver, &self.paths)?;
                 self.exit = true;
@@ -261,7 +265,21 @@ impl Agent {
     pub(crate) fn maybe_auto_update(&mut self) {
         let want = self.software_version.clone();
         if let Some(have) = update::installed_version(&self.paths) {
-            if !want.is_empty() && have != want && !self.tried.contains(&want) {
+            // Rolled back after crashing at start (update.rs): installing it again by itself
+            // would crash and roll back forever. The `update-software` action still can.
+            let failed = update::failed_version(&self.paths).as_deref() == Some(&want);
+            if failed && have != want && !self.tried.contains(&want) {
+                self.tried.push(want.clone());
+                self.event(
+                    "software-update-skipped",
+                    &format!("{want} crashed at start and was rolled back; not retrying"),
+                );
+            }
+            if !want.is_empty()
+                && have != want
+                && !self.tried.contains(&want)
+                && !self.busy.load(Ordering::SeqCst)
+            {
                 self.tried.push(want.clone());
                 eprintln!("tfctl: agent: software {have} -> {want}");
                 match update::software(&self.cfg, &self.artifacts, &want, &self.paths) {
@@ -536,6 +554,43 @@ mod tests {
         a.maybe_auto_update();
         let n = a.events.lock().unwrap().len();
         assert_eq!(n, ev.len());
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn update_software_refused_while_a_system_update_runs() {
+        let (mut a, _rx, _) = agent("busy");
+        a.busy.store(true, Ordering::SeqCst);
+        let e = a
+            .action(
+                "update-software",
+                &json::parse(r#"{"version":"x"}"#).unwrap(),
+            )
+            .unwrap_err();
+        assert!(e.to_string().contains("already running"), "{e}");
+        assert!(!a.exit);
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn rolled_back_software_version_is_not_reinstalled() {
+        let (mut a, _rx, _) = agent("swfailed");
+        let base = std::env::temp_dir().join(format!("tfctl-swf-{}", std::process::id()));
+        a.paths = update::Paths::under(&base);
+        std::fs::create_dir_all(base.join("root/etc")).unwrap();
+        std::fs::create_dir_all(base.join("data")).unwrap();
+        std::fs::write(base.join("root/etc/thinframe.version"), "1.0\n").unwrap();
+        std::fs::write(base.join("data/software-failed"), "2.0\n").unwrap();
+        a.cfg.server_url = "http://127.0.0.1:1".into();
+        a.apply_config(&json::parse(r#"{"software_version":"2.0"}"#).unwrap());
+        a.maybe_auto_update();
+        assert!(!a.exit);
+        let ev = a.events.lock().unwrap().clone();
+        assert_eq!(ev.len(), 1, "{ev:?}");
+        assert_eq!(ev[0].0, "software-update-skipped");
+        a.maybe_auto_update();
+        assert_eq!(a.events.lock().unwrap().len(), 1, "reported once");
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_file(&a.conf_path);
     }

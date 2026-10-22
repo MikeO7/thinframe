@@ -11,7 +11,7 @@ use crate::http::{self, Url};
 use crate::json::{self, Value};
 use crate::kiosk::{KioskCmd, SCREEN_ON};
 use crate::update::{self, Artifacts, Paths};
-use crate::{status, sys, sysupdate, ws};
+use crate::{slot, status, sys, sysupdate, ws};
 use std::io;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,6 +26,24 @@ const PING: Duration = Duration::from_secs(30);
 const DEAD: Duration = Duration::from_secs(90);
 const FALLBACK_AFTER: u32 = 3;
 const STABLE_SESSION: Duration = Duration::from_secs(30);
+/// A slot U-Boot still counts tries for that has not reached the server this long after the
+/// agent started is rebooted, so U-Boot spends a try (and falls back) without a power cycle.
+pub const UNCONFIRMED_REBOOT_S: u64 = 10 * 60;
+
+/// Reboot only while uEnv names the running slot with tries left (tries=0 is a confirmed slot;
+/// another slot means U-Boot already fell back), and only once both the process and the last
+/// server contact (or the start, with none) are `UNCONFIRMED_REBOOT_S` old.
+pub fn should_reboot_unconfirmed(
+    tries: u32,
+    slot_is_running: bool,
+    secs_since_start: u64,
+    secs_since_last_contact: u64,
+) -> bool {
+    tries > 0
+        && slot_is_running
+        && secs_since_start >= UNCONFIRMED_REBOOT_S
+        && secs_since_last_contact >= UNCONFIRMED_REBOOT_S
+}
 
 pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
     serve(Agent::new(cfg, kiosk, &cfg.path)?)
@@ -38,6 +56,7 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
         if sys::term_requested() {
             return Ok(());
         }
+        a.maybe_reboot_unconfirmed();
         // Wi-Fi first, then pairing, then the server (TASK 17).
         if a.needs_wifi() {
             thread::sleep(a.wifi_step());
@@ -113,6 +132,10 @@ pub struct Agent {
     pub(crate) wifi_down_since: Option<Instant>,
     pub(crate) wifi_setup: bool,
     pub(crate) wifi_page_up: bool,
+    /// Process start and the last answer from the server, for `maybe_reboot_unconfirmed`.
+    pub(crate) started: Instant,
+    pub(crate) last_contact: Option<Instant>,
+    pub(crate) reboot_requested: bool,
 }
 
 impl Agent {
@@ -145,6 +168,9 @@ impl Agent {
             wifi_down_since: None,
             wifi_setup: false,
             wifi_page_up: false,
+            started: Instant::now(),
+            last_contact: None,
+            reboot_requested: false,
         })
     }
 
@@ -165,6 +191,38 @@ impl Agent {
         for (k, t) in found {
             self.event(&k, &t);
         }
+    }
+
+    /// A new slot that never reaches the server is never confirmed; without this it would keep
+    /// running until two more power cycles. Real frame only.
+    fn maybe_reboot_unconfirmed(&mut self) {
+        if !self.paths.is_real() || self.reboot_requested {
+            return;
+        }
+        let since_start = self.started.elapsed().as_secs();
+        let since_contact = self
+            .last_contact
+            .map_or(since_start, |t| t.elapsed().as_secs());
+        if since_start < UNCONFIRMED_REBOOT_S || since_contact < UNCONFIRMED_REBOOT_S {
+            return;
+        }
+        let Ok(uenv) = slot::UEnv::load(&sysupdate::uenv_path(&self.paths)) else {
+            return;
+        };
+        let running = sysupdate::running_slot(&self.paths);
+        let is_running = running.is_some() && uenv.slot == running;
+        if !should_reboot_unconfirmed(uenv.tries, is_running, since_start, since_contact) {
+            return;
+        }
+        self.reboot_requested = true;
+        let text = format!(
+            "slot {} not confirmed (tries={}) and no server contact for {since_contact} s; rebooting",
+            running.map_or("?", |s| s.name()),
+            uenv.tries
+        );
+        eprintln!("tfctl: agent: {text}");
+        update::queue_event(&self.paths, "slot-unconfirmed-reboot", &text);
+        sysupdate::reboot_soon();
     }
 
     fn flush_events(&self, c: &mut ws::Client) -> io::Result<()> {
@@ -202,6 +260,7 @@ impl Agent {
 
     pub(crate) fn server_ok(&mut self) {
         self.failures = 0;
+        self.last_contact = Some(Instant::now());
         if self.on_fallback {
             self.on_fallback = false;
             eprintln!("tfctl: agent: server answered, showing the dashboard");
@@ -423,5 +482,45 @@ fn set_clock(t: i64) {
             String::from_utf8_lossy(&o.stderr).trim()
         ),
         Err(e) => eprintln!("tfctl: agent: date -s: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const T: u64 = UNCONFIRMED_REBOOT_S;
+
+    #[test]
+    fn reboots_only_an_unconfirmed_running_slot_after_the_timeout() {
+        assert!(should_reboot_unconfirmed(2, true, T, T));
+        assert!(should_reboot_unconfirmed(1, true, T + 500, T + 1));
+        // Confirmed slot: never.
+        assert!(!should_reboot_unconfirmed(0, true, T * 10, T * 10));
+        // uEnv names the other slot: U-Boot already fell back, leave it alone.
+        assert!(!should_reboot_unconfirmed(2, false, T * 10, T * 10));
+        // Too early after start, or the server answered recently.
+        assert!(!should_reboot_unconfirmed(2, true, T - 1, T - 1));
+        assert!(!should_reboot_unconfirmed(2, true, T * 10, T - 1));
+    }
+
+    #[test]
+    fn test_paths_never_reboot() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let cfg = crate::config::parse("SERVER_URL=http://nas:8080\nFRAME_ID=k\n");
+        let mut a = Agent::new(&cfg, tx, "/dev/null").unwrap();
+        let base = update::tests::tmp_base("unconf");
+        a.paths = Paths::under(&base);
+        std::fs::create_dir_all(&a.paths.boot).unwrap();
+        std::fs::write(&a.paths.cmdline, "root=PARTUUID=50463037-03").unwrap();
+        std::fs::write(sysupdate::uenv_path(&a.paths), "slot=b\ntries=2\n").unwrap();
+        // A CI box that booted less than 20 min ago cannot go back that far; the check holds anyway.
+        if let Some(t) = Instant::now().checked_sub(Duration::from_secs(T * 2)) {
+            a.started = t;
+        }
+        a.maybe_reboot_unconfirmed();
+        assert!(!a.reboot_requested);
+        assert!(update::drain_events(&a.paths).is_empty());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

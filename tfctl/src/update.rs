@@ -201,6 +201,9 @@ pub fn software(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io:
     res.and(ro)
 }
 
+/// Order matters: the overlay is extracted first, while the old binary still runs, so a failed
+/// `tar` leaves the known-good binary and no marker. Then the binary is swapped and the version
+/// file and marker written; if any of that fails, the old binary and version are put back.
 fn install(p: &Paths, new_bin: &Path, overlay: Option<&Path>, version: &str) -> io::Result<()> {
     let bin = p.binary();
     fs::create_dir_all(bin.parent().unwrap())?;
@@ -208,35 +211,77 @@ fn install(p: &Paths, new_bin: &Path, overlay: Option<&Path>, version: &str) -> 
     let staged = bin.with_extension("new");
     fs::copy(new_bin, &staged)?;
     fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
-    let prev = bin.with_extension("prev");
-    if bin.exists() {
-        fs::rename(&bin, &prev)?;
-    }
-    fs::rename(&staged, &bin)?;
     if let Some(tgz) = overlay {
-        let mut args = vec![
-            "-xzf",
-            tgz.to_str().unwrap(),
-            "-C",
-            p.root.to_str().unwrap(),
-        ];
-        let ex: Vec<String> = OVERLAY_EXCLUDES
-            .iter()
-            .flat_map(|e| [format!("--exclude={e}"), format!("--exclude=./{e}")])
-            .collect();
-        args.extend(ex.iter().map(String::as_str));
-        sh("tar", &args)?;
+        if let Err(e) = extract_overlay(p, tgz) {
+            let _ = fs::remove_file(&staged);
+            return Err(e);
+        }
     }
     fs::create_dir_all(p.version_file().parent().unwrap())?;
-    fs::write(p.version_file(), format!("{version}\n"))?;
-    fs::create_dir_all(&p.data)?;
-    fs::write(p.marker(), format!("{version}\n"))?;
+    let ver_prev = version_prev(p);
+    if p.version_file().is_file() {
+        fs::copy(p.version_file(), &ver_prev)?;
+    } else {
+        let _ = fs::remove_file(&ver_prev);
+    }
+    let prev = bin.with_extension("prev");
+    let had_bin = bin.exists();
+    if had_bin {
+        fs::rename(&bin, &prev)?;
+    }
+    let res = (|| {
+        fs::rename(&staged, &bin)?;
+        fs::write(p.version_file(), format!("{version}\n"))?;
+        fs::create_dir_all(&p.data)?;
+        fs::write(p.marker(), format!("{version}\n"))
+    })();
+    if let Err(e) = res {
+        let _ = fs::remove_file(p.marker());
+        let _ = fs::remove_file(&staged);
+        if had_bin {
+            let _ = fs::rename(&prev, &bin);
+        }
+        if ver_prev.is_file() {
+            let _ = fs::rename(&ver_prev, p.version_file());
+        }
+        return Err(e);
+    }
     let _ = fs::remove_file(new_bin);
     if let Some(tgz) = overlay {
         let _ = fs::remove_file(tgz);
     }
     eprintln!("tfctl: update: software {version} installed, restarting");
     Ok(())
+}
+
+fn extract_overlay(p: &Paths, tgz: &Path) -> io::Result<()> {
+    let mut args = vec![
+        "-xzf",
+        tgz.to_str().unwrap(),
+        "-C",
+        p.root.to_str().unwrap(),
+    ];
+    let ex: Vec<String> = OVERLAY_EXCLUDES
+        .iter()
+        .flat_map(|e| [format!("--exclude={e}"), format!("--exclude=./{e}")])
+        .collect();
+    args.extend(ex.iter().map(String::as_str));
+    sh("tar", &args)
+}
+
+/// `etc/thinframe.version.prev`: the version `tfctl.prev` carries, restored with it.
+fn version_prev(p: &Paths) -> PathBuf {
+    p.version_file().with_extension("version.prev")
+}
+
+/// Version a crash-loop rollback took out (`/data/thinframe/software-failed`). The automatic
+/// path does not install it again, or a binary that crashes at start would be downloaded and
+/// rolled back forever. The `update-software` action still can.
+pub fn failed_version(p: &Paths) -> Option<String> {
+    fs::read_to_string(p.data.join("software-failed"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 #[derive(Debug, PartialEq)]
@@ -279,6 +324,7 @@ pub fn record_start_at(p: &Paths, now: u64) -> StartCheck {
             match swap_back(p) {
                 Ok(()) => {
                     let _ = fs::remove_file(p.marker());
+                    let _ = fs::write(p.data.join("software-failed"), format!("{ver}\n"));
                     queue_event(
                         p,
                         "software-rollback",
@@ -306,6 +352,11 @@ fn swap_back(p: &Paths) -> io::Result<()> {
     }
     remount_root(p, true)?;
     let res = fs::rename(&bin, bin.with_extension("bad")).and_then(|_| fs::rename(&prev, &bin));
+    // The version file goes back with the binary, so heartbeats report what runs and the
+    // agent sees the server's version as not installed.
+    if res.is_ok() && version_prev(p).is_file() {
+        let _ = fs::rename(version_prev(p), p.version_file());
+    }
     sync_disks();
     remount_root(p, false)?;
     res
@@ -547,6 +598,72 @@ pub(crate) mod tests {
         assert!(drain_events(&p).is_empty());
         let log = fs::read_to_string(p.data.join("starts")).unwrap();
         assert_eq!(log.lines().count(), 6);
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    fn old_install(base: &Path) -> Paths {
+        let p = Paths::under(base);
+        fs::create_dir_all(p.root.join("usr/bin")).unwrap();
+        fs::create_dir_all(p.root.join("etc")).unwrap();
+        fs::create_dir_all(p.tmp()).unwrap();
+        fs::write(p.binary(), b"old binary").unwrap();
+        fs::write(p.binary().with_extension("prev"), b"older binary").unwrap();
+        fs::write(p.version_file(), "1.0\n").unwrap();
+        fs::write(p.tmp().join("tfctl.new"), b"new binary").unwrap();
+        p
+    }
+
+    #[test]
+    fn failed_overlay_leaves_old_binary_and_no_marker() {
+        let base = tmp_base("badtar");
+        let p = old_install(&base);
+        let tgz = p.tmp().join("overlay.tar.gz");
+        fs::write(&tgz, b"not a tarball").unwrap();
+        let e = install(&p, &p.tmp().join("tfctl.new"), Some(&tgz), "2.0").unwrap_err();
+        assert!(e.to_string().contains("tar"), "{e}");
+        assert_eq!(fs::read(p.binary()).unwrap(), b"old binary");
+        assert_eq!(
+            fs::read(p.binary().with_extension("prev")).unwrap(),
+            b"older binary",
+            "known-good prev kept"
+        );
+        assert!(!p.binary().with_extension("new").exists());
+        assert!(!p.marker().exists());
+        assert_eq!(installed_version(&p).unwrap(), "1.0");
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn failure_after_the_swap_puts_the_old_binary_back() {
+        let base = tmp_base("postswap");
+        let p = old_install(&base);
+        // A directory where the marker goes: the last write fails after the swap.
+        fs::create_dir_all(p.marker()).unwrap();
+        assert!(install(&p, &p.tmp().join("tfctl.new"), None, "2.0").is_err());
+        assert_eq!(fs::read(p.binary()).unwrap(), b"old binary");
+        assert_eq!(installed_version(&p).unwrap(), "1.0");
+        assert!(!p.binary().with_extension("new").exists());
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn rollback_restores_the_version_file() {
+        let base = tmp_base("rbver");
+        let p = old_install(&base);
+        install(&p, &p.tmp().join("tfctl.new"), None, "2.0").unwrap();
+        assert_eq!(installed_version(&p).unwrap(), "2.0");
+        assert_eq!(fs::read_to_string(version_prev(&p)).unwrap(), "1.0\n");
+        assert_eq!(failed_version(&p), None);
+        assert_eq!(record_start_at(&p, 100), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, 110), StartCheck::Normal);
+        assert_eq!(
+            record_start_at(&p, 120),
+            StartCheck::RolledBack("2.0".into())
+        );
+        assert_eq!(fs::read(p.binary()).unwrap(), b"old binary");
+        assert_eq!(installed_version(&p).unwrap(), "1.0");
+        assert!(!version_prev(&p).exists());
+        assert_eq!(failed_version(&p).as_deref(), Some("2.0"));
         fs::remove_dir_all(&base).unwrap();
     }
 
