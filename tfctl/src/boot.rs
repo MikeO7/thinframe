@@ -194,14 +194,17 @@ fn grow_data() -> io::Result<()> {
     let f = fs::OpenOptions::new().read(true).write(true).open(&disk)?;
     let mut mbr = [0u8; 512];
     f.read_exact_at(&mut mbr, 0)?;
+    let p4 = slot::part_n(&disk, 4);
     let Some(len) = p4_new_len(&mbr, sectors) else {
-        return Ok(()); // already fills the card
+        // The table already fills the card. The file system may still be short of it: a boot
+        // that wrote the table and then lost power (or failed the ioctl) before resize2fs ran.
+        // Online resize2fs with nothing to do is a few ms and exit 0, so it runs every boot.
+        return sh("resize2fs", &[&p4.to_string_lossy()]);
     };
     let start = u32::from_le_bytes([mbr[P4 + 8], mbr[P4 + 9], mbr[P4 + 10], mbr[P4 + 11]]);
     f.write_all_at(&p4_entry(&mbr, len), P4 as u64)?;
     f.sync_all()?;
     blkpg_resize(&f, start as u64, len as u64)?;
-    let p4 = slot::part_n(&disk, 4);
     sh("resize2fs", &[&p4.to_string_lossy()])?;
     eprintln!("tfctl: boot: data partition now {} MiB", len as u64 / 2048);
     Ok(())

@@ -158,7 +158,6 @@ fn request(
     })
 }
 
-/// Streaming GET into a file, hashing on the way: the body never sits in memory (a rootfs
 /// A value that goes into the request line or a header: the frame id (in the path), an
 /// artifact name, the token. A control character or a space would end the line or the field
 /// early and let a server-supplied name inject a header.
@@ -169,6 +168,7 @@ fn request_safe(s: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// Streaming GET into a file, hashing on the way: the body never sits in memory (a rootfs
 /// image is ~150 MB). Returns the body's SHA-256 hex. Non-200 is an error; a body shorter than
 /// Content-Length is an error. No Range resume yet (the server supports it; TODO when Wi-Fi
 /// drops prove to be a problem).
