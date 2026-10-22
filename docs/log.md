@@ -412,3 +412,10 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   collector moves single readings by about 50 MB.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
+
+## 2026-10-22 Audit chunk 3: secret files on the frame
+- `/data/etc/thinframe.conf` (holds `FRAME_TOKEN`) was written with the umask mode, 0644, and the
+  iwd profile (the passphrase) was 0644 until the chmod after the write. Both now go through
+  `config::write_private`: created 0600 before the first byte, `sync_all` before the rename.
+  `save_overrides_creates_file` asserts the mode [V].
+- `cargo test`: 117 passed. clippy clean.
