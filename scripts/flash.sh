@@ -30,13 +30,15 @@ list_cards() {
 	local name size rm model mnt sys='^(/|/System(/.*)?|/private/var/vm|/boot.*|/home|/usr|/var)$'
 	if [ "$(uname)" = Darwin ]; then
 		for name in $(diskutil list external physical | awk '/^\/dev\/disk/ {sub("/dev/",""); print $1}'); do
-			size=$(diskutil info "$name" | awk -F'[()]' '/Disk Size/ {split($2,a," "); print a[1]; exit}')
-			rm=$(diskutil info "$name" | grep -qE 'Removable Media: +(Removable|Yes)' && echo 1 || echo 0)
+			# every reader drains its pipe: an early exit (awk exit, grep -q) breaks the writer's
+			# pipe and pipefail then empties the whole listing
+			size=$(diskutil info "$name" | awk -F'[()]' '/Disk Size/ && !s {split($2,a," "); s=a[1]} END {print s+0}')
+			rm=$(diskutil info "$name" | awk '/Removable Media: +(Removable|Yes)/ {r=1} END {print r+0}')
 			card_ok "${size:-0}" "$rm" || continue
 			# a disk the Mac booted from, or that holds a system volume, is never a card
 			mnt=$(mount | awk -v d="/dev/${name}s" 'index($1, d) == 1 {print $3}' | grep -E "$sys" || true)
 			[ -z "$mnt" ] || continue
-			printf '%s\t%s\t%s\n' "$name" "$size" "$(diskutil info "$name" | awk -F': +' '/Media Name/ {print $2; exit}')"
+			printf '%s\t%s\t%s\n' "$name" "$size" "$(diskutil info "$name" | awk -F': +' '/Media Name/ && !m {m=$2} END {print m}')"
 		done
 	else
 		while read -r name size rm model; do
@@ -67,7 +69,7 @@ fetch_image() {
 write_card() {
 	local dev="$1" bytes want got raw="/dev/$1" bs=4M
 	# the name was confirmed a moment ago; make sure the same card is still behind it
-	list_cards | grep -q "^$dev	$2	" || stop "$dev is no longer the card that was listed; re-run"
+	[ "$(list_cards | grep -c "^$dev	$2	")" = 1 ] || stop "$dev is no longer the card that was listed; re-run"
 	bytes=$(wc -c < "$IMG" | tr -d ' '); want=$(sha "$IMG")
 	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"; bs=4m; fi
 	say "Writing $bytes bytes to $raw (sudo asks for your password once)"
