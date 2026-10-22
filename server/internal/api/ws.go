@@ -27,6 +27,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	s.sockets.Add(1)
+	defer s.sockets.Done()
 	ctx := r.Context()
 	done := s.Hub.Add(ctx, id, c)
 	defer done()
