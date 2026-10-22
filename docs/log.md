@@ -413,11 +413,6 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
 
-## 2026-10-22 Audit chunk 6: release workflow guards
-- `release.yml` accepted `workflow_dispatch` from any ref: a run on a feature branch tagged it
-  `v<date>` and published it as `releases/latest`, which `flash.sh` downloads. The `tag` job now
-  runs only on main or a `v*` tag, and every other job needs it. Both workflows default to a
-  read-only token (`permissions: { contents: read }`); the jobs that write already raise their own.
 ## 2026-10-22 Audit chunk 1: server hub and pairing
 - `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
   frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
