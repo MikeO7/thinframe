@@ -201,7 +201,8 @@ impl<'a> Elf<'a> {
     /// A 32-bit pointer stored at section `sec` + `off`, resolved through its R_ARM_ABS32
     /// relocation: (target section, target offset).
     fn pointer(&self, sec: usize, off: u32) -> R<(usize, u32)> {
-        let rel = self.sec(&format!(".rel{}", self.secs[sec].0))?;
+        let name = &self.secs.get(sec).ok_or_else(|| bad("section index"))?.0;
+        let rel = self.sec(&format!(".rel{name}"))?;
         let addend = u32_at(self.bytes(sec, off as usize, 4)?, 0)?;
         for i in 0..rel.2 / 8 {
             let o = rel.1 + i * 8;

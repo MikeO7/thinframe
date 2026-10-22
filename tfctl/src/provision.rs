@@ -145,7 +145,21 @@ pub fn apply(t: &Targets) -> io::Result<bool> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
     };
-    let p = parse(&text);
+    let res = apply_text(t, &text);
+    // The file holds the Wi-Fi passphrase and the token on a FAT partition anyone can read
+    // by pulling the card: it goes whether or not applying it worked, and a failure is
+    // reported once rather than retried on every boot.
+    if file.exists() {
+        if let Err(e) = fs::remove_file(&file) {
+            eprintln!("tfctl: provision: cannot remove {}: {e}", file.display());
+        }
+    }
+    res
+}
+
+fn apply_text(t: &Targets, text: &str) -> io::Result<bool> {
+    let file = t.boot_dir.join(FILE);
+    let p = parse(text);
     if let (Some(ssid), Some(psk)) = (&p.wifi_ssid, &p.wifi_psk) {
         if psk.len() < 8 || psk.len() > 63 {
             eprintln!("tfctl: provision: WIFI_PSK must be 8..63 chars, skipping Wi-Fi");
