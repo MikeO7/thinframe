@@ -413,13 +413,6 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
 
-## 2026-10-22 Audit chunk 5: card writer guards
-- `scripts/flash.sh` (the card writer; CLAUDE.md named a `write-card-macos.sh` that never existed)
-  checked for a mounted system volume only on Linux. The macOS branch now refuses a disk with any
-  partition mounted at `/`, `/System/...` or `/private/var/vm`. `write_card` re-lists the cards and
-  requires the confirmed name and size to still match right before `dd` (a card swapped during the
-  sudo prompt is refused). The `sudo bash -c` string no longer interpolates the image path; it takes
-  the paths as arguments. `tests/flash-test.sh` shims `uname` and runs both OS paths everywhere [V].
 ## 2026-10-22 Audit chunk 1: server hub and pairing
 - `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
   frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
