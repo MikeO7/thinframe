@@ -420,4 +420,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   acting on state the next restart would not have. Now: file fsync, rename, directory fsync; a bad
   file is moved to `<id>.json.bad` and logged; `Update` runs on a copy and commits to memory only
   after the save; `Pending` is capped at 32 (the hub's replay buffer). Three new tests [V].
+## 2026-10-22 Audit chunk 1: server hub and pairing
+- `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
+  frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
+  bare goroutine, so one Wi-Fi flap during an action could kill frameserver. Fixed by sending under the
+  read lock. `TestSendDuringReconnectDoesNotPanic` reproduces `panic: send on closed channel` on the old code [V].
+- `handlePairAccept` handed the token to whatever request was open at the end, not the one it accepted.
+  Now compares the pointer. `handleDeleteFrame` now kicks the live socket and drops the open pair request
+  (`TestDeleteFrameKicksSocket`) [V].
 - `go test -race ./...`, `go vet`: clean.
