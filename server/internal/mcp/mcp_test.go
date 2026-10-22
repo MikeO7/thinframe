@@ -145,7 +145,7 @@ func TestProtocolVersions(t *testing.T) {
 	_, m = rpc(t, ts.URL, h, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{`+meta+`}}`)
 	r, _ = m["result"].(map[string]any)
 	tools, _ := r["tools"].([]any)
-	if len(tools) != 8 {
+	if len(tools) != 10 {
 		t.Fatalf("tools/list (2026-07-28): %v", m)
 	}
 	for _, x := range tools {

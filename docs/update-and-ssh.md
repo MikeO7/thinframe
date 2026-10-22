@@ -31,8 +31,31 @@ Put `WIFI_SSID`/`WIFI_PSK` in `provision.txt` on PFBOOT and reboot, or (as root)
 "My SSID" "passphrase"`. Profiles live in `/var/lib/iwd/` (bound from `/data/iwd`).
 
 ## Debug
+Without touching the frame:
+- **report**: send the `report` action (`/admin`, `POST /api/frames/<id>/actions`, or the MCP
+  tool `frame_action`). The frame posts one text file: tfctl versions and slot, `thinframe.conf`,
+  `uEnv.txt`/`.bak`, mounts, `df`, `ps`, `dmesg` (every `tfctl boot` step line is in there), the
+  Wi-Fi station, this boot's log and the previous boot's log. Read it in `/admin` (reports), at
+  `GET /api/frames/<id>/reports/latest`, or with the MCP tool `get_report`. The server keeps the
+  last 20 per frame under `DATA_DIR/reports/<id>/`.
+- **debug mode**: `debug: true` in the frame's config (the checkbox in `/admin`, or
+  `set_frame_config`). tfctl then logs every socket message both ways, every config key it
+  writes and cog's command line, runs cog with `G_MESSAGES_DEBUG=all`, and posts a report on its
+  first server contact after every (re)start. Persisted as `DEBUG="1"` in `thinframe.conf`, so it
+  survives reboots until switched off. Chatty: the log is capped at 1 MiB in RAM, so leave it on
+  only while hunting something.
+
+Pushing a change to a connected frame: `scripts/dev-push.sh` builds tfctl for armv7, stages it
+with the overlay as `dev-<stamp>-<sha>` in the server's artifacts directory (the server reads
+`versions.json` on every config request, no restart) and, with `SERVER_URL`, `FRAME_ID` and
+`FRAME_TOKEN` set, sends `update-software`. The frame swaps the binary within seconds; a build
+that crash-loops is rolled back by tfctl itself. A native server for that loop:
+`cd server && PORT=8080 DATA_DIR=~/.thinframe/data ARTIFACTS_DIR=~/.thinframe/artifacts FRAME_TOKEN=... go run ./cmd/frameserver`.
+
+On the frame (ssh as `frame`):
 - `tfctl status`: uptime, IP, memory, cog pid, URL.
-- `/var/log/thinframe.log` (RAM): tfctl and cog output. `dmesg` for drivers
-  (`dmesg | grep -E 'panel|dsi|silead|aic'`).
+- `/var/log/thinframe.log` (RAM): tfctl and cog output. A copy is kept on the card every 15 s:
+  `/data/thinframe/log/current.log`, and `previous.log` from the boot before, so a reboot or a
+  crash loop leaves its trace. `dmesg` for drivers (`dmesg | grep -E 'panel|dsi|silead|aic'`).
 - Console-only rescue: in `extlinux/slot-a.conf` on PFBOOT, change `DEFAULT thinframe` to
   `DEFAULT min` (minimal DTB, kernel messages on the USB serial port).

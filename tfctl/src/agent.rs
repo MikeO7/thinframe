@@ -104,7 +104,7 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
 pub struct Agent {
     pub(crate) cfg: Config,
     pub(crate) kiosk: Sender<KioskCmd>,
-    base: Url,
+    pub(crate) base: Url,
     pub(crate) conf_path: String,
     failures: u32,
     pub(crate) on_fallback: bool,
@@ -125,6 +125,8 @@ pub struct Agent {
     pub(crate) pair_nonce: Option<String>,
     /// The pairing page is on screen.
     pub(crate) pair_page_up: bool,
+    /// Debug mode: one report per process, on the first server contact.
+    pub(crate) reported: bool,
     /// Wi-Fi first (wifisetup.rs): the radio, the setup page's state once it ran, since when the
     /// station is down, whether setup (not just waiting) is due, and whether its page is up.
     pub(crate) radio: Arc<dyn crate::wifi::Radio>,
@@ -163,6 +165,7 @@ impl Agent {
             tried: Vec::new(),
             pair_nonce: None,
             pair_page_up: false,
+            reported: false,
             radio: Arc::new(crate::wifi::Iwctl),
             wifi_ui: None,
             wifi_down_since: None,
@@ -190,6 +193,10 @@ impl Agent {
         found.extend(update::drain_events(&self.paths));
         for (k, t) in found {
             self.event(&k, &t);
+        }
+        if crate::dbg::on() && !self.reported {
+            self.reported = true;
+            self.send_report();
         }
     }
 
@@ -421,6 +428,7 @@ impl Agent {
     }
 
     fn on_message(&mut self, c: &mut ws::Client, text: &str) -> io::Result<()> {
+        crate::dbg::log("ws rx", text);
         let v = match json::parse(text) {
             Ok(v) => v,
             Err(e) => {

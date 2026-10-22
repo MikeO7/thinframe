@@ -40,7 +40,7 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
 {{with .Last}}<td>{{.IP}}</td><td>{{.MemUsedMB}}/{{.MemTotalMB}} MB</td><td>{{printf "%.0f" .TempC}}°C</td><td>{{with $f.Touch}}{{.LastMS}} ms<br><span class="hint">p50 {{.P50}} · max {{.Max}} · n {{len .SamplesMS}}</span>{{else}}<span class="hint">no touch yet</span>{{end}}</td><td>tfctl {{.TfctlVersion}}<br>sys {{.SystemVersion}} {{.Slot}}</td>{{else}}<td colspan="5" class="hint">no heartbeat yet</td>{{end}}
 <td>{{ago .LastSeen}}</td></tr>{{end}}</table>
 
-{{range .Frames}}<h2 id="f-{{.ID}}">{{.ID}} <a class="hint" href="/frame/{{.ID}}" target="_blank">open page ↗</a></h2>
+{{range .Frames}}{{$f := .}}<h2 id="f-{{.ID}}">{{.ID}} <a class="hint" href="/frame/{{.ID}}" target="_blank">open page ↗</a></h2>
 {{if .TokenHash}}<form method="post" action="/admin/{{.ID}}/unpair" class="row"><span class="on">paired on its screen</span> <button>forget pairing</button> <span class="hint">the frame then shows its PAIR button again</span></form>{{end}}
 <form method="post" action="/admin/{{.ID}}/config" class="row">
  <label>name <input name="name" value="{{.Name}}"></label>
@@ -50,6 +50,7 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
  <label>on <input name="screen_on" value="{{.Config.ScreenOn}}" placeholder="06:30" style="width:5rem"></label>
  <label>url <input name="url" value="{{.Config.URL}}" placeholder="(default: /frame/{{.ID}})" style="width:18rem"></label>
  <label>tags <input name="tags" value="{{join .Config.Tags ","}}"></label>
+ <label><input type="checkbox" name="debug" {{if .Config.Debug}}checked{{end}}> debug</label>
  <button>save</button>
 </form>
 <form method="post" action="/admin/{{.ID}}/action" class="row">
@@ -61,6 +62,8 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
 <form method="post" action="/admin/{{.ID}}/layout"><textarea name="layout">{{pretty .Layout}}</textarea><br><button>save layout</button></form></details>
 <details><summary>events</summary><pre class="hint">{{range .Events}}{{.At.Format "15:04:05"}} {{.Kind}} {{.Text}}
 {{end}}</pre></details>
+<details><summary>reports ({{len .Reports}})</summary><p class="hint">send the <b>report</b> action to get a new one: versions, config, mounts, processes, dmesg, this and the previous boot's log.</p>
+{{range .Reports}}<a href="/admin/{{$f.ID}}/reports/{{.Name}}">{{.Name}}</a> <span class="hint">{{.Size}} B</span><br>{{end}}</details>
 {{end}}
 </body></html>`))
 
@@ -82,6 +85,7 @@ func (s *Server) renderAdmin(w http.ResponseWriter, errText string) {
 	d := adminData{Version: s.opts.Version, Error: errText, Actions: ValidActions, Types: widgets.Types}
 	for _, f := range fs {
 		v := s.view(f)
+		v.Reports, _ = s.ListReports(f.ID)
 		d.Frames = append(d.Frames, v)
 		if v.Online {
 			d.Online++
@@ -107,7 +111,7 @@ func (s *Server) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := map[string]any{}
-	for _, k := range []string{"name", "rotation", "brightness", "screen_off", "screen_on", "url", "tags"} {
+	for _, k := range []string{"name", "rotation", "brightness", "screen_off", "screen_on", "url", "tags", "debug"} {
 		patch[k] = r.Form.Get(k)
 	}
 	_, err := s.SetConfig(r.PathValue("id"), patch)

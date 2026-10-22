@@ -30,14 +30,17 @@ mod boot;
 mod config;
 mod dawn;
 mod dawnpage;
+mod dbg;
 mod drm;
 mod font;
 mod http;
 mod json;
 mod kiosk;
+mod logmirror;
 mod pair;
 mod png;
 mod provision;
+mod report;
 mod retro;
 mod screen;
 mod sdf;
@@ -103,6 +106,7 @@ fn main() -> ExitCode {
     if agent::valid_tz(&cfg.tz) && env::var_os("TZ").is_none() {
         env::set_var("TZ", &cfg.tz);
     }
+    dbg::set(cfg.debug);
     let result = match args.first().map(String::as_str) {
         Some("kiosk") => kiosk::run(&cfg),
         Some("boot") => boot::run(&conf),

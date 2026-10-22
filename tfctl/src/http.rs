@@ -109,14 +109,31 @@ pub fn get(url: &Url, token: &str, timeout: Duration) -> io::Result<Response> {
 
 /// POST a JSON body (pairing, TASK 16).
 pub fn post_json(url: &Url, token: &str, body: &str, timeout: Duration) -> io::Result<Response> {
-    request("POST", url, token, Some(body), timeout)
+    request(
+        "POST",
+        url,
+        token,
+        Some(("application/json", body.as_bytes())),
+        timeout,
+    )
+}
+
+/// POST any body (the report: text/plain).
+pub fn post_bytes(
+    url: &Url,
+    token: &str,
+    content_type: &str,
+    body: &[u8],
+    timeout: Duration,
+) -> io::Result<Response> {
+    request("POST", url, token, Some((content_type, body)), timeout)
 }
 
 fn request(
     method: &str,
     url: &Url,
     token: &str,
-    body: Option<&str>,
+    body: Option<(&str, &[u8])>,
     timeout: Duration,
 ) -> io::Result<Response> {
     request_safe(&url.path)?;
@@ -130,15 +147,17 @@ fn request(
     if !token.is_empty() {
         req.push_str(&format!("Authorization: Bearer {token}\r\n"));
     }
-    if let Some(b) = body {
+    if let Some((ct, b)) = body {
         req.push_str(&format!(
-            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            "Content-Type: {ct}\r\nContent-Length: {}\r\n",
             b.len()
         ));
     }
     req.push_str("\r\n");
-    req.push_str(body.unwrap_or(""));
     s.write_all(req.as_bytes())?;
+    if let Some((_, b)) = body {
+        s.write_all(b)?;
+    }
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {

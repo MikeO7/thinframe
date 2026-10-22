@@ -52,8 +52,9 @@ func (s *Server) handleFramePage(w http.ResponseWriter, r *http.Request) {
 // frameView is what the list/get endpoints return.
 type frameView struct {
 	store.Frame
-	Online bool           `json:"online"`
-	Config map[string]any `json:"config"`
+	Online  bool           `json:"online"`
+	Config  map[string]any `json:"config"`
+	Reports []Report       `json:"reports,omitempty"`
 }
 
 func (s *Server) view(f store.Frame) frameView {

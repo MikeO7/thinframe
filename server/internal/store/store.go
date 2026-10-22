@@ -30,7 +30,11 @@ type Config struct {
 	SplashText      string   `json:"splash_text,omitempty"` // boot splash line (TASK 15)
 	SplashBG        string   `json:"splash_bg,omitempty"`   // "#rrggbb"
 	SplashPNG       string   `json:"splash_png,omitempty"`  // base64 PNG, at most MaxSplashPNG bytes decoded
+	Debug           bool     `json:"debug"`                 // tfctl logs everything and reports on connect
 }
+
+// Dir is where the store keeps its files (<data>/frames).
+func (s *Store) Dir() string { return s.dir }
 
 // Heartbeat is what a frame reports.
 type Heartbeat struct {

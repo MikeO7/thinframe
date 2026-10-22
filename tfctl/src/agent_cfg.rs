@@ -109,6 +109,18 @@ impl Agent {
                 eprintln!("tfctl: agent: splash_png: {e}");
             }
         }
+        if let Some(d) = v.get("debug").and_then(|d| match d {
+            Value::Bool(b) => Some(*b),
+            Value::Str(s) => Some(s == "1" || s == "true"),
+            _ => None,
+        }) {
+            if d != self.cfg.debug {
+                over.push(("DEBUG", if d { "1" } else { "0" }.into()));
+                self.cfg.debug = d;
+                crate::dbg::set(d);
+                eprintln!("tfctl: agent: debug mode {}", if d { "on" } else { "off" });
+            }
+        }
         if let Some(ver) = v.field_string("software_version") {
             self.software_version = ver;
         }
@@ -121,8 +133,30 @@ impl Agent {
         }
         if !over.is_empty() {
             let refs: Vec<(&str, &str)> = over.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            let keys: Vec<&str> = refs.iter().map(|(k, _)| *k).collect();
+            crate::dbg::log("config persist", &keys.join(" "));
             self.persist(&refs);
         }
+    }
+
+    /// `report` action, and automatic in debug mode: collect and post in a thread (dmesg, ps
+    /// and iwctl take a moment); the outcome arrives as a `report` event.
+    pub(crate) fn send_report(&self) {
+        let cfg = self.cfg.clone();
+        let base = self.base.clone();
+        let events = self.events.clone();
+        thread::spawn(move || {
+            let text = crate::report::collect(&cfg);
+            let r = crate::report::send(&base, &cfg, &text);
+            let msg = match r {
+                Ok(n) => format!("{n} bytes stored"),
+                Err(e) => format!("failed: {e}"),
+            };
+            eprintln!("tfctl: agent: report {msg}");
+            if let Ok(mut q) = events.lock() {
+                q.push(("report".into(), msg));
+            }
+        });
     }
 
     /// Decode, check it is a PNG we can draw, and write `<data>/splash.png` if it changed.
@@ -182,6 +216,10 @@ impl Agent {
                 self.start_system_update(ver)
             }
             "bench" => self.start_bench(v),
+            "report" => {
+                self.send_report();
+                Ok(())
+            }
             "rollback" => {
                 let slot = sysupdate::rollback(&self.paths)?;
                 self.event("rollback", &format!("booting slot {} next", slot.name()));

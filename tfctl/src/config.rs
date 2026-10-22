@@ -42,6 +42,8 @@ pub struct Config {
     pub splash_text: String,
     /// "dawn" (default, animated), "seventies" (animated), "retro" or "plain"
     pub splash_style: String,
+    /// DEBUG="1": log everything (dbg.rs). The server's `debug` config field sets it too.
+    pub debug: bool,
     /// Where this config was loaded from (and where overrides are written back).
     pub path: String,
 }
@@ -74,6 +76,7 @@ impl Default for Config {
             splash_bg: 0x0b0d10,
             splash_text: "thinframe".into(),
             splash_style: "dawn".into(),
+            debug: false,
             path: DEFAULT_PATH.into(),
         }
     }
@@ -136,6 +139,7 @@ pub fn parse(text: &str) -> Config {
     cfg.tz = get("TZ", &cfg.tz);
     cfg.splash_text = get("SPLASH_TEXT", &cfg.splash_text);
     cfg.splash_style = get("SPLASH_STYLE", &cfg.splash_style);
+    cfg.debug = matches!(kv.get("DEBUG").copied(), Some("1" | "true" | "yes" | "on"));
     if let Some(bg) = kv.get("SPLASH_BG").and_then(|v| parse_rgb(v)) {
         cfg.splash_bg = bg;
     }
