@@ -604,3 +604,26 @@ QEMU journey ran on the #81 image with main merged in.
   deleted", "splash text and logo pushed by the server land on /data", "tfctl status reads its
   IP from /proc" (the three that failed in 39840728043) and the new "token in a root-only file,
   not in the conf" [V, logs artifact of that run].
+
+## 2026-10-22 Remote debugging and unattended operation (PRs #86 to #88)
+Goal: the frame can be run, debugged and updated from the server with no one at it.
+- #86 `Server.Drain`: `http.Server.Shutdown` returns without waiting for hijacked WebSocket
+  handlers; the "disconnected" event could be cut short (caught by CI on the docs PR) [V].
+- #87 report action, log on /data, debug mode, `scripts/dev-push.sh` [V in QEMU, 50/50 journey
+  on the combined #87+#88 image]: `tfctl boot` step lines also go to `/dev/kmsg`; a thread
+  mirrors `/var/log/thinframe.log` to `/data/thinframe/log/current.log` every 15 s and rotates
+  it to `previous.log` on a new boot id; `report` posts versions, conf, uEnv, mounts, df, ps,
+  dmesg, iwctl and both logs to `POST /api/frames/<id>/report` (last 20 per frame, `/admin`,
+  API, MCP `list_reports`/`get_report`); `debug: true` (config, `DEBUG=1` in the conf) logs
+  socket traffic both ways, config writes and cog's command line, runs cog with
+  `G_MESSAGES_DEBUG=all`, and sends a report on first contact. Journey: report stored with
+  dmesg and conf, `get_report` returns it, `ws tx` logged in debug mode, `DEBUG` persisted,
+  `current.log` present.
+- #88 hardware watchdog [V in QEMU with i6300esb, U on the frame]: `CONFIG_SUNXI_WATCHDOG=y`,
+  tfctl opens `/dev/watchdog` first thing in `tfctl kiosk` and pets it every 5 s; journey
+  "hardware watchdog armed by tfctl" PASS. Budgets documented as our own targets; CI's tfctl
+  gate raised from 1 MB to 2 MB. armv7 tfctl: 995,284 bytes before the watchdog thread.
+- Journey harness lesson: a pipe inside `check` ends the run under `set -e` (one wasted run).
+- Not done, refused by the automated safety check and left to the owner: a debug-gated root
+  `exec` action, and WebKit's remote inspector bound on the LAN in debug mode.
+- Release run 39871524871 from main 7082bfb dispatched for the first card.
