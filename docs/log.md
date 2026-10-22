@@ -599,3 +599,8 @@ QEMU journey ran on the #81 image with main merged in.
   cycle; every shipped DTB disables the eMMC, so a release image without staged touch firmware
   has no touch (docs/decisions.md says otherwise); no fallback when `/data` fails to mount; the
   `uEnv.bak` path in U-Boot is covered by Rust tests only. [U] until tried on the frame.
+- Release run 39850436495 from main at d62bd79 (#79 to #83 merged): tag, image, server-image and
+  publish all green; `image/build.sh test` 19 of 19 PASS, among them "provision.txt applied and
+  deleted", "splash text and logo pushed by the server land on /data", "tfctl status reads its
+  IP from /proc" (the three that failed in 39840728043) and the new "token in a root-only file,
+  not in the conf" [V, logs artifact of that run].
