@@ -124,6 +124,17 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
             current.name()
         )));
     }
+    // While U-Boot still counts tries for this slot, the other one is the only image known to
+    // boot; overwriting it now could leave no good slot at all.
+    if let Ok(u) = UEnv::load(&uenv_path(p)) {
+        if u.tries > 0 && u.slot == Some(current) {
+            return Err(io::Error::other(format!(
+                "slot {} is not confirmed yet (tries={}); refusing to overwrite the other slot",
+                current.name(),
+                u.tries
+            )));
+        }
+    }
     let (file, sha) = arts.get("system")?;
     let disk = card(p)?;
     let standby = current.other();
@@ -184,7 +195,9 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
     Ok(standby)
 }
 
-/// `rollback` action: boot the other slot next time, with no retry counter.
+/// `rollback` action: boot the other slot next time. It gets the same retry counter as a fresh
+/// update: if it cannot reach the server, U-Boot comes back here instead of looping on it;
+/// `confirm_slot` zeroes the counter once it has connected.
 pub fn rollback(p: &Paths) -> io::Result<Slot> {
     let current =
         running_slot(p).ok_or_else(|| io::Error::other("cannot tell which slot is running"))?;
@@ -192,7 +205,7 @@ pub fn rollback(p: &Paths) -> io::Result<Slot> {
     boot_rw(p)?;
     let res = UEnv::load(&uenv_path(p))
         .unwrap_or_else(|_| UEnv::parse(""))
-        .save(&uenv_path(p), target, 0);
+        .save(&uenv_path(p), target, TRIES);
     boot_ro(p);
     res?;
     Ok(target)
@@ -295,7 +308,7 @@ mod tests {
         assert_eq!(confirm_slot(&p), None, "tries=0: nothing to confirm");
         assert_eq!(rollback(&p).unwrap(), Slot::B);
         let u = UEnv::load(&uenv_path(&p)).unwrap();
-        assert_eq!((u.slot, u.tries), (Some(Slot::B), 0));
+        assert_eq!((u.slot, u.tries), (Some(Slot::B), TRIES));
         // Pretend U-Boot booted b with tries pending and we are now running b.
         fs::write(&p.cmdline, "root=PARTUUID=50463037-03").unwrap();
         u.save(&uenv_path(&p), Slot::B, 2).unwrap();
@@ -350,6 +363,11 @@ mod tests {
         let (cfg, arts) = artifact_server(vec![("system", fs::read(&tar).unwrap())]);
         let e = system(&cfg, &arts, "2026.10.1", &p).unwrap_err();
         assert!(e.to_string().contains("already running"));
+        // Running a while U-Boot still counts tries for a: b is the only known-good image.
+        fs::write(uenv_path(&p), "# boot\nslot=a\ntries=2\n").unwrap();
+        let e = system(&cfg, &arts, "2026.10.2", &p).unwrap_err();
+        assert!(e.to_string().contains("not confirmed"), "{e}");
+        fs::write(uenv_path(&p), "# boot\nslot=a\ntries=0\n").unwrap();
         assert_eq!(system(&cfg, &arts, "2026.10.2", &p).unwrap(), Slot::B);
         let dev = slot::part_dev(&p.disks[1], Slot::B);
         assert_eq!(
