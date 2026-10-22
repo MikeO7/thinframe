@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -311,7 +312,14 @@ func TestTouchSurvivesHeartbeat(t *testing.T) {
 	if _, err := s.Store.Get("ghost"); err == nil {
 		t.Fatal("a beacon created an unknown frame")
 	}
-	_, page := do(t, "GET", ts.URL+"/admin", "", nil)
+	req, _ := http.NewRequest("GET", ts.URL+"/admin", nil)
+	req.SetBasicAuth("admin", "secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	page, _ := io.ReadAll(resp.Body)
 	if !bytes.Contains(page, []byte("30 ms")) || !bytes.Contains(page, []byte("max 40")) {
 		t.Fatalf("admin does not show the touch latency")
 	}

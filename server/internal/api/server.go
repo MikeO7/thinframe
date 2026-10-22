@@ -99,11 +99,13 @@ func (s *Server) Routes() http.Handler {
 	if s.opts.Artifacts != nil {
 		m.Handle("GET /api/artifacts/{name}", s.authAnyFrame(s.opts.Artifacts.Handler()))
 	}
-	m.HandleFunc("GET /admin", s.handleAdmin)
-	m.HandleFunc("POST /admin/{id}/config", s.handleAdminConfig)
-	m.HandleFunc("POST /admin/{id}/layout", s.handleAdminLayout)
-	m.HandleFunc("POST /admin/{id}/action", s.handleAdminAction)
-	m.HandleFunc("POST /admin/{id}/unpair", s.handleAdminUnpair)
+	// Admin: HTTP Basic (password = FRAME_TOKEN) when set; POSTs also refuse cross-origin forms.
+	cop := http.NewCrossOriginProtection()
+	m.Handle("GET /admin", s.authAdmin(http.HandlerFunc(s.handleAdmin)))
+	m.Handle("POST /admin/{id}/config", cop.Handler(s.authAdmin(adminForm(s.handleAdminConfig))))
+	m.Handle("POST /admin/{id}/layout", cop.Handler(s.authAdmin(adminForm(s.handleAdminLayout))))
+	m.Handle("POST /admin/{id}/action", cop.Handler(s.authAdmin(adminForm(s.handleAdminAction))))
+	m.Handle("POST /admin/{id}/unpair", cop.Handler(s.authAdmin(adminForm(s.handleAdminUnpair))))
 	return logRequests(m)
 }
 
@@ -131,6 +133,37 @@ func (s *Server) authWith(next http.Handler, frameOK func(*http.Request) bool) h
 		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="thinframe"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+}
+
+// authAdmin guards the browser admin page with HTTP Basic: any user name, password = token.
+func (s *Server) authAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pw, ok := r.BasicAuth(); s.opts.Token == "" || ok && subtle.ConstantTimeCompare([]byte(pw), []byte(s.opts.Token)) == 1 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Basic realm="thinframe"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+}
+
+// MaxAdminForm bounds an admin form body.
+const MaxAdminForm = 64 << 10
+
+// adminForm parses the form under MaxAdminForm before the handler reads it.
+func adminForm(next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, MaxAdminForm)
+		if err := r.ParseForm(); err != nil {
+			code := http.StatusBadRequest
+			if _, big := errors.AsType[*http.MaxBytesError](err); big {
+				code = http.StatusRequestEntityTooLarge
+			}
+			http.Error(w, err.Error(), code)
+			return
+		}
+		next(w, r)
 	})
 }
 
@@ -184,54 +217,12 @@ func checkSplashPNG(s string) error {
 func (s *Server) SetConfig(id string, patch map[string]any) (store.Frame, error) {
 	var bad error
 	f, err := s.Store.Update(id, func(f *store.Frame) {
-		c := &f.Config
-		for k, v := range patch {
-			switch k {
-			case "url":
-				c.URL, _ = v.(string)
-			case "rotation":
-				n, ok := asInt(v)
-				if !ok || n < 0 || n > 3 {
-					bad = fmt.Errorf("%w: rotation must be 0..3", ErrInvalid)
-					return
-				}
-				c.Rotation = n
-			case "brightness":
-				n, ok := asInt(v)
-				if !ok || n < 0 || n > 100 {
-					bad = fmt.Errorf("%w: brightness must be 0..100", ErrInvalid)
-					return
-				}
-				c.Brightness = n
-			case "screen_off":
-				c.ScreenOff, _ = v.(string)
-			case "screen_on":
-				c.ScreenOn, _ = v.(string)
-			case "tags":
-				c.Tags = asStrings(v)
-			case "name":
-				f.Name, _ = v.(string)
-			case "splash_text":
-				c.SplashText, _ = v.(string)
-			case "splash_bg":
-				str, _ := v.(string)
-				if str != "" && !rgbRe.MatchString(str) {
-					bad = fmt.Errorf("%w: splash_bg must be #rrggbb", ErrInvalid)
-					return
-				}
-				c.SplashBG = str
-			case "splash_png":
-				str, _ := v.(string)
-				if err := checkSplashPNG(str); err != nil {
-					bad = err
-					return
-				}
-				c.SplashPNG = str
-			default:
-				bad = fmt.Errorf("%w: unknown config field %q", ErrInvalid, k)
-				return
-			}
+		// Apply to copies; the frame takes them only if every field is valid.
+		c, name := f.Config, f.Name
+		if bad = applyConfig(&c, &name, patch); bad != nil {
+			return
 		}
+		f.Config, f.Name = c, name
 		store.AddEvent(f, "config", fmt.Sprintf("set %v", keys(patch)))
 	})
 	if err != nil {
@@ -242,6 +233,53 @@ func (s *Server) SetConfig(id string, patch map[string]any) (store.Frame, error)
 	}
 	s.pushConfig(f)
 	return f, nil
+}
+
+// applyConfig writes patch into c and name, stopping at the first invalid field.
+func applyConfig(c *store.Config, name *string, patch map[string]any) error {
+	for k, v := range patch {
+		switch k {
+		case "url":
+			c.URL, _ = v.(string)
+		case "rotation":
+			n, ok := asInt(v)
+			if !ok || n < 0 || n > 3 {
+				return fmt.Errorf("%w: rotation must be 0..3", ErrInvalid)
+			}
+			c.Rotation = n
+		case "brightness":
+			n, ok := asInt(v)
+			if !ok || n < 0 || n > 100 {
+				return fmt.Errorf("%w: brightness must be 0..100", ErrInvalid)
+			}
+			c.Brightness = n
+		case "screen_off":
+			c.ScreenOff, _ = v.(string)
+		case "screen_on":
+			c.ScreenOn, _ = v.(string)
+		case "tags":
+			c.Tags = asStrings(v)
+		case "name":
+			*name, _ = v.(string)
+		case "splash_text":
+			c.SplashText, _ = v.(string)
+		case "splash_bg":
+			str, _ := v.(string)
+			if str != "" && !rgbRe.MatchString(str) {
+				return fmt.Errorf("%w: splash_bg must be #rrggbb", ErrInvalid)
+			}
+			c.SplashBG = str
+		case "splash_png":
+			str, _ := v.(string)
+			if err := checkSplashPNG(str); err != nil {
+				return err
+			}
+			c.SplashPNG = str
+		default:
+			return fmt.Errorf("%w: unknown config field %q", ErrInvalid, k)
+		}
+	}
+	return nil
 }
 
 // SetLayout validates and stores a layout, bumps page_version and tells the page to reload.

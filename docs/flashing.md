@@ -39,6 +39,8 @@ logo, then the dashboard.
 
 Open `http://nas.local:8080/admin`. The frame is listed under the name you gave, with its IP,
 version and temperature. Or ask Claude: "is the kitchen frame online?"
+If the server has `FRAME_TOKEN` set, the browser asks for a login first: any user name, the
+token as password **[V]** (server tests `TestAdminAuth`).
 
 That is all. From here on the frame updates itself from the server, including the operating
 system. You never flash it again unless the card dies.

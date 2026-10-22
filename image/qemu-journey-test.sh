@@ -41,7 +41,7 @@ no_event() { ! event "$1"; }
 rendered() { curl -fsS "http://127.0.0.1:$PORT/frame/$ID" | grep -q "$1"; }
 stays() { sleep "$1"; on "$2" "$3"; }
 benched() { event bench && frame | tr -d '\n' | grep -o '"frame:bench"[^}]*' | tee -a "$RES"; }
-admin_touch() { curl -fsS "http://127.0.0.1:$PORT/admin" | grep -q 'p50 [0-9]* · max'; }
+admin_touch() { curl -fsS -u "owner:$TOKEN" "http://127.0.0.1:$PORT/admin" | grep -q 'p50 [0-9]* · max'; }
 # README budget: nothing runs but these (kernel threads aside; sh/ps are this ssh session;
 # hostapd is the QEMU image's simulated access point).
 OK_PROCS='hostapd|init|getty|dropbear|iwd|dbus-daemon|dhcpcd|udevd|udhcpd|tfctl|cog|WPEWebProcess|WPENetworkProcess|sh|ps|grep'

@@ -63,11 +63,16 @@ func TestPairOnce(t *testing.T) {
 	if r, _ := do(t, "POST", ts.URL+"/api/pair", "", map[string]string{"id": "kitchen", "nonce": "fedcba9876543210fedc"}); r.StatusCode != 409 {
 		t.Fatalf("second request: %d", r.StatusCode)
 	}
-	resp, err := http.PostForm(ts.URL+"/admin/kitchen/unpair", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/admin/kitchen/unpair", nil)
+	req.SetBasicAuth("admin", "admin-secret")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode != 200 { // 303 to /admin, followed with the same credentials
+		t.Fatalf("unpair: %d", resp.StatusCode)
+	}
 	if r, _ := do(t, "GET", ts.URL+"/api/frames/kitchen/config", got.Token, nil); r.StatusCode != 401 {
 		t.Fatalf("token after unpair: %d", r.StatusCode)
 	}
