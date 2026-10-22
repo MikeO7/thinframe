@@ -23,15 +23,22 @@ impl Url {
             Some(i) => (&rest[..i], &rest[i..]),
             None => (rest, "/"),
         };
-        let (host, port) = match hostport.rsplit_once(':') {
-            Some((h, p)) if !h.contains(']') || h.ends_with(']') => (h, p.parse().ok()?),
-            _ => (hostport, 80),
+        // "[v6]" or "[v6]:port" (RFC 3986 IP-literal), else "host" or "host:port".
+        let (host, port) = match hostport.strip_prefix('[') {
+            Some(v6) => match v6.split_once(']')? {
+                (h, "") => (h, 80),
+                (h, p) => (h, p.strip_prefix(':')?.parse().ok()?),
+            },
+            None => match hostport.rsplit_once(':') {
+                Some((h, p)) => (h, p.parse().ok()?),
+                None => (hostport, 80),
+            },
         };
-        if host.is_empty() {
+        if host.is_empty() || host.contains(['[', ']']) {
             return None;
         }
         Some(Url {
-            host: host.trim_matches(['[', ']']).to_string(),
+            host: host.to_string(),
             port,
             path: path.to_string(),
         })
@@ -45,11 +52,17 @@ impl Url {
         }
     }
 
+    /// `Host:` value; an IPv6 literal goes back in brackets (RFC 7230 5.4).
     pub fn host_header(&self) -> String {
-        if self.port == 80 {
-            self.host.clone()
+        let host = if self.host.contains(':') {
+            format!("[{}]", self.host)
         } else {
-            format!("{}:{}", self.host, self.port)
+            self.host.clone()
+        };
+        if self.port == 80 {
+            host
+        } else {
+            format!("{host}:{}", self.port)
         }
     }
 }
@@ -298,6 +311,31 @@ mod tests {
         assert!(Url::parse("https://x/").is_none());
         assert!(Url::parse("http://").is_none());
         assert_eq!(u.with_path("/p").path, "/p");
+    }
+
+    /// Found by fuzz.rs: `http://[::1]/` (IPv6 literal, no port) was refused, and a host with a
+    /// stray `]` and `:` split at the wrong colon, so the URL did not read back the same.
+    #[test]
+    fn parses_ipv6_literals() {
+        let u = Url::parse("http://[::1]/").unwrap();
+        assert_eq!((u.host.as_str(), u.port, u.path.as_str()), ("::1", 80, "/"));
+        assert_eq!(u.host_header(), "[::1]");
+        let u = Url::parse("ws://[fe80::1]:8080").unwrap();
+        assert_eq!(
+            (u.host.as_str(), u.port, u.path.as_str()),
+            ("fe80::1", 8080, "/")
+        );
+        assert_eq!(u.host_header(), "[fe80::1]:8080");
+        for bad in [
+            "http://[::1/",
+            "http://[::1]x/",
+            "http://[]/",
+            "http://[::1]:/",
+            "http://a]b:c]:9000/",
+            "http://[a]b]:1/",
+        ] {
+            assert!(Url::parse(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]

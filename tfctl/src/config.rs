@@ -354,6 +354,14 @@ mod tests {
         assert_eq!(parse_rgb("#fff"), None);
     }
 
+    /// Found by fuzz.rs: `COG_ROTATION=200` was kept and handed to cog as `rotation=200`.
+    #[test]
+    fn rotation_out_of_range_keeps_the_default() {
+        assert_eq!(parse("COG_ROTATION=200\n").rotation, 3);
+        assert_eq!(parse("COG_ROTATION=4\n").rotation, 3);
+        assert_eq!(parse("COG_ROTATION=0\n").rotation, 0);
+    }
+
     #[test]
     fn server_url_derives_frame_url() {
         let c = parse("SERVER_URL=http://nas:8080/\nFRAME_ID=kitchen\n");

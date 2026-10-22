@@ -1,10 +1,15 @@
 //! Recursive-descent JSON parser producing `Value`. Tests live in json/mod.rs.
 use super::Value;
 
+/// Deepest array/object nesting accepted. The control messages nest three levels; the limit
+/// keeps a hostile `[[[[...` from overflowing the stack (each level is a recursion).
+pub const MAX_DEPTH: usize = 64;
+
 pub fn parse(text: &str) -> Result<Value, String> {
     let mut p = Parser {
         b: text.as_bytes(),
         i: 0,
+        depth: 0,
     };
     let v = p.value()?;
     p.ws();
@@ -17,6 +22,7 @@ pub fn parse(text: &str) -> Result<Value, String> {
 struct Parser<'a> {
     b: &'a [u8],
     i: usize,
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -48,14 +54,23 @@ impl Parser<'_> {
         self.ws();
         match self.peek() {
             None => Err("unexpected end".into()),
-            Some(b'{') => self.object(),
-            Some(b'[') => self.array(),
+            Some(b'{' | b'[') if self.depth >= MAX_DEPTH => {
+                Err(format!("nested deeper than {MAX_DEPTH} at {}", self.i))
+            }
+            Some(b'{') => self.nested(Self::object),
+            Some(b'[') => self.nested(Self::array),
             Some(b'"') => self.string().map(Value::Str),
             Some(b't') => self.lit("true", Value::Bool(true)),
             Some(b'f') => self.lit("false", Value::Bool(false)),
             Some(b'n') => self.lit("null", Value::Null),
             Some(_) => self.number(),
         }
+    }
+    fn nested(&mut self, f: fn(&mut Self) -> Result<Value, String>) -> Result<Value, String> {
+        self.depth += 1;
+        let v = f(self);
+        self.depth -= 1;
+        v
     }
     fn object(&mut self) -> Result<Value, String> {
         self.eat(b'{')?;
@@ -141,11 +156,16 @@ impl Parser<'_> {
                             {
                                 self.i += 2;
                                 let lo = self.hex4()?;
-                                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo.wrapping_sub(0xDC00));
+                                if (0xDC00..0xE000).contains(&lo) {
+                                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                                } else {
+                                    // A high surrogate without its low half: U+FFFD for it,
+                                    // and the second escape stands on its own.
+                                    push_char(&mut out, '\u{FFFD}');
+                                    cp = lo;
+                                }
                             }
-                            let ch = char::from_u32(cp).unwrap_or('\u{FFFD}');
-                            let mut buf = [0u8; 4];
-                            out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                            push_char(&mut out, char::from_u32(cp).unwrap_or('\u{FFFD}'));
                         }
                         _ => return Err(format!("bad escape at {}", self.i)),
                     }
@@ -166,8 +186,15 @@ impl Parser<'_> {
             self.i += 1;
         }
         let s = std::str::from_utf8(&self.b[start..self.i]).map_err(|_| "bad number")?;
-        s.parse::<f64>()
-            .map(Value::Num)
-            .map_err(|_| format!("bad number '{s}' at {start}"))
+        match s.parse::<f64>() {
+            // 1e999 parses to infinity, which JSON cannot write back.
+            Ok(n) if n.is_finite() => Ok(Value::Num(n)),
+            _ => Err(format!("bad number '{s}' at {start}")),
+        }
     }
+}
+
+fn push_char(out: &mut Vec<u8>, ch: char) {
+    let mut buf = [0u8; 4];
+    out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
 }

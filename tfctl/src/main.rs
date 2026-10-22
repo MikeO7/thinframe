@@ -56,6 +56,9 @@ mod wifi;
 mod wifisetup;
 mod ws;
 
+#[cfg(test)]
+mod fuzz;
+
 fn usage() -> ExitCode {
     eprintln!(
         "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
