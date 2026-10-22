@@ -136,6 +136,6 @@ Change the dashboard: edit the frame's layout in `/admin` (or via MCP); widget t
 | `tfctl/` | Rust: the only custom code on the frame |
 | `server/` | Go: the brains. Dockerfile builds a scratch image |
 | `sim/` | Simulated frame container: headless WPE + agent, or QEMU of the real image |
-| `scripts/` | `flash.sh` one-command flasher, `deploy.sh` dev push |
+| `scripts/` | `flash.sh` one-command flasher, `make-artifacts.sh` stages what the server carries |
 
 License: MIT.
