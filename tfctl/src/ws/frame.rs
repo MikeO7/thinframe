@@ -8,6 +8,9 @@ pub const OP_CLOSE: u8 = 0x8;
 pub const OP_PING: u8 = 0x9;
 pub const OP_PONG: u8 = 0xA;
 
+/// Largest frame `decode` accepts and largest message `Assembler` joins.
+pub const MAX_MESSAGE: usize = 16 << 20;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Frame {
     pub fin: bool,
@@ -63,7 +66,7 @@ pub fn decode(buf: &[u8]) -> Result<Option<(Frame, usize)>, String> {
                 return Ok(None);
             }
             let n = u64::from_be_bytes(buf[2..10].try_into().unwrap());
-            if n > 16 << 20 {
+            if n > MAX_MESSAGE as u64 {
                 return Err("frame too large".into());
             }
             (n as usize, 10)
@@ -129,6 +132,10 @@ impl Assembler {
         }
         let (op, mut data) = match self.frag.take() {
             Some((op, mut d)) => {
+                // Each frame is capped by `decode`; the message they add up to is capped here.
+                if d.len() + f.payload.len() > MAX_MESSAGE {
+                    return Err("message too large".into());
+                }
                 d.extend_from_slice(&f.payload);
                 (op, d)
             }
@@ -216,5 +223,34 @@ mod tests {
         assert_eq!(a.push(close).unwrap(), Some(Event::Close(vec![0x03, 0xE8])));
         let (lone_cont, _) = dec(&[0x80, 0x00]);
         assert!(a.push(lone_cont).is_err());
+    }
+
+    /// Each frame was capped at 16 MiB but a message of endless continuation frames grew
+    /// without bound (the fuzz review in fuzz.rs).
+    #[test]
+    fn fragmented_message_is_capped() {
+        let mut a = Assembler::default();
+        let mib = vec![0u8; 1 << 20];
+        let frame = |opcode, fin| Frame {
+            fin,
+            opcode,
+            payload: mib.clone(),
+        };
+        assert_eq!(a.push(frame(OP_BIN, false)).unwrap(), None);
+        for _ in 1..16 {
+            assert_eq!(a.push(frame(OP_CONT, false)).unwrap(), None);
+        }
+        let e = a.push(frame(OP_CONT, true)).unwrap_err();
+        assert!(e.contains("too large"), "{e}");
+        // Exactly 16 MiB still goes through.
+        let mut a = Assembler::default();
+        assert_eq!(a.push(frame(OP_BIN, false)).unwrap(), None);
+        for _ in 1..15 {
+            assert_eq!(a.push(frame(OP_CONT, false)).unwrap(), None);
+        }
+        match a.push(frame(OP_CONT, true)).unwrap() {
+            Some(Event::Binary(d)) => assert_eq!(d.len(), MAX_MESSAGE),
+            other => panic!("{other:?}"),
+        }
     }
 }
