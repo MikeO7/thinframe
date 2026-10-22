@@ -270,6 +270,11 @@ impl Agent {
                 }
             }
         }
+        if self.exit {
+            // The process restarts in a moment; a system update started now would be
+            // orphaned mid-dd and started again by the new binary.
+            return;
+        }
         let want = self.system_version.clone();
         if let Some(have) = sysupdate::system_version(&self.paths) {
             // Written before and not what runs now: it failed to boot (U-Boot fell back) or was
