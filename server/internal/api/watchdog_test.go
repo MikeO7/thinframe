@@ -87,3 +87,16 @@ func TestHungPageRestartsCogOnce(t *testing.T) {
 		t.Fatalf("no page event in %v", f.Events)
 	}
 }
+
+// Any path string used to become a permanent key in the ping map and the SSE broker.
+func TestAliveAndStreamRejectBadIDs(t *testing.T) {
+	_, ts := newTest(t, "")
+	for _, bad := range []string{"Bad%20ID", "x..", "a%2Fb", strings.Repeat("a", 40)} {
+		if resp, _ := do(t, "POST", ts.URL+"/api/frames/"+bad+"/alive", "", nil); resp.StatusCode != 400 {
+			t.Fatalf("alive %q: %d", bad, resp.StatusCode)
+		}
+		if resp, _ := do(t, "GET", ts.URL+"/api/stream/"+bad, "", nil); resp.StatusCode != 400 {
+			t.Fatalf("stream %q: %d", bad, resp.StatusCode)
+		}
+	}
+}

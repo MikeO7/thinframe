@@ -24,6 +24,9 @@ func (b *broker) subscribe(id string) (chan []byte, func()) {
 	return ch, func() {
 		b.mu.Lock()
 		delete(b.subs[id], ch)
+		if len(b.subs[id]) == 0 {
+			delete(b.subs, id) // or every id ever streamed keeps an empty map forever
+		}
 		b.mu.Unlock()
 	}
 }
