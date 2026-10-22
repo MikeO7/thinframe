@@ -224,10 +224,13 @@ fn install(p: &Paths, new_bin: &Path, overlay: Option<&Path>, version: &str) -> 
     } else {
         let _ = fs::remove_file(&ver_prev);
     }
+    // The old binary is linked, not moved, to `tfctl.prev`, and the new one renamed over it:
+    // `/usr/bin/tfctl` exists at every instant. A gap there (a rename pair) and a power cut
+    // between them would leave init respawning nothing, with the card the only way back.
     let prev = bin.with_extension("prev");
     let had_bin = bin.exists();
     if had_bin {
-        fs::rename(&bin, &prev)?;
+        keep_copy(&bin, &prev)?;
     }
     let res = (|| {
         fs::rename(&staged, &bin)?;
@@ -252,6 +255,16 @@ fn install(p: &Paths, new_bin: &Path, overlay: Option<&Path>, version: &str) -> 
     }
     eprintln!("tfctl: update: software {version} installed, restarting");
     Ok(())
+}
+
+/// `dst` becomes another name for `src` (a hard link, or a copy on a file system without
+/// them); `src` stays in place.
+fn keep_copy(src: &Path, dst: &Path) -> io::Result<()> {
+    let _ = fs::remove_file(dst);
+    if fs::hard_link(src, dst).is_ok() {
+        return Ok(());
+    }
+    fs::copy(src, dst).map(|_| ())
 }
 
 fn extract_overlay(p: &Paths, tgz: &Path) -> io::Result<()> {
@@ -351,7 +364,10 @@ fn swap_back(p: &Paths) -> io::Result<()> {
         return Err(io::Error::other("no tfctl.prev to restore"));
     }
     remount_root(p, true)?;
-    let res = fs::rename(&bin, bin.with_extension("bad")).and_then(|_| fs::rename(&prev, &bin));
+    // Keep the crashing binary as `tfctl.bad` for a look later, but never by moving it: the
+    // rename of `.prev` over `tfctl` is the one step, atomic, so the path always has a binary.
+    let _ = keep_copy(&bin, &bin.with_extension("bad"));
+    let res = fs::rename(&prev, &bin);
     // The version file goes back with the binary, so heartbeats report what runs and the
     // agent sees the server's version as not installed.
     if res.is_ok() && version_prev(p).is_file() {
