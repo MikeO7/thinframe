@@ -52,6 +52,19 @@ const RETRO_CSS: &str = "html,body{margin:0;height:100%;overflow:hidden;backgrou
     @keyframes b{50%{opacity:0}}\
     p{margin:.4em 0 0;color:#7ef0ff;font-size:22px;text-shadow:2px 2px #1d0b3d}";
 
+/// Poppins on the frosted sheet, where the splash puts its status line (dawn.rs: the dot's
+/// centre 126 px in and the baseline 524 px down on the 1280x800 page, 26 px type).
+const DAWN_CSS: &str = "@font-face{font-family:Poppins;\
+    src:url(\"file:///usr/share/fonts/thinframe/Poppins-Regular.ttf\")}\
+    html,body{margin:0;height:100%;overflow:hidden;background:transparent;\
+    color:#2b2140;font:3.25vh/1.5 Poppins,'DejaVu Sans',sans-serif}\
+    main{position:absolute;left:9.375vw;right:8vw;top:61.9vh}\
+    h1{margin:0;font-size:1em;font-weight:400;white-space:nowrap;display:flex;align-items:center;gap:.69em}\
+    h1::before{content:\"\";flex:none;width:.46em;height:.46em;border-radius:50%;background:#2b2140;\
+    animation:p 1.2s ease-in-out infinite}\
+    @keyframes p{50%{opacity:.35}}\
+    p{margin:.35em 0 0 1.86em;font-size:.62em;line-height:1.4;color:#4a3d63}";
+
 /// Shrikhand on the cream scene, where the splash puts its status line (seventies.rs).
 const SEVENTIES_CSS: &str = "@font-face{font-family:Shrikhand;\
     src:url(\"file:///usr/share/fonts/thinframe/Shrikhand-Regular.ttf\")}\
@@ -81,6 +94,7 @@ pub fn render_line(headline: &str, details: &[String], style: &str) -> String {
          <meta http-equiv=\"refresh\" content=\"15\"><style>{}</style></head>\
          <body><main><h1>{}</h1>{}</main></body></html>",
         match style {
+            "dawn" => DAWN_CSS,
             "seventies" => SEVENTIES_CSS,
             "retro" => RETRO_CSS,
             _ => PLAIN_CSS,
@@ -169,6 +183,8 @@ mod tests {
             render_line("x", &[], "retro").contains("#ffb000"),
             "retro is amber"
         );
+        let dawn = render_line("x", &["IP 10.0.0.2".into()], "dawn");
+        assert!(dawn.contains("Poppins-Regular.ttf") && dawn.contains("<p>IP 10.0.0.2</p>"));
         assert!(
             render_line("x", &[], "seventies").contains("Shrikhand-Regular.ttf"),
             "seventies uses the shipped font"

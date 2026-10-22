@@ -162,6 +162,11 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (Plus `splash_bg`. Server validates #rrggbb and a PNG of at most 48 KiB; REST and MCP
       `set_frame_config`; tfctl stores `/data/thinframe/splash.png` and SPLASH_* in the conf, drawn
       from the next kiosk start. QEMU: pushed through the server and found on /data.)
+- [x] Dawn splash (`SPLASH_STYLE=dawn`, the default): a frosted-glass sunrise, thin title, status
+      line and address; the status page matches it. tfctl/src/dawn.rs, Poppins atlas, docs/decisions.md.
+      [V in QEMU: docs/img/boot-dawn.jpg is the virtio screen at boot; the status line was checked
+      in Chrome over the same backdrop. On the panel: not seen. The Wi-Fi, keyboard, joining and PAIR
+      pages sit on the same sheet, one shared stylesheet (tfctl/src/dawnpage.rs); QEMU journey 41/41.]
 - Gate: power on → dark ≤10 s → logo → status text → dashboard, no kernel or console text visible; photo in docs/img/.
 
 ## 16. One-press pairing (no token typing)

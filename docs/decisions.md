@@ -345,6 +345,39 @@ rasterize the TTF, miniz_oxide to deflate) never reach the frame binary, which s
 dependencies. The animation redraws only what moves: angle and radius per pixel are computed once,
 and each frame picks a ray colour per background pixel and blends the static layer over it.
 
+## Dawn splash: the default boot screen
+Chosen by the owner on 2026-10-21 from five browser mockups (frosted aurora, liquid orb, prism
+panes, dawn frost, midnight lens). `SPLASH_STYLE=dawn` is the default; `seventies`, `retro` and
+`plain` stay selectable, per frame, over MCP or the config.
+- **Glass without a blur.** The splash is drawn in software on the A33 (no GLES, TASK 15). The
+  scene behind the sheet is all soft gradients (a 160deg sunrise, two blobs, the sun), so
+  frosting is the white tint alone plus a one-pixel rim, brighter on top, and a drop shadow
+  outside the sheet. It looks the same as the mockup's `backdrop-filter` and costs nothing.
+- **One thin font, two weights of use.** Poppins ExtraLight (SIL OFL 1.1) as a second 64 KB atlas
+  (tfctl/assets/poppins-extralight.sdf, `fontgen ... 64 5`). Small text (status, address) is
+  drawn with `draw_bold`, which pushes the signed-distance threshold out by half a pixel, so one
+  atlas serves both the 176 px title and 16 px text. tfctl went from 879,260 to 963,036 bytes (armv7);
+  the limit is 1 MB. The status page loads Poppins-Regular from the rootfs (160 KB).
+- **Cheap animation.** Everything is built once into layers (sky without the sun, shadow, glass,
+  ink). A frame copies the still picture and recomposes only the box the sun can reach (it drifts
+  about 14 x 18 px over 12 s), through a 256-entry glow table indexed by squared distance, so
+  there is no per-pixel square root. 150 ms per frame (seventies: 100 ms). The status dot breathes.
+- **Same picture on the status page.** The backdrop PNG is the scene without status or address;
+  the status page lays its line over it at the same place (126 px in, baseline 524 px down on
+  the 1280x800 page).
+- **The pages that wait for a person sit on the sheet itself.** Wi-Fi setup (list, password and
+  keyboard, joining) and PAIR have no cards under `dawn`: the content is set straight on the
+  frosted sheet, with ExtraLight headings, ink pill buttons and white glass keys
+  (tfctl/src/dawnpage.rs, one stylesheet for both; the markup is unchanged, so the seventies CSS
+  stays where it was and is used for the other styles). Their backdrop is the sheet alone
+  (`write_page_backdrop`: the scene with an empty title, no mark and no lettering), because
+  the big title would sit behind the list. Poppins Regular and ExtraLight come from the rootfs
+  (320 KB), served to the Wi-Fi page as `/poppins.ttf` and `/poppins-light.ttf`.
+- **Memory.** One journey run read 339 MB used with the page up against 282 to 284 MB for every
+  other run, with this splash and without it. The next runs read 284 (dawn) and 282 (seventies):
+  one-off, WebKit's collector. The journey's budget check now takes the median of three readings
+  15 s apart.
+
 ## Wi-Fi setup on the frame's screen
 
 A frame with a radio and no connection shows a Wi-Fi page before the PAIR page (TASK 17), so

@@ -13,7 +13,7 @@ export BOARD=virt SCREEN=1 FRESH=1
 # shellcheck source=SCRIPTDIR/qemu-lib.sh
 . "$(dirname "$0")/qemu-lib.sh"
 RES="$OUT/qemu-journey-test.txt"; SHOTS="$OUT/journey"
-ROW0="${ROW0:-231}"; ROWH="${ROWH:-62}"	# first network row, row pitch (page px)
+ROW0="${ROW0:-256}"; ROWH="${ROWH:-62}"	# first network row, row pitch (page px)
 A="$(built_version)"; B="$A-b"
 
 # shellcheck source=SCRIPTDIR/qemu-screen.sh
@@ -50,7 +50,10 @@ procs() {	# kernel threads are [name] in args; the rest by program name
 		grep -v -E "^($OK_PROCS)$" | sort -u > "$W/extra-procs.txt" || true
 	cat "$W/extra-procs.txt" >&2; [ ! -s "$W/extra-procs.txt" ]
 }
-mem() { r 'free -m' | tee -a "$RES" | awk '/^Mem:/ { exit !($3 < 300) }'; }
+mem() {	# the median of three samples 15 s apart: WebKit's collector makes single readings jump by 50 MB
+	local v i; for i in 1 2 3; do r 'free -m' | tee -a "$RES" | awk '/^Mem:/ { print $3 }'; [ "$i" = 3 ] || sleep 15; done > "$W/mem.txt"
+	v="$(sort -n "$W/mem.txt" | sed -n 2p)"; echo "mem used (median of 3): $v MB" | tee -a "$RES"; [ "$v" -lt 300 ]
+}
 mkdir -p "$SHOTS"; rm -f "$SHOTS"/*.png
 echo "== bundle $B from system-$A.tar"
 make_bundles "$A" "$B"
@@ -68,12 +71,12 @@ check "row tapped: the password page loads" wait_for 300 loaded "/wifi/net?ssid=
 check "password page painted" snap 2-password 300
 type_text "far out man"
 snap 3-typed 60 || true
-tap 1110 139
+tap 1105 161
 check "joined Groovy Wifi from the screen" wait_for 300 log_has "wifi setup: joined Groovy Wifi"
 check "then the frame asks the server to pair" wait_for 600 srv_has "POST /api/pair"
 check "PAIR page loads" wait_for 600 loaded "pair.html"
 check "PAIR page painted" snap 4-pair 300
-a=$(alive); tap 252 543
+a=$(alive); tap 238 419
 check "PAIR pressed on the frame: server accepted it" wait_for 300 srv_has "POST /pair/$ID/accept"
 check "the dashboard runs in cog (its JS pings /alive)" page_up "$a"
 check "heartbeat: A on slot a" wait_for 600 on "$A" a

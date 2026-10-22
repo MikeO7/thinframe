@@ -1,13 +1,13 @@
 //! Boot splash (TASK 15), drawn in software into a DRM dumb
-//! buffer (drm.rs). `SPLASH_STYLE=seventies` (default) is the animated scene in seventies.rs,
-//! `retro` the synthwave scene in retro.rs; `plain` is a flat
+//! buffer (drm.rs). `SPLASH_STYLE=dawn` (default) is the frosted-glass sunrise in dawn.rs,
+//! `seventies` the animated scene in seventies.rs, `retro` the synthwave scene in retro.rs; `plain` is a flat
 //! colour, the logo PNG and one text line in the embedded 8x16 font. `COG_ROTATION` is applied
 //! exactly as cog applies it, so splash, status page and dashboard share one orientation.
 //!
 //! `tfctl splash [--png FILE] [STATUS]` draws and holds until SIGTERM (or writes a preview);
 //! the kiosk draws it in process and keeps it up while cog starts (see `Splash::hand_over`).
 use crate::config::Config;
-use crate::{drm, font, png, retro, seventies, sys};
+use crate::{dawn, drm, font, png, retro, seventies, sys};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -199,7 +199,49 @@ impl Drop for Splash {
     }
 }
 
-/// What the splash shows: `SPLASH_STYLE` (seventies, retro or plain), colours, the title
+/// The animated styles. Built for one size, title, status and address; `frame` draws upright.
+enum Scene {
+    Dawn(Box<dawn::Scene>),
+    Seventies(seventies::Scene),
+}
+
+impl Scene {
+    fn new(
+        style: &str,
+        w: usize,
+        h: usize,
+        title: &str,
+        status: &str,
+        ip: Option<&str>,
+    ) -> Option<Scene> {
+        match style {
+            "dawn" => Some(Scene::Dawn(Box::new(dawn::Scene::new(
+                w, h, title, status, ip,
+            )))),
+            "seventies" => Some(Scene::Seventies(seventies::Scene::new(
+                w, h, title, status, ip,
+            ))),
+            _ => None,
+        }
+    }
+
+    fn frame(&self, t_ms: u64, out: &mut [u32]) {
+        match self {
+            Scene::Dawn(s) => s.frame(t_ms, out),
+            Scene::Seventies(s) => s.frame(t_ms, out),
+        }
+    }
+
+    /// Time between frames: what the style needs and the A33 can draw [U].
+    fn period(&self) -> Duration {
+        match self {
+            Scene::Dawn(_) => Duration::from_millis(150),
+            Scene::Seventies(_) => FRAME,
+        }
+    }
+}
+
+/// What the splash shows: `SPLASH_STYLE` (dawn, seventies, retro or plain), colours, the title
 /// (`SPLASH_TEXT`), the boot status line under it and the frame's address once it has one.
 pub struct Look<'a> {
     pub style: &'a str,
@@ -245,9 +287,16 @@ fn turn_into(c: &mut Canvas, rotation: u8, l: &[u32], lw: usize, lh: usize) {
 pub fn render(look: &Look, w: usize, h: usize) -> Canvas {
     let mut c = Canvas::new(w, h, look.bg);
     let (lw, lh) = c.logical(look.rotation);
-    if look.style == "seventies" {
+    if let Some(scene) = Scene::new(
+        look.style,
+        lw,
+        lh,
+        look.title,
+        look.status,
+        look.ip.as_deref(),
+    ) {
         let mut l = vec![0; lw * lh];
-        seventies::Scene::new(lw, lh, look.title, look.status, look.ip.as_deref()).frame(0, &mut l);
+        scene.frame(0, &mut l);
         turn_into(&mut c, look.rotation, &l, lw, lh);
         return c;
     }
@@ -274,18 +323,33 @@ pub fn render(look: &Look, w: usize, h: usize) -> Canvas {
     c
 }
 
-/// The scene without a status line, upright, as a PNG for the status and pairing pages'
-/// background (TASK 15: the same picture from splash to status page). Panel 800x1280 turned by
-/// COG_ROTATION. None for `SPLASH_STYLE=plain`. Written once per boot (tmpfs).
+/// The scene without a status line, upright, as a PNG for the status page's background (TASK 15:
+/// the same picture from splash to status page). Panel 800x1280 turned by COG_ROTATION. None for
+/// `SPLASH_STYLE=plain`. Written once per boot (tmpfs).
 pub fn write_backdrop(cfg: &Config, path: &str) -> io::Result<Option<String>> {
+    backdrop(cfg, path, true)
+}
+
+/// The same for the pages that wait for a person (Wi-Fi, PAIR). Under `dawn` it is the frosted
+/// sheet alone, because the page's own text sits on it; the other styles keep their picture.
+pub fn write_page_backdrop(cfg: &Config, path: &str) -> io::Result<Option<String>> {
+    backdrop(cfg, path, false)
+}
+
+fn backdrop(cfg: &Config, path: &str, titled: bool) -> io::Result<Option<String>> {
     if cfg.splash_style == "plain" {
         return Ok(None);
     }
     if !std::path::Path::new(path).exists() {
         let (lw, lh) = Canvas::new(800, 1280, 0).logical(cfg.rotation);
-        let px = if cfg.splash_style == "seventies" {
+        let title = if titled || cfg.splash_style != "dawn" {
+            cfg.splash_text.as_str()
+        } else {
+            ""
+        };
+        let px = if let Some(scene) = Scene::new(&cfg.splash_style, lw, lh, title, "", None) {
             let mut l = vec![0; lw * lh];
-            seventies::Scene::new(lw, lh, &cfg.splash_text, "", None).frame(0, &mut l);
+            scene.frame(0, &mut l);
             l
         } else {
             let mut l = Canvas::new(lw, lh, 0);
@@ -299,7 +363,7 @@ pub fn write_backdrop(cfg: &Config, path: &str) -> io::Result<Option<String>> {
     Ok(Some(path.to_string()))
 }
 
-/// Frames per second of the seventies animation; the A33 draws one in well under this budget [U].
+/// Time between seventies frames; the A33 draws one in well under this budget [U].
 const FRAME: Duration = Duration::from_millis(100);
 
 pub fn show(look: &Look) -> io::Result<Splash> {
@@ -317,15 +381,26 @@ pub fn show(look: &Look) -> io::Result<Splash> {
         Arc::new(AtomicBool::new(false)),
         Arc::new(AtomicBool::new(false)),
     );
-    let anim = (look.style == "seventies").then(|| {
+    let anim = matches!(look.style, "dawn" | "seventies").then(|| {
         let (disp, handed, stop) = (display.clone(), handed_over.clone(), stop.clone());
-        let (title, status, ip, rot) = (
+        let (style, title, status, ip, rot) = (
+            look.style.to_string(),
             look.title.to_string(),
             look.status.to_string(),
             look.ip.clone(),
             look.rotation,
         );
-        thread::spawn(move || animate(&disp, &handed, &stop, (w, h), rot, &title, &status, ip))
+        thread::spawn(move || {
+            animate(
+                &disp,
+                &handed,
+                &stop,
+                (w, h),
+                rot,
+                (&style, &title, &status),
+                ip,
+            )
+        })
     });
     Ok(Splash {
         display,
@@ -335,7 +410,7 @@ pub fn show(look: &Look) -> io::Result<Splash> {
     })
 }
 
-/// Redraw the seventies scene every FRAME until stopped or until cog's picture replaced ours.
+/// Redraw the animated scene every `period` until stopped or until cog's picture replaced ours.
 /// The address is looked up every 2 s and the scene rebuilt when it appears or changes.
 #[allow(clippy::too_many_arguments)]
 fn animate(
@@ -344,13 +419,14 @@ fn animate(
     stop: &AtomicBool,
     (w, h): (usize, usize),
     rot: u8,
-    title: &str,
-    status: &str,
+    (style, title, status): (&str, &str, &str),
     mut ip: Option<String>,
 ) {
     let mut c = Canvas::new(w, h, 0);
     let (lw, lh) = c.logical(rot);
-    let mut scene = seventies::Scene::new(lw, lh, title, status, ip.as_deref());
+    let Some(mut scene) = Scene::new(style, lw, lh, title, status, ip.as_deref()) else {
+        return;
+    };
     let mut l = vec![0; lw * lh];
     let map: Vec<u32> = (0..lw * lh)
         .map(|i| {
@@ -367,7 +443,9 @@ fn animate(
             let now = lan_ip();
             if now != ip {
                 ip = now;
-                scene = seventies::Scene::new(lw, lh, title, status, ip.as_deref());
+                if let Some(s) = Scene::new(style, lw, lh, title, status, ip.as_deref()) {
+                    scene = s;
+                }
             }
         }
         scene.frame(start.elapsed().as_millis() as u64, &mut l);
@@ -389,7 +467,7 @@ fn animate(
                 busy.as_millis() / 20
             );
         }
-        thread::sleep(FRAME.saturating_sub(t0.elapsed()));
+        thread::sleep(scene.period().saturating_sub(t0.elapsed()));
     }
 }
 

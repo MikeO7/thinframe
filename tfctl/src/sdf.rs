@@ -6,6 +6,9 @@ use crate::png;
 use std::sync::OnceLock;
 
 static ATLAS: &[u8] = include_bytes!("../assets/shrikhand.sdf");
+/// Poppins ExtraLight (SIL OFL 1.1) for the "dawn" splash: `fontgen Poppins-ExtraLight.ttf
+/// poppins-extralight.sdf 64 5`. Small text is drawn with `draw_bold` so the thin strokes hold up.
+static THIN_ATLAS: &[u8] = include_bytes!("../assets/poppins-extralight.sdf");
 
 #[derive(Clone, Copy, Default)]
 struct Glyph {
@@ -76,6 +79,12 @@ pub fn font() -> Option<&'static Font> {
     F.get_or_init(|| parse(ATLAS)).as_ref()
 }
 
+/// The thin sans of the "dawn" splash; None only if its atlas is corrupt (a test guards that).
+pub fn thin() -> Option<&'static Font> {
+    static F: OnceLock<Option<Font>> = OnceLock::new();
+    F.get_or_init(|| parse(THIN_ATLAS)).as_ref()
+}
+
 impl Font {
     fn glyph(&self, c: char) -> Glyph {
         let i = (c as u32).wrapping_sub(32) as usize;
@@ -109,7 +118,21 @@ impl Font {
     }
 
     /// Rasterize `text` with its baseline at (`x`, `y`); `plot(x, y, coverage 0..1)` per pixel.
-    pub fn draw(&self, text: &str, x: f32, y: f32, px: f32, mut plot: impl FnMut(i32, i32, f32)) {
+    pub fn draw(&self, text: &str, x: f32, y: f32, px: f32, plot: impl FnMut(i32, i32, f32)) {
+        self.draw_bold(text, x, y, px, 0.0, plot)
+    }
+
+    /// Like `draw`, with every stroke `bold` pixels fatter on each side (0.4 turns ExtraLight
+    /// into something readable at 26 px).
+    pub fn draw_bold(
+        &self,
+        text: &str,
+        x: f32,
+        y: f32,
+        px: f32,
+        bold: f32,
+        mut plot: impl FnMut(i32, i32, f32),
+    ) {
         let s = px / self.base;
         let mut pen = x;
         let mut prev = None;
@@ -142,7 +165,7 @@ impl Font {
                     let top = at(vi, ui) + (at(vi, ui1) - at(vi, ui)) * uf;
                     let bot = at(vi1, ui) + (at(vi1, ui1) - at(vi1, ui)) * uf;
                     let d = (top + (bot - top) * vf - 128.0) / 127.0 * self.spread * s;
-                    let a = (d + 0.5).clamp(0.0, 1.0);
+                    let a = (d + 0.5 + bold).clamp(0.0, 1.0);
                     if a > 0.0 {
                         plot(dx, dy, a);
                     }
@@ -164,6 +187,20 @@ mod tests {
         assert!(w > 500.0 && w < 1100.0, "width {w}");
         assert!((f.measure("ab", 100.0) - 2.0 * f.measure("ab", 50.0)).abs() < 0.5);
         assert_eq!(f.measure("", 40.0), 0.0);
+    }
+
+    #[test]
+    fn thin_atlas_loads_and_bold_fattens() {
+        let f = thin().expect("poppins atlas parses");
+        assert_eq!(f.glyphs.len(), 95);
+        let ink = |bold: f32| {
+            let mut sum = 0.0;
+            f.draw_bold("thinframe", 4.0, 40.0, 26.0, bold, |_, _, a| sum += a);
+            sum
+        };
+        assert!(ink(0.45) > ink(0.0) * 1.25, "{} vs {}", ink(0.45), ink(0.0));
+        let w = f.measure("thinframe", 176.0);
+        assert!(w > 700.0 && w < 1100.0, "width {w}");
     }
 
     #[test]

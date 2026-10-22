@@ -27,6 +27,8 @@ mod b64;
 mod bench;
 mod boot;
 mod config;
+mod dawn;
+mod dawnpage;
 mod drm;
 mod font;
 mod http;

@@ -403,3 +403,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   - 283 MB used includes llvmpipe's buffers, which the frame's lima GPU does not need.
   - The gate (under 50 ms, 60 fps, idle CPU under 5 %) is measured on the panel, so it stays open.
 - `tests/e2e.sh` (Docker sim): ok. `cargo test`: 108 passed. `go test ./...`: ok.
+
+## 2026-10-21 Dawn pages (branch mikeo/dawn-frost)
+- Wi-Fi list, keyboard, joining and PAIR pages restyled onto the Dawn sheet; `dawn` splash is the default [V in QEMU].
+- QEMU journey `BOARD=virt SCREEN=1 FRESH=1`: 41/41 PASS. Screens: docs/img/journey-*.jpg (landscape, rotated 270).
+- `mem used (median of 3): 284 MB` with the page up. One earlier run read 339 MB; not reproducible
+  (284 and 285 with Dawn, 282 with seventies). The check now takes the median, because WebKit's
+  collector moves single readings by about 50 MB.
+- armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
+- Not seen on the panel yet.
