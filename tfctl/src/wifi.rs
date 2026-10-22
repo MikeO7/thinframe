@@ -226,7 +226,7 @@ pub fn parse_networks(text: &str) -> Vec<Net> {
         let dbm = signal
             .parse::<i32>()
             .ok()
-            .map(|v| if v.abs() > 200 { v / 100 } else { v });
+            .map(|v| if v.unsigned_abs() > 200 { v / 100 } else { v });
         nets.push(Net {
             ssid,
             security: security.to_string(),
@@ -436,6 +436,19 @@ mod tests {
             parse_networks("      Network name   Security  Signal\n  No networks available\n")
                 .is_empty()
         );
+    }
+
+    /// Found by fuzz.rs: a signal of i32::MIN made `v.abs()` overflow (a panic in debug).
+    #[test]
+    fn extreme_signal_values_do_not_overflow() {
+        let t = format!(
+            "      Network name   Security  Signal\n      A   psk  -2147483648\n      B   psk  {}\n",
+            i32::MAX
+        );
+        let n = parse_networks(&t);
+        assert_eq!(n.len(), 2);
+        assert!(n.iter().any(|x| x.dbm == Some(i32::MIN / 100)));
+        assert!(n.iter().any(|x| x.dbm == Some(i32::MAX / 100)));
     }
 
     /// A row as iwd 3.0 prints it: `display_table_row(MARGIN, 4, 2, mark, 32, name, 18, type,
