@@ -138,7 +138,8 @@ pub fn parse(text: &str) -> Config {
         .map(String::from)
         .collect();
     if let Some(v) = kv.get("COG_ROTATION") {
-        cfg.rotation = v.parse().unwrap_or(cfg.rotation);
+        // Quarter turns: 0..3, like provision.txt and the server config are held to.
+        cfg.rotation = v.parse().ok().filter(|r| *r < 4).unwrap_or(cfg.rotation);
     }
     if let Some(v) = kv.get("HEALTH_INTERVAL_S") {
         cfg.health_interval_s = v.parse().unwrap_or(cfg.health_interval_s);
@@ -298,6 +299,14 @@ mod tests {
         );
         assert_eq!(parse_rgb("ffffff"), Some(0xffffff));
         assert_eq!(parse_rgb("#fff"), None);
+    }
+
+    /// Found by fuzz.rs: `COG_ROTATION=200` was kept and handed to cog as `rotation=200`.
+    #[test]
+    fn rotation_out_of_range_keeps_the_default() {
+        assert_eq!(parse("COG_ROTATION=200\n").rotation, 3);
+        assert_eq!(parse("COG_ROTATION=4\n").rotation, 3);
+        assert_eq!(parse("COG_ROTATION=0\n").rotation, 0);
     }
 
     #[test]
