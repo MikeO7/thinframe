@@ -126,12 +126,19 @@ impl UEnv {
         out
     }
 
-    /// Write via a temp file + rename, then fsync the file. FAT has no atomic rename
-    /// guarantee but this is the best a user-space writer can do.
+    /// Write a temp file and fsync it, copy the current file to `uEnv.bak` (fsynced too), then
+    /// rename the temp file over it; the caller syncs the file system afterwards. FAT has no
+    /// atomic rename, so a power cut mid-rename can lose `uEnv.txt`; the `.bak` copy means
+    /// U-Boot's built-in defaults are not the only thing left to recover from.
     pub fn save(&self, path: &Path, slot: Slot, tries: u32) -> io::Result<()> {
         let tmp = path.with_extension("tmp");
         fs::write(&tmp, self.render(slot, tries))?;
         fs::File::open(&tmp)?.sync_all()?;
+        if path.is_file() {
+            let bak = path.with_extension("bak");
+            fs::copy(path, &bak)?;
+            fs::File::open(&bak)?.sync_all()?;
+        }
         fs::rename(&tmp, path)
     }
 }
@@ -218,6 +225,16 @@ mod tests {
         let u = UEnv::load(&p).unwrap();
         assert_eq!((u.slot, u.tries), (Some(Slot::B), 3));
         assert!(!dir.join("uEnv.tmp").exists());
+        assert_eq!(
+            fs::read_to_string(dir.join("uEnv.bak")).unwrap(),
+            "slot=a\ntries=0\n",
+            ".bak holds the previous file"
+        );
+        UEnv::load(&p).unwrap().save(&p, Slot::B, 0).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("uEnv.bak")).unwrap(),
+            "slot=b\ntries=3\n"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
