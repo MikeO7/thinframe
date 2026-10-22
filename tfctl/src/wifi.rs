@@ -6,7 +6,6 @@
 //! network list and join, all through `iwctl` (no D-Bus client in tfctl).
 use std::fs;
 use std::io::{self, Read};
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -62,9 +61,8 @@ pub fn configured_ssid(dir: &Path) -> Option<String> {
 
 pub fn write_profile(dir: &Path, ssid: &str, psk: &str) -> io::Result<()> {
     fs::create_dir_all(dir)?;
-    let path = dir.join(profile_name(ssid));
-    fs::write(&path, profile(psk))?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+    // Mode 0600 from the first byte: the profile holds the passphrase.
+    crate::config::write_private(&dir.join(profile_name(ssid)), profile(psk).as_bytes())
 }
 
 fn sh(cmd: &str, args: &[&str]) -> io::Result<String> {
@@ -299,6 +297,7 @@ impl Radio for Iwctl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn profile_format_and_names() {
