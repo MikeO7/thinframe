@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/jpeg"
 	_ "image/png" // register decoder
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,7 +19,44 @@ import (
 	"time"
 
 	"golang.org/x/image/draw"
+
+	"github.com/MikeO7/thinframe/server/internal/store"
 )
+
+// Sizes are the only outputs ever rendered: the panel in both orientations and
+// their halves. Requests snap to one of these, so the cache holds at most four
+// files per photo and no request allocates more than 1280x800 pixels.
+var Sizes = [...]image.Point{{1280, 800}, {800, 1280}, {640, 400}, {400, 640}}
+
+const (
+	maxCursors   = 256 // per-frame cursors kept; the map is cleared past this
+	cacheHigh    = 500 // cache files that trigger eviction
+	cacheLow     = 400 // cache files left after eviction (oldest mtime go first)
+	sharedCursor = ""  // cursor for requests whose frame id is not a valid store id
+)
+
+// snap returns the entry of Sizes with the same orientation nearest w x h by area.
+func snap(w, h int) (int, int) {
+	best, bestD := Sizes[0], -1
+	for _, c := range Sizes {
+		if (c.X >= c.Y) != (w >= h) {
+			continue
+		}
+		d := c.X*c.Y - w*h
+		if d < 0 {
+			d = -d
+		}
+		if bestD < 0 || d < bestD {
+			best, bestD = c, d
+		}
+	}
+	return best.X, best.Y
+}
+
+// encodeJPEG is a variable so tests can force an encode failure.
+var encodeJPEG = func(w io.Writer, m image.Image) error {
+	return jpeg.Encode(w, m, &jpeg.Options{Quality: 85})
+}
 
 // Source lists photos and opens one. Folder is the first implementation.
 type Source interface {
@@ -82,6 +120,12 @@ type Service struct {
 	list     []string
 	listedAt time.Time
 	cursor   map[string]int
+	keys     map[string]*keyLock // per cache key; one generator at a time
+}
+
+type keyLock struct {
+	sync.Mutex
+	refs int
 }
 
 // New returns a Service. cacheDir is created.
@@ -89,15 +133,20 @@ func New(src Source, cacheDir string) (*Service, error) {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return nil, err
 	}
-	return &Service{src: src, cacheDir: cacheDir, cursor: map[string]int{}}, nil
+	return &Service{src: src, cacheDir: cacheDir, cursor: map[string]int{}, keys: map[string]*keyLock{}}, nil
 }
 
 // ErrNoPhotos means the source is empty.
 var ErrNoPhotos = errors.New("no photos")
 
-// Next returns the path of a cached JPEG at w x h for the given frame's next photo.
-// Rescans the source every 5 minutes. Rotation is "recent first", then cyclic.
+// Next returns the path of a cached JPEG for the given frame's next photo, at the
+// entry of Sizes nearest w x h. Frame ids that are not valid store ids share one
+// cursor. Rescans the source every 5 minutes. Rotation is "recent first", then cyclic.
 func (s *Service) Next(frame string, w, h int) (string, error) {
+	w, h = snap(w, h)
+	if !store.ValidID(frame) {
+		frame = sharedCursor
+	}
 	s.mu.Lock()
 	if time.Since(s.listedAt) > 5*time.Minute || s.list == nil {
 		l, err := s.src.List()
@@ -110,6 +159,9 @@ func (s *Service) Next(frame string, w, h int) (string, error) {
 	if len(s.list) == 0 {
 		s.mu.Unlock()
 		return "", ErrNoPhotos
+	}
+	if _, ok := s.cursor[frame]; !ok && len(s.cursor) >= maxCursors {
+		clear(s.cursor)
 	}
 	i := s.cursor[frame] % len(s.list)
 	s.cursor[frame] = i + 1
@@ -125,14 +177,39 @@ func (s *Service) Count() int {
 	return len(s.list)
 }
 
+// lock takes the per-key generation lock and returns its release.
+func (s *Service) lock(key string) func() {
+	s.mu.Lock()
+	k := s.keys[key]
+	if k == nil {
+		k = &keyLock{}
+		s.keys[key] = k
+	}
+	k.refs++
+	s.mu.Unlock()
+	k.Lock()
+	return func() {
+		k.Unlock()
+		s.mu.Lock()
+		if k.refs--; k.refs == 0 {
+			delete(s.keys, key)
+		}
+		s.mu.Unlock()
+	}
+}
+
 func (s *Service) cached(id string, w, h int) (string, error) {
 	st, err := os.Stat(id)
 	if err != nil {
 		return "", err
 	}
 	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%dx%d", id, st.ModTime().UnixNano(), w, h)))
-	out := filepath.Join(s.cacheDir, hex.EncodeToString(sum[:])+".jpg")
+	key := hex.EncodeToString(sum[:])
+	out := filepath.Join(s.cacheDir, key+".jpg")
+	defer s.lock(key)()
 	if _, err := os.Stat(out); err == nil {
+		now := time.Now()
+		_ = os.Chtimes(out, now, now) // keep files in use out of eviction
 		return out, nil
 	}
 	img, err := s.src.Open(id)
@@ -141,17 +218,59 @@ func (s *Service) cached(id string, w, h int) (string, error) {
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.CatmullRom.Scale(dst, dst.Bounds(), img, coverRect(img.Bounds(), w, h), draw.Src, nil)
-	tmp := out + ".tmp"
-	fh, err := os.Create(tmp)
+	fh, err := os.CreateTemp(s.cacheDir, ".gen-*.tmp")
 	if err != nil {
 		return "", err
 	}
-	if err := jpeg.Encode(fh, dst, &jpeg.Options{Quality: 85}); err != nil {
-		fh.Close()
+	tmp := fh.Name()
+	err = encodeJPEG(fh, dst)
+	if cerr := fh.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, out)
+	}
+	if err != nil {
+		os.Remove(tmp)
 		return "", err
 	}
-	fh.Close()
-	return out, os.Rename(tmp, out)
+	s.evict(out)
+	return out, nil
+}
+
+// evict deletes the oldest cache files by mtime once there are more than
+// cacheHigh, leaving cacheLow. keep (the file just written) is never removed.
+func (s *Service) evict(keep string) {
+	ents, err := os.ReadDir(s.cacheDir)
+	if err != nil {
+		return
+	}
+	type ent struct {
+		p string
+		t time.Time
+	}
+	var files []ent
+	for _, e := range ents {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".jpg" {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			files = append(files, ent{filepath.Join(s.cacheDir, e.Name()), info.ModTime()})
+		}
+	}
+	if len(files) <= cacheHigh {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].t.Before(files[j].t) })
+	n := len(files)
+	for _, f := range files {
+		if n <= cacheLow {
+			break
+		}
+		if f.p != keep && os.Remove(f.p) == nil {
+			n--
+		}
+	}
 }
 
 // coverRect picks the largest centred sub-rectangle of src with the w:h aspect.
