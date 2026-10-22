@@ -411,7 +411,9 @@ impl Agent {
                 return Ok(());
             }
             if last_hb.elapsed() >= HEARTBEAT {
-                c.send_text(&self.status_json("heartbeat").to_string())?;
+                let hb = self.status_json("heartbeat").to_string();
+                crate::dbg::log("ws tx", &hb);
+                c.send_text(&hb)?;
                 last_hb = Instant::now();
             }
             if last_ping.elapsed() >= PING {
@@ -453,7 +455,9 @@ impl Agent {
                     eprintln!("tfctl: agent: action {name}: {e}");
                     ack = ack.set("error", e.to_string());
                 }
-                c.send_text(&ack.to_string())?;
+                let ack = ack.to_string();
+                crate::dbg::log("ws tx", &ack);
+                c.send_text(&ack)?;
             }
             "ping" => c.send_text(&Value::obj().set("type", "pong").to_string())?,
             other => eprintln!("tfctl: agent: ignoring message type '{other}'"),
