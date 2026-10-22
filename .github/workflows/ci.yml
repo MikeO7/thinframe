@@ -1,5 +1,9 @@
 name: ci
-on: [push, pull_request]
+# PRs run once: pull_request covers every branch; push only re-checks main after a merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
 permissions: { contents: read }
 jobs:
   shell:

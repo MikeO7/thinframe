@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -97,5 +99,92 @@ func TestPairRejectsBadInputAndExpires(t *testing.T) {
 	r, body := do(t, "GET", ts.URL+"/admin", "", nil)
 	if r.StatusCode != 200 || strings.Contains(string(body), "forget pairing") {
 		t.Fatalf("admin shows an unpaired frame as paired")
+	}
+}
+
+// from sends one pairing call to h as if from ip. JSON body for /api/pair, form for accept.
+func from(h http.Handler, ip, method, path, body string) int {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.RemoteAddr = ip + ":40000"
+	if strings.HasSuffix(path, "/accept") {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+func pairBody(id, nonce string) string { return fmt.Sprintf(`{"id":%q,"nonce":%q}`, id, nonce) }
+
+// Another LAN host can neither accept, collect nor replace a frame's open request.
+func TestPairBoundToSourceIP(t *testing.T) {
+	s, _ := newTest(t, "")
+	h := s.Routes()
+	const frame, other = "192.168.1.50", "192.168.1.66"
+	const nonce, nonce2 = "0123456789abcdef0123", "fedcba9876543210fedc"
+	if c := from(h, frame, "POST", "/api/pair", pairBody("kitchen", nonce)); c != 202 {
+		t.Fatalf("request: %d", c)
+	}
+	if c := from(h, other, "POST", "/api/pair", pairBody("kitchen", nonce2)); c != 409 {
+		t.Fatalf("other IP replaced an open request: %d", c)
+	}
+	if c := from(h, other, "POST", "/pair/kitchen/accept", "nonce="+nonce); c != 404 {
+		t.Fatalf("accept from another IP: %d", c)
+	}
+	if c := from(h, other, "GET", "/api/pair/kitchen?nonce="+nonce, ""); c != 404 {
+		t.Fatalf("poll from another IP: %d", c)
+	}
+	// A rebooted frame (same IP, new nonce) replaces its own request; the old nonce is dead.
+	if c := from(h, frame, "POST", "/api/pair", pairBody("kitchen", nonce2)); c != 202 {
+		t.Fatalf("same IP replace: %d", c)
+	}
+	if c := from(h, frame, "POST", "/pair/kitchen/accept", "nonce="+nonce); c != 404 {
+		t.Fatalf("accept with the replaced nonce: %d", c)
+	}
+	if c := from(h, frame, "POST", "/pair/kitchen/accept", "nonce="+nonce2); c != 200 {
+		t.Fatalf("accept from the frame: %d", c)
+	}
+	if c := from(h, other, "GET", "/api/pair/kitchen?nonce="+nonce2, ""); c != 404 {
+		t.Fatalf("token handed to another IP: %d", c)
+	}
+	if c := from(h, frame, "GET", "/api/pair/kitchen?nonce="+nonce2, ""); c != 200 {
+		t.Fatalf("pickup from the frame: %d", c)
+	}
+	// An expired request from one IP no longer blocks another.
+	from(h, frame, "POST", "/api/pair", pairBody("hall", nonce))
+	s.mu.Lock()
+	s.pair.open["hall"].created = time.Now().Add(-pairTTL - time.Second)
+	s.mu.Unlock()
+	if c := from(h, other, "POST", "/api/pair", pairBody("hall", nonce2)); c != 202 {
+		t.Fatalf("other IP after expiry: %d", c)
+	}
+}
+
+func TestPairCapPerIP(t *testing.T) {
+	s, _ := newTest(t, "")
+	h := s.Routes()
+	const nonce = "0123456789abcdef0123"
+	for i := range pairMaxIP {
+		if c := from(h, "10.0.0.9", "POST", "/api/pair", pairBody(fmt.Sprintf("f%d", i), nonce)); c != 202 {
+			t.Fatalf("request %d: %d", i, c)
+		}
+	}
+	if c := from(h, "10.0.0.9", "POST", "/api/pair", pairBody("one-more", nonce)); c != 429 {
+		t.Fatalf("over the per-IP cap: %d", c)
+	}
+	if c := from(h, "10.0.0.9", "POST", "/api/pair", pairBody("f0", "fedcba9876543210fedc")); c != 202 {
+		t.Fatalf("replacing its own request at the cap: %d", c)
+	}
+	if c := from(h, "10.0.0.10", "POST", "/api/pair", pairBody("one-more", nonce)); c != 202 {
+		t.Fatalf("another IP under the cap: %d", c)
+	}
+	// The global cap still holds across many IPs.
+	for i := pairMaxIP + 1; i < pairMaxOpen; i++ {
+		if c := from(h, fmt.Sprintf("10.1.0.%d", i), "POST", "/api/pair", pairBody(fmt.Sprintf("g%d", i), nonce)); c != 202 {
+			t.Fatalf("global fill %d: %d", i, c)
+		}
+	}
+	if c := from(h, "10.2.0.1", "POST", "/api/pair", pairBody("last", nonce)); c != 429 {
+		t.Fatalf("over the global cap: %d", c)
 	}
 }
