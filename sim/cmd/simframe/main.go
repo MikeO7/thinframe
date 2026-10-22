@@ -21,6 +21,7 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,6 +35,10 @@ const (
 	driverURL = "http://127.0.0.1:4444"
 	confPath  = "/tmp/thinframe.conf"
 )
+
+// wdClient bounds every WebDriver call: one hung WPEWebDriver request must not stall the
+// screenshot loop forever (frame.png would silently stop updating).
+var wdClient = &http.Client{Timeout: 30 * time.Second}
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
@@ -135,16 +140,20 @@ func wd(method, path string, body any) map[string]any {
 	}
 	req, _ := http.NewRequest(method, driverURL+path, rd)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := wdClient.Do(req)
 	if err != nil {
-		log.Printf("webdriver %s %s: %v", method, path, err)
+		logWDErr(method, path, err)
 		return nil
 	}
 	defer resp.Body.Close()
 	var out struct {
 		Value map[string]any `json:"value"`
 	}
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logWDErr(method, path, err)
+		return nil
+	}
 	if json.Unmarshal(raw, &out) != nil {
 		// screenshot returns a bare string value
 		var s struct {
@@ -162,6 +171,14 @@ func wd(method, path string, body any) map[string]any {
 		out.Value["_error"] = string(raw)
 	}
 	return out.Value
+}
+
+func logWDErr(method, path string, err error) {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		log.Printf("webdriver %s %s: timed out after %s", method, path, wdClient.Timeout)
+		return
+	}
+	log.Printf("webdriver %s %s: %v", method, path, err)
 }
 
 func newSession() string {
