@@ -151,7 +151,9 @@ func (s *Server) handlePairAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	if p := s.pending(id); p != nil {
+	// Only the request that was accepted gets the token. A newer request for the
+	// same id (a different nonce) may have replaced it while the store was updated.
+	if s.pair.open[id] == p {
 		p.token = tok
 	}
 	s.mu.Unlock()
