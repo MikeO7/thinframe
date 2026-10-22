@@ -422,3 +422,84 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   Now compares the pointer. `handleDeleteFrame` now kicks the live socket and drops the open pair request
   (`TestDeleteFrameKicksSocket`) [V].
 - `go test -race ./...`, `go vet`: clean.
+## 2026-10-22 Audit chunk 2: no guessed eMMC mount
+- `sysupdate::boot_rw` fell back to mounting `/dev/mmcblk0p1` read-write when `/boot` was not mounted
+  and the caller (`rollback`, `confirm_slot`) passed no disk. On a frame where the SD card is mmcblk1,
+  mmcblk0 is the Android eMMC, so that path broke the "never write the eMMC" rule and then wrote
+  `uEnv.txt` there. Now every /boot mount resolves the partition from `slot::find_disk` (MBR
+  signature) and refuses when no signed disk exists. `card_is_the_signed_disk_or_nothing` [V].
+- `cargo test`: 118 passed. clippy clean.
+## 2026-10-22 Audit chunk 3: secret files on the frame
+- `/data/etc/thinframe.conf` (holds `FRAME_TOKEN`) was written with the umask mode, 0644, and the
+  iwd profile (the passphrase) was 0644 until the chmod after the write. Both now go through
+  `config::write_private`: created 0600 before the first byte, `sync_all` before the rename.
+  `save_overrides_creates_file` asserts the mode [V].
+- `cargo test`: 117 passed. clippy clean.
+## 2026-10-22 Audit chunk 4: PNG decode limits
+- `png::decode` accepted any image up to 4096 x 4096. The IHDR is 13 bytes and deflate reaches
+  1000:1, so a 48 KiB `splash_png` from the server could declare 3500 x 3500 and cost about 256 MB
+  to decode on the frame while cog runs. `decode` now refuses more than 1280 x 1280 pixels on the
+  header alone (`rejects_images_larger_than_the_panel`); `inflate` reserves the exact output;
+  `store_logo` refuses base64 past 48 KiB before decoding [V].
+- `cargo test`: 118 passed. clippy clean.
+## 2026-10-22 Audit chunk 5: card writer guards
+- `scripts/flash.sh` (the card writer; CLAUDE.md named a `write-card-macos.sh` that never existed)
+  checked for a mounted system volume only on Linux. The macOS branch now refuses a disk with any
+  partition mounted at `/`, `/System/...` or `/private/var/vm`. `write_card` re-lists the cards and
+  requires the confirmed name and size to still match right before `dd` (a card swapped during the
+  sudo prompt is refused). The `sudo bash -c` string no longer interpolates the image path; it takes
+  the paths as arguments. `tests/flash-test.sh` shims `uname` and runs both OS paths everywhere [V].
+## 2026-10-22 Audit chunk 6: release workflow guards
+- `release.yml` accepted `workflow_dispatch` from any ref: a run on a feature branch tagged it
+  `v<date>` and published it as `releases/latest`, which `flash.sh` downloads. The `tag` job now
+  runs only on main or a `v*` tag, and every other job needs it. Both workflows default to a
+  read-only token (`permissions: { contents: read }`); the jobs that write already raise their own.
+## 2026-10-22 Audit chunk 7: store durability
+- `store.save` wrote and renamed with no fsync; `Open` failed on any frame file that did not parse,
+  and `main` treats that as fatal, so one torn file after a power cut kept the container restarting
+  with every frame dark. `Update` changed memory before saving, so a full disk left the server
+  acting on state the next restart would not have. Now: file fsync, rename, directory fsync; a bad
+  file is moved to `<id>.json.bad` and logged; `Update` runs on a copy and commits to memory only
+  after the save; `Pending` is capped at 32 (the hub's replay buffer). Three new tests [V].
+
+## 2026-10-22 Audit chunk 8: update paths
+- `sysupdate::write_rootfs` kept the zstd pipe's read end inside the `dd` Command after `output()`
+  returned, so a dd that quit early (ENOSPC, device would not open) left zstd blocked on a full
+  pipe and the sysupdate thread waiting forever with `busy=true`; every later system update was
+  refused as "already running" until tfctl restarted. The Command is dropped as soon as dd exits,
+  and zstd is killed when dd failed.
+- `update::record_start_at` used `saturating_sub`, so a start logged with a real clock looked
+  "recent" on the next cold boot, when the A33 (no RTC battery) is back in 1970. A power cut right
+  after a good software update then rolled the healthy binary back. Starts after `now` no longer
+  count. `starts_from_before_a_reboot_are_not_recent` [V].
+- `cargo test`: 118 passed. clippy clean.
+
+## 2026-10-22 Audit chunk 9: A/B slot guards
+- `sysupdate::system` overwrote the standby slot even while U-Boot was still counting tries for
+  the running one, so a second update arriving before the first was confirmed could leave no slot
+  known to boot. It now refuses with "not confirmed" until `confirm_slot` has zeroed the counter.
+- `rollback` wrote `tries=0`, so a damaged other slot (a dd that died mid-write) would boot-loop
+  with no fallback. It now writes `tries=3`, like a fresh update; `confirm_slot` clears it.
+- `http_poll` never confirmed anything, so a frame that only reached the server over HTTP stayed
+  unconfirmed and two power cuts reverted a healthy update. A successful poll now runs the same
+  `on_connect` as a WebSocket connect. Tests updated [V].
+- `cargo test`: 117 passed. clippy clean.
+## 2026-10-22 Audit chunk 10: tfctl hardening
+- `touchfw::pointer` indexed `secs[sec]` with a section index from the module file; a corrupt
+  `gslX680new.ko` aborted `tfctl boot`. Now a checked lookup.
+- `drm::write` used `chunks(w)` and copied `w*4` bytes from a possibly short last row. `chunks_exact`.
+- `http`: the path (frame id, artifact name) and the token went into the request line unchecked; a
+  server-supplied name with CR LF injected a header. Bytes at or below space, or 0x7f, are refused
+  (`request_values_reject_control_characters_and_spaces`).
+- `maybe_auto_update` returns once a software update set `exit`, so a process about to restart no
+  longer starts a system update (an orphaned dd, then a second one).
+- `provision::apply` removes `provision.txt` (passphrase and token on FAT) on every exit path.
+- `cargo test`: 118 passed. clippy clean.
+
+## 2026-10-22 Audit: what was left open
+- Four read-only audits (tfctl core, tfctl network and UI, the Go server, scripts and image) gave
+  48 findings; chunks 1 to 10 above fix the ones traced to a concrete failure. Still open, each a
+  product decision: `/admin` has no auth or CSRF guard; pairing lets the requester accept its own
+  request; the Wi-Fi passphrase is on the `iwctl --passphrase` command line during a join; `/data`
+  mounts without fsck; `/api/data/photo/next` is unauthenticated and its cache never shrinks;
+  `scripts/deploy.sh` targets another OS. Listed for the owner in the PR thread of 2026-10-22.
