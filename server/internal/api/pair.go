@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"io"
 	"net"
@@ -27,7 +28,8 @@ import (
 const (
 	pairTTL     = 15 * time.Minute
 	pairMaxOpen = 32
-	pairMaxIP   = 4 // open requests from one source IP
+	pairMaxIP   = 4    // open requests from one source IP
+	maxPairForm = 4096 // the PAIR button's form: one nonce
 )
 
 type pairReq struct {
@@ -128,6 +130,15 @@ p{margin:0}small{display:block;font-size:30px;color:#b8452a;margin-top:.5em}</st
 // handlePairAccept: POST /pair/{id}/accept (form nonce=), sent by the PAIR button on the frame.
 func (s *Server) handlePairAccept(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	r.Body = http.MaxBytesReader(w, r.Body, maxPairForm)
+	if err := r.ParseForm(); err != nil {
+		code := http.StatusBadRequest
+		if _, big := errors.AsType[*http.MaxBytesError](err); big {
+			code = http.StatusRequestEntityTooLarge
+		}
+		http.Error(w, "bad pairing form", code)
+		return
+	}
 	nonce := r.FormValue("nonce")
 	page := func(code int, title, detail string) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

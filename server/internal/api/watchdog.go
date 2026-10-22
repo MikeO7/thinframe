@@ -20,16 +20,19 @@ type pageWatch struct {
 }
 
 // handleAlive takes the page's ping (no auth: sendBeacon cannot set headers; a forged ping can
-// only delay a restart).
+// only delay a restart). Only known frames are remembered, so pings for made-up ids cannot grow
+// the map; the answer is the same either way.
 func (s *Server) handleAlive(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !store.ValidID(id) {
 		http.Error(w, "bad frame id", http.StatusBadRequest)
 		return
 	}
-	s.page.mu.Lock()
-	s.page.last[id] = time.Now()
-	s.page.mu.Unlock()
+	if _, err := s.Store.Get(id); err == nil {
+		s.page.mu.Lock()
+		s.page.last[id] = time.Now()
+		s.page.mu.Unlock()
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
