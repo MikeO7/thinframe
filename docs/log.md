@@ -418,3 +418,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   `v<date>` and published it as `releases/latest`, which `flash.sh` downloads. The `tag` job now
   runs only on main or a `v*` tag, and every other job needs it. Both workflows default to a
   read-only token (`permissions: { contents: read }`); the jobs that write already raise their own.
+## 2026-10-22 Audit chunk 1: server hub and pairing
+- `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
+  frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
+  bare goroutine, so one Wi-Fi flap during an action could kill frameserver. Fixed by sending under the
+  read lock. `TestSendDuringReconnectDoesNotPanic` reproduces `panic: send on closed channel` on the old code [V].
+- `handlePairAccept` handed the token to whatever request was open at the end, not the one it accepted.
+  Now compares the pointer. `handleDeleteFrame` now kicks the live socket and drops the open pair request
+  (`TestDeleteFrameKicksSocket`) [V].
+- `go test -race ./...`, `go vet`: clean.

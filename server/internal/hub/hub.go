@@ -79,9 +79,11 @@ func (h *Hub) Send(id string, m Msg) bool {
 	if err != nil {
 		return false
 	}
+	// The send happens under the read lock: Add and the done func close c.send
+	// under the write lock, and a send on a closed channel panics even in a select.
 	h.mu.RLock()
+	defer h.mu.RUnlock()
 	c, ok := h.conns[id]
-	h.mu.RUnlock()
 	if !ok {
 		return false
 	}
