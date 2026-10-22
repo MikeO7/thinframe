@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -27,6 +28,15 @@ var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
 			return v
 		}
 		return def
+	},
+	// A stored src that fails iframeSrc (layouts saved before the check) renders blank.
+	// about:blank is a constant; html/template would otherwise filter it to the
+	// relative "#ZgotmplZ", which loads this dashboard inside its own iframe.
+	"iframesrc": func(w store.Widget) any {
+		if s, err := iframeSrc(w); err == nil && s != "" {
+			return s
+		}
+		return template.URL("about:blank")
 	},
 }).ParseFS(files, "templates/*.html"))
 
@@ -111,6 +121,11 @@ func Validate(l store.Layout) error {
 		if w.X < 0 || w.Y < 0 || w.W < 1 || w.H < 1 || w.X+w.W > l.Cols || w.Y+w.H > l.Rows {
 			return fmt.Errorf("widget %s: outside the %dx%d grid", w.ID, l.Cols, l.Rows)
 		}
+		if w.Type == "iframe" {
+			if _, err := iframeSrc(w); err != nil {
+				return fmt.Errorf("widget %s: %w", w.ID, err)
+			}
+		}
 		for x := w.X; x < w.X+w.W; x++ {
 			for y := w.Y; y < w.Y+w.H; y++ {
 				if other, ok := cells[[2]int{x, y}]; ok {
@@ -121,6 +136,22 @@ func Validate(l store.Layout) error {
 		}
 	}
 	return nil
+}
+
+// iframeSrc returns an iframe widget's src prop: "" when unset (renders about:blank),
+// otherwise it must be an absolute http:// or https:// URL with a host. Relative and
+// same-origin paths would load this server's pages next to the dashboard.
+func iframeSrc(w store.Widget) (string, error) {
+	v, ok := w.Props["src"]
+	if !ok {
+		return "", nil
+	}
+	s, _ := v.(string)
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", fmt.Errorf("iframe src must be an absolute http:// or https:// URL with a host, got %q", fmt.Sprint(v))
+	}
+	return s, nil
 }
 
 func known(t string) bool {

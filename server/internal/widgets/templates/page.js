@@ -13,14 +13,20 @@
   tickClock();
 
   document.querySelectorAll('.w-photo').forEach(sec => {
-    const img = sec.querySelector('img');
+    let img = sec.querySelector('img');
     img.onerror = () => { img.style.opacity = 0; };
     img.onload = () => { img.style.opacity = 1; };
     img.src = '/api/data/photo/next?frame=' + encodeURIComponent(TF.frame) + '&t=' + Date.now();
     const every = Math.max(10, Number(img.dataset.interval || 600)) * 1000;
+    // Show the preloaded element itself: each request advances the rotation (no-store), so
+    // reassigning img.src would fetch and decode a second photo and skip the first.
     function next() {
       const n = new Image();
-      n.onload = () => { img.style.opacity = 0; setTimeout(() => { img.src = n.src; img.style.opacity = 1; }, 300); };
+      n.alt = ''; n.style.opacity = 0;
+      n.onload = () => {
+        img.style.opacity = 0;
+        setTimeout(() => { img.replaceWith(n); img = n; void n.offsetWidth; n.style.opacity = 1; }, 300);
+      };
       n.src = '/api/data/photo/next?frame=' + encodeURIComponent(TF.frame) + '&t=' + Date.now();
     }
     setInterval(next, every);
@@ -67,5 +73,6 @@
   alive();
   setInterval(alive, 30000);
 
-  window.toast = t => { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2500); };
+  let toastT;
+  window.toast = t => { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2500); };
 })();
