@@ -84,6 +84,10 @@ pub fn path() -> String {
     std::env::var("TFCTL_CONF").unwrap_or_else(|_| DEFAULT_PATH.into())
 }
 
+/// The config file is world-readable (the `frame` ssh user runs `tfctl status`, the tests grep
+/// it); the token is not. It lives next to the real file as `thinframe.token`, mode 0600, and
+/// wins over a `FRAME_TOKEN` line left in the file by an older tfctl. A reader that may not
+/// open the token file (not root) gets an empty token, not an error.
 pub fn load(path: &str) -> io::Result<Config> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
@@ -92,7 +96,19 @@ pub fn load(path: &str) -> io::Result<Config> {
     };
     let mut cfg = parse(&text);
     cfg.path = path.to_string();
+    if let Ok(t) = fs::read_to_string(token_path(path)) {
+        let t = t.trim();
+        if !t.is_empty() {
+            cfg.token = t.to_string();
+        }
+    }
     Ok(cfg)
+}
+
+/// `/etc/thinframe.conf` -> `/data/etc/thinframe.token` (the link is followed: `/etc` is
+/// read-only on the frame).
+pub fn token_path(conf: &str) -> std::path::PathBuf {
+    resolve_target(Path::new(conf)).with_extension("token")
 }
 
 pub fn parse(text: &str) -> Config {
@@ -159,6 +175,9 @@ pub fn parse_rgb(s: &str) -> Option<u32> {
 /// Rewrite the given keys in place (comments, order and unrelated lines preserved), append the
 /// ones that were missing, drop duplicates of a rewritten key. Atomic via rename next to the
 /// real file: on the frame /etc/thinframe.conf is a symlink into /data (the root is read-only).
+/// `FRAME_TOKEN` never lands in the file: it goes to the 0600 token file (an empty value
+/// removes it) and the line in the file is blanked. A token an older tfctl left in the file is
+/// moved out on the next save, whatever keys that save carries.
 pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
     let real = resolve_target(Path::new(path));
     let path = real.to_str().unwrap_or(path);
@@ -167,9 +186,43 @@ pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
+    let legacy = parse(&text).token;
+    let token = kv
+        .iter()
+        .find(|(k, _)| *k == "FRAME_TOKEN")
+        .map(|(_, v)| *v)
+        .or((!legacy.is_empty()).then_some(legacy.as_str()));
+    let mut kv: Vec<(&str, &str)> = kv
+        .iter()
+        .copied()
+        .filter(|(k, _)| *k != "FRAME_TOKEN")
+        .collect();
+    if let Some(t) = token {
+        save_token(Path::new(path), t)?;
+        if !legacy.is_empty() {
+            kv.push(("FRAME_TOKEN", ""));
+        }
+    }
     let tmp = format!("{path}.tmp");
-    write_private(Path::new(&tmp), apply_overrides(&text, kv).as_bytes())?;
+    write_mode(
+        Path::new(&tmp),
+        apply_overrides(&text, &kv).as_bytes(),
+        0o644,
+    )?;
     fs::rename(&tmp, path)
+}
+
+fn save_token(conf: &Path, token: &str) -> io::Result<()> {
+    let tp = conf.with_extension("token");
+    if token.is_empty() {
+        return match fs::remove_file(&tp) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    }
+    let tmp = conf.with_extension("token.tmp");
+    write_private(&tmp, format!("{token}\n").as_bytes())?;
+    fs::rename(&tmp, &tp)
 }
 
 /// Where a write to `path` lands: the symlink target, followed even when it does not exist yet
@@ -193,13 +246,17 @@ fn resolve_target(path: &Path) -> std::path::PathBuf {
 /// Write a file that may hold a secret (the token, a Wi-Fi passphrase): created mode 0600
 /// before any byte lands in it, and flushed to disk so a rename right after is durable.
 pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_mode(path, bytes, 0o600)
+}
+
+fn write_mode(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .mode(0o600)
+        .mode(mode)
         .open(path)?;
     f.write_all(bytes)?;
     f.sync_all()
@@ -269,12 +326,41 @@ mod tests {
         let c = load(ps).unwrap();
         assert_eq!(c.frame_id, "kitchen");
         assert_eq!(c.token, "t0k");
-        // The file holds the token: only root reads it.
+        // The token is not in the world-readable file; it is in the 0600 token file.
         use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&p), 0o644);
+        assert!(!fs::read_to_string(&p).unwrap().contains("t0k"));
+        let tp = dir.join("thinframe.token");
+        assert_eq!(mode(&tp), 0o600);
+        assert_eq!(fs::read_to_string(&tp).unwrap(), "t0k\n");
+        // Forgetting the token removes the file.
+        save_overrides(ps, &[("FRAME_TOKEN", "")]).unwrap();
+        assert!(!tp.exists());
+        assert_eq!(load(ps).unwrap().token, "");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_token_left_in_the_file_by_an_older_tfctl_moves_out_on_the_next_save() {
+        let dir = std::env::temp_dir().join(format!("tfctl-cfg-mig-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("thinframe.conf");
+        let ps = p.to_str().unwrap();
+        fs::write(&p, "FRAME_ID=\"a\"\nFRAME_TOKEN=\"old\"\n").unwrap();
+        assert_eq!(load(ps).unwrap().token, "old");
+        save_overrides(ps, &[("TZ", "UTC")]).unwrap();
+        let text = fs::read_to_string(&p).unwrap();
+        assert!(text.contains("FRAME_TOKEN=\"\"\n"), "{text}");
+        assert!(!text.contains("old"));
         assert_eq!(
-            fs::metadata(&p).unwrap().permissions().mode() & 0o777,
-            0o600
+            fs::read_to_string(dir.join("thinframe.token")).unwrap(),
+            "old\n"
         );
+        assert_eq!(load(ps).unwrap().token, "old");
+        // A new token replaces it; the token file wins over any line in the file.
+        save_overrides(ps, &[("FRAME_TOKEN", "new")]).unwrap();
+        assert_eq!(load(ps).unwrap().token, "new");
         fs::remove_dir_all(&dir).unwrap();
     }
 

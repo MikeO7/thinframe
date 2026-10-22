@@ -23,7 +23,8 @@ The frame's own `www/` is only the offline fallback.
 ## Changing config
 `/etc/thinframe.conf` is a symlink to the data partition (`/data/etc/thinframe.conf`) and
 written by `tfctl` (config pushed from the server, `provision.txt`, `tfctl set` as root). The
-image default is `image/rootfs/etc/thinframe.conf`.
+image default is `image/rootfs/etc/thinframe.conf`. The server token is not in it: it sits in
+`/data/etc/thinframe.token`, root only, so `frame` can read the conf but not the secret.
 
 ## Wi-Fi
 Put `WIFI_SSID`/`WIFI_PSK` in `provision.txt` on PFBOOT and reboot, or (as root) `tfctl wifi
