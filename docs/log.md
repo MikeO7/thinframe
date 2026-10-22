@@ -420,3 +420,12 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   requires the confirmed name and size to still match right before `dd` (a card swapped during the
   sudo prompt is refused). The `sudo bash -c` string no longer interpolates the image path; it takes
   the paths as arguments. `tests/flash-test.sh` shims `uname` and runs both OS paths everywhere [V].
+## 2026-10-22 Audit chunk 1: server hub and pairing
+- `hub.Send` wrote to a channel after dropping the lock; `Add` closes that channel under the lock when a
+  frame reconnects. A send on a closed channel panics even in a `select`, and `checkPage` runs it from a
+  bare goroutine, so one Wi-Fi flap during an action could kill frameserver. Fixed by sending under the
+  read lock. `TestSendDuringReconnectDoesNotPanic` reproduces `panic: send on closed channel` on the old code [V].
+- `handlePairAccept` handed the token to whatever request was open at the end, not the one it accepted.
+  Now compares the pointer. `handleDeleteFrame` now kicks the live socket and drops the open pair request
+  (`TestDeleteFrameKicksSocket`) [V].
+- `go test -race ./...`, `go vet`: clean.
