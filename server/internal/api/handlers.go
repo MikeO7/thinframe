@@ -246,6 +246,10 @@ func (s *Server) handlePhotoNext(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !store.ValidID(id) {
+		http.Error(w, "bad frame id", http.StatusBadRequest)
+		return
+	}
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", 500)

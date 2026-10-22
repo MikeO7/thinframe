@@ -22,8 +22,13 @@ type pageWatch struct {
 // handleAlive takes the page's ping (no auth: sendBeacon cannot set headers; a forged ping can
 // only delay a restart).
 func (s *Server) handleAlive(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !store.ValidID(id) {
+		http.Error(w, "bad frame id", http.StatusBadRequest)
+		return
+	}
 	s.page.mu.Lock()
-	s.page.last[r.PathValue("id")] = time.Now()
+	s.page.last[id] = time.Now()
 	s.page.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
