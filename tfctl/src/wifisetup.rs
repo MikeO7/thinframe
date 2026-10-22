@@ -22,6 +22,8 @@ pub const GRACE: Duration = Duration::from_secs(45);
 const RESCAN: Duration = Duration::from_secs(20);
 const STEP: Duration = Duration::from_secs(2);
 const FONT: &str = "/usr/share/fonts/thinframe/Shrikhand-Regular.ttf";
+const POPPINS: &str = "/usr/share/fonts/thinframe/Poppins-Regular.ttf";
+const POPPINS_LIGHT: &str = "/usr/share/fonts/thinframe/Poppins-ExtraLight.ttf";
 
 #[derive(Default)]
 pub struct Setup {
@@ -39,6 +41,8 @@ pub struct Setup {
     pub missing: Option<String>,
     pub frame_id: String,
     pub backdrop: Option<String>,
+    /// `SPLASH_STYLE=dawn`: the frosted-sheet look (dawnpage.rs) instead of the seventies cards.
+    pub dawn: bool,
 }
 
 pub type Shared = Arc<Mutex<Setup>>;
@@ -329,6 +333,8 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
             see_other("/wifi")
         }
         ("GET", "/font.ttf") => file(FONT, "font/ttf"),
+        ("GET", "/poppins.ttf") => file(POPPINS, "font/ttf"),
+        ("GET", "/poppins-light.ttf") => file(POPPINS_LIGHT, "font/ttf"),
         ("GET", "/backdrop.png") => match lock(st).backdrop.clone() {
             Some(p) => file(&p, "image/png"),
             None => not_found(),
@@ -361,6 +367,7 @@ background:#f4dcaa;border:.6vh solid #5b3a1e;border-radius:3vh;box-shadow:1.2vh 
 h1{margin:0 0 .2em;font-size:6.4vh;font-weight:400;color:#b8452a;line-height:1.1}p{margin:.2em 0 .6em}\
 .steps{position:absolute;right:3vw;top:2.4vh;font-size:3vh;background:#f4dcaa;border:.4vh solid #5b3a1e;\
 border-radius:999px;padding:.1em .8em}.steps b{color:#b8452a;font-weight:400}\
+.note{font:2.8vh 'DejaVu Sans',sans-serif}\
 .err{color:#f4dcaa;background:#b8452a;border-radius:1.5vh;padding:.3em .7em;font:2.8vh 'DejaVu Sans',sans-serif}\
 ul{list-style:none;margin:0 0 1.4vh;padding:0;max-height:52vh;overflow-y:auto}\
 li a{display:flex;align-items:center;gap:1.2vw;color:inherit;text-decoration:none;padding:1.4vh 1vw;\
@@ -386,11 +393,15 @@ fn page(s: &Setup, step: &str, body: &str, refresh: Option<u32>, script: &str) -
     let meta = refresh
         .map(|r| format!("<meta http-equiv=\"refresh\" content=\"{r};url=/wifi\">"))
         .unwrap_or_default();
+    let css = if s.dawn {
+        crate::dawnpage::css("/poppins.ttf", "/poppins-light.ttf", bg)
+    } else {
+        CSS.replace("BG", bg)
+    };
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">{meta}<title>thinframe</title>\
-         <style>{}</style></head><body><div class=\"steps\">{step}</div>{body}\
+         <style>{css}</style></head><body><div class=\"steps\">{step}</div>{body}\
          <small>frame {}</small>{script}</body></html>",
-        CSS.replace("BG", bg),
         esc(&s.frame_id)
     )
 }
@@ -506,7 +517,7 @@ pub fn render_password(s: &Setup, ssid: &str, net: Option<&Net>) -> String {
         );
         return page(s, STEP1, &body, None, "");
     }
-    let css = "<style>.wide h1{font-size:5vh}.top{display:flex;align-items:center;gap:2vw}\
+    let seventies = "<style>.wide h1{font-size:5vh}.top{display:flex;align-items:center;gap:2vw}\
         .field{flex:1;font:4.4vh 'DejaVu Sans Mono',monospace;background:#fff6e0;border:.4vh solid #5b3a1e;\
         border-radius:1.5vh;padding:.25em .5em;white-space:pre;overflow:hidden}\
         .row{display:flex;gap:1.5vw;align-items:center;margin:0}\
@@ -516,6 +527,11 @@ pub fn render_password(s: &Setup, ssid: &str, net: Option<&Net>) -> String {
         #kb button.k2{background:#eecb8d;min-width:10.5vw;font:3.4vh Shrikhand,Georgia,serif}\
         #kb button.on{background:#d9662b;color:#f4dcaa}#kb button.sp{min-width:44vw;font:3.4vh Shrikhand,Georgia,serif}\
         small,.steps{display:none}.hint{opacity:.35}</style>";
+    let css = if s.dawn {
+        format!("<style>{}</style>", crate::dawnpage::KEYBOARD_CSS)
+    } else {
+        seventies.to_string()
+    };
     let body = format!(
         "{css}<main class=\"card wide\"><div class=\"top\"><h1>{}</h1>{err}</div>\
          <div class=\"top\"><div class=\"field\" id=\"pw\"></div>{form_head}\
@@ -529,7 +545,7 @@ pub fn render_password(s: &Setup, ssid: &str, net: Option<&Net>) -> String {
 fn render_joining(s: &Setup, ssid: &str) -> String {
     let body = format!(
         "<main class=\"card low\"><h1 class=\"dots\">Joining<span>.</span><span>.</span><span>.</span></h1>\
-         <p>{}</p><p style=\"font:2.8vh 'DejaVu Sans',sans-serif\">This can take half a minute.</p></main>",
+         <p>{}</p><p class=\"note\">This can take half a minute.</p></main>",
         esc(ssid)
     );
     page(s, STEP1, &body, Some(2), "")
@@ -624,8 +640,8 @@ impl Agent {
             s.scanned = Some(Instant::now());
         }
         if !self.wifi_page_up {
-            let bg = crate::pair::page_path().with_file_name("backdrop.png");
-            let backdrop = crate::splash::write_backdrop(&self.cfg, &bg.to_string_lossy())
+            let bg = crate::pair::page_path().with_file_name("backdrop-page.png");
+            let backdrop = crate::splash::write_page_backdrop(&self.cfg, &bg.to_string_lossy())
                 .ok()
                 .flatten();
             {
@@ -633,6 +649,7 @@ impl Agent {
                 s.active = true;
                 s.frame_id = self.cfg.frame_id.clone();
                 s.backdrop = backdrop;
+                s.dawn = self.cfg.splash_style == "dawn";
                 s.joined = None;
             }
             eprintln!("tfctl: wifi setup: on screen");
@@ -773,6 +790,84 @@ mod tests {
         assert!(p.contains("id=\"kb\""));
         let o = render_password(&s, "Cafe", s.nets.get(1));
         assert!(!o.contains("id=\"kb\"") && o.contains("no password"));
+    }
+
+    #[test]
+    fn dawn_pages_use_the_sheet_look_and_keep_the_same_markup() {
+        let s = Setup {
+            nets: vec![net("Home", "psk")],
+            frame_id: "kitchen".into(),
+            backdrop: Some("/run/thinframe/backdrop-page.png".into()),
+            dawn: true,
+            ..Setup::default()
+        };
+        let l = render_list(&s);
+        assert!(l.contains("/poppins-light.ttf") && !l.contains("Shrikhand"));
+        assert!(l.contains("url(/backdrop.png)") && l.contains("href=\"/wifi/net?ssid=Home\""));
+        let p = render_password(&s, "Home", s.nets.first());
+        assert!(p.contains("id=\"kb\"") && p.contains("rgba(255,255,255,.66)"));
+        assert!(!p.contains("#fff6e0"), "no seventies keys");
+        let old = render_list(&Setup { dawn: false, ..s });
+        assert!(old.contains("Shrikhand") && !old.contains("/poppins.ttf"));
+    }
+
+    /// `TF_PREVIEW=/dir cargo test preview_pages -- --ignored`: the setup pages as HTML files,
+    /// for a browser. Fonts and the backdrop are read from the paths in `TF_PREVIEW_FONTS`
+    /// (a directory holding the Poppins files) and `/dir/backdrop-page.png`.
+    #[test]
+    #[ignore]
+    fn preview_pages() {
+        let dir = std::env::var("TF_PREVIEW").expect("TF_PREVIEW=/dir");
+        let fonts = std::env::var("TF_PREVIEW_FONTS").unwrap_or_default();
+        let s = Setup {
+            nets: vec![
+                net("Groovy Wifi", "psk"),
+                net("Cafe", "open"),
+                net("Corp", "8021x"),
+            ],
+            frame_id: "kitchen".into(),
+            backdrop: Some(format!("{dir}/backdrop-page.png")),
+            dawn: true,
+            ..Setup::default()
+        };
+        let fix = |h: String| {
+            h.replace(
+                "/poppins-light.ttf",
+                &format!("file://{fonts}/Poppins-ExtraLight.ttf"),
+            )
+            .replace(
+                "/poppins.ttf",
+                &format!("file://{fonts}/Poppins-Regular.ttf"),
+            )
+            .replace(
+                "url(/backdrop.png)",
+                &format!("url(file://{dir}/backdrop-page.png)"),
+            )
+        };
+        let put = |n: &str, h: String| std::fs::write(format!("{dir}/{n}.html"), fix(h)).unwrap();
+        put("list", render_list(&s));
+        put(
+            "password",
+            render_password(&s, "Groovy Wifi", s.nets.first()),
+        );
+        put("joining", render_joining(&s, "Groovy Wifi"));
+        put("joined", render_joined(&s, "Groovy Wifi"));
+        let pair = crate::pair::render(
+            crate::pair::Ask::Button,
+            "http://nas.local:8080/",
+            "kitchen",
+            "abc",
+            Some("192.168.1.42"),
+            Some(&format!("{dir}/backdrop-page.png")),
+            true,
+        );
+        put(
+            "pair",
+            pair.replace(
+                "file:///usr/share/fonts/thinframe",
+                &format!("file://{fonts}"),
+            ),
+        );
     }
 
     fn req(method: &str, target: &str, body: &str, port: u16) -> Req {

@@ -46,6 +46,7 @@ pub fn render(
     nonce: &str,
     ip: Option<&str>,
     backdrop: Option<&str>,
+    dawn: bool,
 ) -> String {
     let bg = match backdrop {
         Some(b) => format!("#f4dcaa url(\"file://{}\") center/cover no-repeat", esc(b)),
@@ -71,6 +72,22 @@ pub fn render(
             esc(server_name(server))
         ),
     };
+    if dawn {
+        let img = backdrop
+            .map(|b| format!("url(\"file://{}\") center/cover no-repeat", esc(b)))
+            .unwrap_or_default();
+        let font = |f: &str| format!("file:///usr/share/fonts/thinframe/{f}");
+        return format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>thinframe</title><style>{}</style></head>\
+             <body><div class=\"steps\">1 Wi-Fi &middot; <b>2 pair</b></div>\
+             <main class=\"card low\">{body}</main><small>{who}</small></body></html>",
+            crate::dawnpage::css(
+                &font("Poppins-Regular.ttf"),
+                &font("Poppins-ExtraLight.ttf"),
+                &img
+            )
+        );
+    }
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>thinframe</title><style>\
          @font-face{{font-family:Shrikhand;src:url(\"file:///usr/share/fonts/thinframe/Shrikhand-Regular.ttf\")}}\
@@ -199,8 +216,8 @@ impl Agent {
             .find(|ip| *ip != crate::statuspage::USB_IP)
             .cloned();
         let path = page_path();
-        let bg = path.with_file_name("backdrop.png");
-        let backdrop = crate::splash::write_backdrop(&self.cfg, &bg.to_string_lossy())
+        let bg = path.with_file_name("backdrop-page.png");
+        let backdrop = crate::splash::write_page_backdrop(&self.cfg, &bg.to_string_lossy())
             .ok()
             .flatten();
         let html = render(
@@ -210,6 +227,7 @@ impl Agent {
             nonce,
             ip.as_deref(),
             backdrop.as_deref(),
+            self.cfg.splash_style == "dawn",
         );
         let tmp = path.with_extension("html.tmp");
         if let Err(e) = fs::create_dir_all(path.parent().unwrap_or(Path::new("/")))
@@ -244,6 +262,7 @@ mod tests {
             "abc123",
             Some("192.168.1.20"),
             Some("/run/thinframe/backdrop.png"),
+            false,
         );
         assert!(h.contains("action=\"http://nas.local:8080/pair/kitchen/accept\""));
         assert!(h.contains("name=\"nonce\" value=\"abc123\""));
@@ -254,8 +273,29 @@ mod tests {
     }
 
     #[test]
+    fn dawn_page_sits_on_the_sheet_with_the_same_form() {
+        let h = render(
+            Ask::Button,
+            "http://nas.local:8080/",
+            "kitchen",
+            "abc123",
+            Some("192.168.1.20"),
+            Some("/run/thinframe/backdrop-page.png"),
+            true,
+        );
+        assert!(
+            h.contains("name=\"nonce\" value=\"abc123\"") && h.contains("<button>PAIR</button>")
+        );
+        assert!(h.contains("Poppins-ExtraLight.ttf") && !h.contains("Shrikhand"));
+        assert!(h.contains("url(\"file:///run/thinframe/backdrop-page.png\")"));
+        assert!(h.contains("frame kitchen &middot; 192.168.1.20"));
+        let none = render(Ask::Refused, "http://a", "k", "", None, None, true);
+        assert!(!none.contains("<button>") && none.contains("Already paired"));
+    }
+
+    #[test]
     fn refused_page_has_no_button_and_escapes() {
-        let h = render(Ask::Refused, "http://a<b", "k", "", None, None);
+        let h = render(Ask::Refused, "http://a<b", "k", "", None, None, false);
         assert!(!h.contains("<button>"));
         assert!(h.contains("a&lt;b"));
         assert!(h.contains("Already paired"));

@@ -39,7 +39,7 @@ pub struct Config {
     /// Splash screen (TASK 15): background "#rrggbb" and the one text line.
     pub splash_bg: u32,
     pub splash_text: String,
-    /// "seventies" (default, animated), "retro" or "plain"
+    /// "dawn" (default, animated), "seventies" (animated), "retro" or "plain"
     pub splash_style: String,
     /// Where this config was loaded from (and where overrides are written back).
     pub path: String,
@@ -72,7 +72,7 @@ impl Default for Config {
             tz: String::new(),
             splash_bg: 0x0b0d10,
             splash_text: "thinframe".into(),
-            splash_style: "seventies".into(),
+            splash_style: "dawn".into(),
             path: DEFAULT_PATH.into(),
         }
     }

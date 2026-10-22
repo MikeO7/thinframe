@@ -40,11 +40,11 @@ changed() {	# name [seconds]: the screen differs from the last snap and holds st
 	return 1
 }
 type_text() {	# the on-screen keyboard, lower-case letters and space
-	local rows=("qwertyuiop" "asdfghjkl" "zxcvbnm") ys=(222 309 394) x0=(168 220 325) c i k
+	local rows=("qwertyuiop" "asdfghjkl" "zxcvbnm") ys=(247 331 416) x0=(167 219 324) c i k
 	for ((i = 0; i < ${#1}; i++)); do
 		c="${1:i:1}"
 		# A trailing space paints nothing, so do not wait long for it.
-		if [ "$c" = " " ]; then tap 640 481; changed "key-$i" 15 || true; continue; fi
+		if [ "$c" = " " ]; then tap 640 500; changed "key-$i" 15 || true; continue; fi
 		for k in 0 1 2; do
 			case "${rows[k]}" in *"$c"*) local pre="${rows[k]%%"$c"*}"; tap $(( x0[k] + ${#pre} * 105 )) "${ys[k]}" ;; esac
 		done
