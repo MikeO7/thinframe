@@ -11,7 +11,7 @@ use crate::http::{self, Url};
 use crate::json::{self, Value};
 use crate::kiosk::{KioskCmd, SCREEN_ON};
 use crate::update::{self, Artifacts, Paths};
-use crate::{slot, status, sys, sysupdate, ws};
+use crate::{status, sys, sysupdate, ws};
 use std::io;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -194,19 +194,24 @@ impl Agent {
     }
 
     /// A new slot that never reaches the server is never confirmed; without this it would keep
-    /// running until two more power cycles. Real frame only.
+    /// running until two more power cycles. Real frame only. "Start" is the system's boot
+    /// (/proc/uptime), not this process: a new slot whose tfctl crashes and is respawned by
+    /// init every few minutes must still be rebooted. Any earlier contact on this boot has
+    /// already confirmed the slot (tries=0), so only this process's contact time matters.
     fn maybe_reboot_unconfirmed(&mut self) {
         if !self.paths.is_real() || self.reboot_requested {
             return;
         }
-        let since_start = self.started.elapsed().as_secs();
+        let since_start = uptime_s(&std::fs::read_to_string("/proc/uptime").unwrap_or_default())
+            .unwrap_or(0)
+            .max(self.started.elapsed().as_secs());
         let since_contact = self
             .last_contact
             .map_or(since_start, |t| t.elapsed().as_secs());
         if since_start < UNCONFIRMED_REBOOT_S || since_contact < UNCONFIRMED_REBOOT_S {
             return;
         }
-        let Ok(uenv) = slot::UEnv::load(&sysupdate::uenv_path(&self.paths)) else {
+        let Ok(uenv) = sysupdate::uenv(&self.paths) else {
             return;
         };
         let running = sysupdate::running_slot(&self.paths);
@@ -453,17 +458,27 @@ impl Agent {
             set_clock(t);
         }
         if let Some(tz) = v.field_string("tz") {
-            if !tz.is_empty() && !tz.contains("..") && tz != self.cfg.tz {
-                std::env::set_var("TZ", &tz);
-                let zi = format!("/usr/share/zoneinfo/{tz}");
-                if std::path::Path::new(&zi).is_file() {
-                    let _ = std::fs::copy(&zi, "/etc/localtime");
+            // TZ only, never /etc/localtime: the root is read-only, and that file is Buildroot's
+            // symlink into /usr/share/zoneinfo, so a copy onto it would overwrite a zone file.
+            // musl reads zone names in TZ from /usr/share/zoneinfo; `main` sets TZ from the
+            // config at start, so the zone holds across reboots before the first hello.
+            if !tz.is_empty() && !tz.contains("..") {
+                if std::env::var("TZ").ok().as_deref() != Some(tz.as_str()) {
+                    std::env::set_var("TZ", &tz);
                 }
-                self.cfg.tz = tz.clone();
-                self.persist(&[("TZ", &tz)]);
+                if tz != self.cfg.tz {
+                    self.cfg.tz = tz.clone();
+                    self.persist(&[("TZ", &tz)]);
+                }
             }
         }
     }
+}
+
+/// Whole seconds since boot from the text of /proc/uptime ("123.45 678.90").
+pub fn uptime_s(text: &str) -> Option<u64> {
+    let first = text.split_whitespace().next()?;
+    first.split('.').next()?.parse().ok()
 }
 
 /// `date -s @N` (busybox); only when off by more than 2 s. No NTP on the frame.
@@ -502,6 +517,14 @@ mod tests {
         // Too early after start, or the server answered recently.
         assert!(!should_reboot_unconfirmed(2, true, T - 1, T - 1));
         assert!(!should_reboot_unconfirmed(2, true, T * 10, T - 1));
+    }
+
+    #[test]
+    fn uptime_parses_proc_uptime() {
+        assert_eq!(uptime_s("123.45 678.90\n"), Some(123));
+        assert_eq!(uptime_s("700 1"), Some(700));
+        assert_eq!(uptime_s(""), None);
+        assert_eq!(uptime_s("x.1 2"), None);
     }
 
     #[test]
