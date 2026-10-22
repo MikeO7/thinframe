@@ -95,6 +95,20 @@ impl UEnv {
         Ok(UEnv::parse(&fs::read_to_string(path)?))
     }
 
+    /// What U-Boot acts on (boot.cmd.patch): `uEnv.txt` when it names a slot, else `uEnv.bak`
+    /// (the copy `save` keeps), else `uEnv.txt` as it is (U-Boot then defaults to slot a,
+    /// tries 0). Err only when neither file can be read.
+    pub fn load_effective(path: &Path) -> io::Result<UEnv> {
+        let main = UEnv::load(path);
+        if matches!(&main, Ok(u) if u.slot.is_some()) {
+            return main;
+        }
+        match UEnv::load(&path.with_extension("bak")) {
+            Ok(b) if b.slot.is_some() => Ok(b),
+            _ => main,
+        }
+    }
+
     /// Rendered with `slot` and `tries` set; missing keys are appended.
     pub fn render(&self, slot: Slot, tries: u32) -> String {
         let mut out = String::with_capacity(self.text.len() + 32);
@@ -128,13 +142,14 @@ impl UEnv {
 
     /// Write a temp file and fsync it, copy the current file to `uEnv.bak` (fsynced too), then
     /// rename the temp file over it; the caller syncs the file system afterwards. FAT has no
-    /// atomic rename, so a power cut mid-rename can lose `uEnv.txt`; the `.bak` copy means
-    /// U-Boot's built-in defaults are not the only thing left to recover from.
+    /// journal, so a power cut mid-rename (or mid-`fatwrite` in U-Boot) can lose `uEnv.txt`;
+    /// boot.cmd.patch then reads `uEnv.bak`, the last state that was in force. A current file
+    /// that names no slot (torn, garbage) never replaces a `.bak` that does.
     pub fn save(&self, path: &Path, slot: Slot, tries: u32) -> io::Result<()> {
         let tmp = path.with_extension("tmp");
         fs::write(&tmp, self.render(slot, tries))?;
         fs::File::open(&tmp)?.sync_all()?;
-        if path.is_file() {
+        if UEnv::load(path).is_ok_and(|u| u.slot.is_some()) {
             let bak = path.with_extension("bak");
             fs::copy(path, &bak)?;
             fs::File::open(&bak)?.sync_all()?;
@@ -149,10 +164,20 @@ pub fn mbr_is_ours(mbr: &[u8]) -> bool {
 }
 
 /// The whole-disk device our root lives on: the first candidate whose MBR signature is ours.
-/// Candidates default to `/dev/mmcblk0..2`; a disk that is not ours (the eMMC with Android)
-/// is never returned, so `dd` cannot reach it.
+/// Candidates default to `DISKS`; a disk that is not ours (the eMMC with Android) is never
+/// returned, so `dd` cannot reach it. Belt and braces: an MMC device that sysfs reports as
+/// eMMC (`/sys/block/<name>/device/type` = `MMC`; SD cards say `SD`) is skipped even if its
+/// MBR carries our signature, so a card image someone once wrote to the eMMC is never picked.
 pub fn find_disk(candidates: &[&Path]) -> Option<std::path::PathBuf> {
+    find_disk_in(candidates, Path::new("/sys/block"))
+}
+
+/// `find_disk` with the sysfs block directory as a parameter (tests).
+pub fn find_disk_in(candidates: &[&Path], sys_block: &Path) -> Option<std::path::PathBuf> {
     candidates.iter().find_map(|p| {
+        if is_emmc(sys_block, p) {
+            return None;
+        }
         let mut f = fs::File::open(p).ok()?;
         let mut mbr = [0u8; 512];
         f.seek(SeekFrom::Start(0)).ok()?;
@@ -161,8 +186,18 @@ pub fn find_disk(candidates: &[&Path]) -> Option<std::path::PathBuf> {
     })
 }
 
+/// True when sysfs says the device `disk` names is an eMMC (`device/type` reads `MMC`).
+pub fn is_emmc(sys_block: &Path, disk: &Path) -> bool {
+    let Some(name) = disk.file_name() else {
+        return false;
+    };
+    fs::read_to_string(sys_block.join(name).join("device/type")).is_ok_and(|t| t.trim() == "MMC")
+}
+
 /// Where the card can be: the frame's SD slot (mmcblk*), or virtio-blk under `qemu -M virt` (M2).
-/// `find_disk` still takes only the one with our MBR signature.
+/// `find_disk` still takes only the one with our MBR signature. With the DTS aliases
+/// (mmc0 = SD, mmc1 = SDIO Wi-Fi, mmc2 = eMMC) the card is mmcblk0; the eMMC node is disabled
+/// in every DTB we ship, so today no eMMC block device exists at all.
 pub const DISKS: [&str; 4] = ["/dev/mmcblk0", "/dev/mmcblk1", "/dev/mmcblk2", "/dev/vda"];
 
 /// `/dev/mmcblk0` + slot -> `/dev/mmcblk0p2`.
@@ -238,6 +273,52 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// Mirrors boot.cmd.patch: a uEnv.txt without a usable slot falls back to uEnv.bak, and
+    /// such a file never overwrites a good .bak.
+    #[test]
+    fn uenv_backup_is_what_uboot_falls_back_to() {
+        let dir = std::env::temp_dir().join(format!("tfctl-uenvbak-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (p, bak) = (dir.join("uEnv.txt"), dir.join("uEnv.bak"));
+        assert!(UEnv::load_effective(&p).is_err(), "neither file");
+        fs::write(&bak, "slot=b\ntries=0\npf_mode=linux\n").unwrap();
+        // Missing, empty, torn or garbage uEnv.txt: U-Boot and tfctl both use the .bak.
+        for main in [
+            None,
+            Some(""),
+            Some("slo"),
+            Some("slot=c\ntries=2\n"),
+            Some("\0\0\0"),
+        ] {
+            match main {
+                None => {
+                    let _ = fs::remove_file(&p);
+                }
+                Some(t) => fs::write(&p, t).unwrap(),
+            }
+            let u = UEnv::load_effective(&p).unwrap();
+            assert_eq!((u.slot, u.tries), (Some(Slot::B), 0), "{main:?}");
+        }
+        // Saving over a garbage uEnv.txt keeps the good .bak.
+        fs::write(&p, "garbage").unwrap();
+        UEnv::load_effective(&p)
+            .unwrap()
+            .save(&p, Slot::A, 3)
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&bak).unwrap(),
+            "slot=b\ntries=0\npf_mode=linux\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&p).unwrap(),
+            "slot=a\ntries=3\npf_mode=linux\n"
+        );
+        // A good uEnv.txt wins over the .bak.
+        let u = UEnv::load_effective(&p).unwrap();
+        assert_eq!((u.slot, u.tries), (Some(Slot::A), 3));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn disk_guard() {
         let mut mbr = vec![0u8; 512];
@@ -252,6 +333,20 @@ mod tests {
         fs::write(&sd, &mbr).unwrap();
         assert_eq!(find_disk(&[&emmc, &sd]), Some(sd.clone()));
         assert_eq!(find_disk(&[&emmc, &dir.join("missing")]), None);
+        // An eMMC that somehow carries our signature is still never the card.
+        let sys = dir.join("sys");
+        fs::create_dir_all(sys.join("mmcblk0/device")).unwrap();
+        fs::create_dir_all(sys.join("mmcblk1/device")).unwrap();
+        fs::write(sys.join("mmcblk0/device/type"), "MMC\n").unwrap();
+        fs::write(sys.join("mmcblk1/device/type"), "SD\n").unwrap();
+        fs::write(&emmc, &mbr).unwrap();
+        assert_eq!(find_disk_in(&[&emmc, &sd], &sys), Some(sd.clone()));
+        assert_eq!(find_disk_in(&[&emmc], &sys), None);
+        assert!(is_emmc(&sys, &emmc) && !is_emmc(&sys, &sd));
+        assert!(
+            !is_emmc(&sys, Path::new("/dev/vda")),
+            "no sysfs entry: not eMMC"
+        );
         assert_eq!(
             part_dev(Path::new("/dev/mmcblk0"), Slot::B)
                 .to_str()

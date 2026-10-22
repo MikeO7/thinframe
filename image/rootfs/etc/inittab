@@ -1,7 +1,9 @@
 # BusyBox init. Root is read-only; writable state lives on /data (see fstab).
 ::sysinit:/bin/mount -t proc proc /proc
+::sysinit:/bin/mount -t sysfs sysfs /sys
 ::sysinit:/bin/mkdir -p /dev/pts /dev/shm
-# e2fsck /data while it is still unmounted (a power cut can leave it dirty), then mount it.
+# Link /dev/thinframe-{data,boot} to our card's p4/p1 (sysfs: never an eMMC), e2fsck /data
+# while it is still unmounted (a power cut can leave it dirty), then mount everything.
 ::sysinit:/usr/bin/tfctl boot fsck
 ::sysinit:/bin/mount -a
 ::sysinit:/bin/mkdir -p /run/lock/subsys

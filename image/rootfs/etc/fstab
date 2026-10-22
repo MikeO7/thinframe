@@ -8,7 +8,9 @@ tmpfs				/run			tmpfs	mode=0755,nosuid,nodev		0 0
 sysfs				/sys			sysfs	defaults			0 0
 # p4: survives OS updates. Seeded by post-image.sh, grown to the card by `tfctl boot`.
 # Checked by `tfctl boot fsck` (inittab) just before `mount -a`; BusyBox ignores <pass>.
-LABEL=data			/data			ext4	noatime				0 0
-LABEL=PFBOOT			/boot			vfat	ro,noatime,umask=0022		0 0
+# Not LABEL=: `tfctl boot fsck` links /dev/thinframe-{data,boot} to p4/p1 of the disk with our
+# MBR signature, so neither mount can land on an eMMC partition that shares a label.
+/dev/thinframe-data		/data			ext4	noatime				0 0
+/dev/thinframe-boot		/boot			vfat	ro,noatime,umask=0022		0 0
 /data/ssh			/etc/dropbear		none	bind				0 0
 /data/iwd			/var/lib/iwd		none	bind				0 0

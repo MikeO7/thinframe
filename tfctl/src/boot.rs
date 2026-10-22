@@ -8,11 +8,15 @@
 //!  6. touch firmware from the frame's own Android eMMC when the image has none (`touchfw`)
 //!
 //! `tfctl boot fsck` is a separate, earlier step: the inittab line between `mount proc` and
-//! `mount -a`. /data (p4) is never mounted at that point, so `e2fsck -p` can repair it after a
-//! power cut; if preen mode gives up (exit bit 4), one `e2fsck -y` pass follows. Then `mount -a`
-//! mounts /data and the bind mounts over it in fstab order, before rcS starts iwd and dropbear,
-//! which read their state from those binds. The device is p4 of the disk `slot::find_disk`
-//! returns (our MBR signature only), so the eMMC is never named.
+//! `mount -a`. It first links `/dev/thinframe-data` and `/dev/thinframe-boot` (devtmpfs) to p4
+//! and p1 of the disk `slot::find_disk` returns (our MBR signature only, never an eMMC); fstab
+//! mounts those links, not `LABEL=`, because the frame's Android eMMC may hold a file system
+//! labelled `data` (Android build tools can label userdata after its mount point; not checked
+//! on this frame's dump), and BusyBox mount takes the first label match it finds. No thinframe disk: no links, and /data and /boot stay
+//! unmounted rather than landing on something else. /data (p4) is never mounted at that
+//! point, so `e2fsck -p` can repair it after a power cut; if preen mode gives up (exit bit 4),
+//! one `e2fsck -y` pass follows. Then `mount -a` mounts /data and the bind mounts over it in
+//! fstab order, before rcS starts iwd and dropbear, which read their state from those binds.
 use crate::config;
 use crate::provision;
 use crate::slot;
@@ -29,6 +33,8 @@ const RUN_DIRS: [(&str, u32); 2] = [("/run/user/1000", 0o700), ("/run/thinframe"
 const P4: usize = 446 + 3 * 16;
 /// Grow only when it gains at least 1 MiB.
 const MIN_GAIN_SECTORS: u64 = 2048;
+/// What /etc/fstab mounts: (link in devtmpfs, partition number on our card).
+pub const DEV_LINKS: [(&str, u8); 2] = [("/dev/thinframe-data", 4), ("/dev/thinframe-boot", 1)];
 
 fn sh(cmd: &str, args: &[&str]) -> io::Result<()> {
     let out = Command::new(cmd).args(args).output()?;
@@ -74,6 +80,18 @@ pub fn run(conf: &str) -> io::Result<()> {
 pub fn fsck_data() -> io::Result<()> {
     let cands = slot::DISKS.map(Path::new);
     let disk = slot::find_disk(&cands).ok_or_else(|| io::Error::other("no thinframe disk"))?;
+    for (link, n) in DEV_LINKS {
+        let target = slot::part_n(&disk, n);
+        let r = fs::remove_file(link)
+            .or_else(|e| match e.kind() {
+                io::ErrorKind::NotFound => Ok(()),
+                _ => Err(e),
+            })
+            .and_then(|()| std::os::unix::fs::symlink(&target, link));
+        if let Err(e) = r {
+            eprintln!("tfctl: boot: link {link} -> {}: {e}", target.display());
+        }
+    }
     let p4 = slot::part_n(&disk, 4).to_string_lossy().to_string();
     let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
     if is_mounted(&mounts, &p4) {
@@ -194,20 +212,50 @@ fn grow_data() -> io::Result<()> {
     let f = fs::OpenOptions::new().read(true).write(true).open(&disk)?;
     let mut mbr = [0u8; 512];
     f.read_exact_at(&mut mbr, 0)?;
+    if let Some(len) = p4_new_len(&mbr, sectors) {
+        let start = u32::from_le_bytes([mbr[P4 + 8], mbr[P4 + 9], mbr[P4 + 10], mbr[P4 + 11]]);
+        f.write_all_at(&p4_entry(&mbr, len), P4 as u64)?;
+        f.sync_all()?;
+        blkpg_resize(&f, start as u64, len as u64)?;
+    }
+    // The file system is grown separately from the table, so a power cut between the two (or
+    // a failed resize2fs) is finished on a later boot instead of leaving /data at 64 MiB.
     let p4 = slot::part_n(&disk, 4);
-    let Some(len) = p4_new_len(&mbr, sectors) else {
-        // The table already fills the card. The file system may still be short of it: a boot
-        // that wrote the table and then lost power (or failed the ioctl) before resize2fs ran.
-        // Online resize2fs with nothing to do is a few ms and exit 0, so it runs every boot.
-        return sh("resize2fs", &[&p4.to_string_lossy()]);
-    };
-    let start = u32::from_le_bytes([mbr[P4 + 8], mbr[P4 + 9], mbr[P4 + 10], mbr[P4 + 11]]);
-    f.write_all_at(&p4_entry(&mbr, len), P4 as u64)?;
-    f.sync_all()?;
-    blkpg_resize(&f, start as u64, len as u64)?;
-    sh("resize2fs", &[&p4.to_string_lossy()])?;
-    eprintln!("tfctl: boot: data partition now {} MiB", len as u64 / 2048);
+    let p4_name = p4.file_name().unwrap().to_string_lossy().to_string();
+    let part_sectors: u64 = fs::read_to_string(format!("/sys/class/block/{p4_name}/size"))?
+        .trim()
+        .parse()
+        .map_err(io::Error::other)?;
+    let mut sb = [0u8; 1024];
+    fs::File::open(&p4)?.read_exact_at(&mut sb, 1024)?;
+    if ext4_lags_partition(&sb, part_sectors) {
+        sh("resize2fs", &[&p4.to_string_lossy()])?;
+        eprintln!(
+            "tfctl: boot: data partition now {} MiB",
+            part_sectors / 2048
+        );
+    }
     Ok(())
+}
+
+/// True when the ext4 superblock `sb` (the 1024 bytes at offset 1024 of the partition)
+/// describes a file system at least 1 MiB smaller than a partition of `part_sectors`.
+/// Not ext4 (bad magic): false, so resize2fs never runs on something unexpected.
+pub fn ext4_lags_partition(sb: &[u8; 1024], part_sectors: u64) -> bool {
+    let le32 = |o: usize| u32::from_le_bytes([sb[o], sb[o + 1], sb[o + 2], sb[o + 3]]) as u64;
+    if u16::from_le_bytes([sb[0x38], sb[0x39]]) != 0xef53 {
+        return false;
+    }
+    let log = le32(0x18);
+    if log > 6 {
+        return false; // block size above 64 KiB: not a superblock we wrote
+    }
+    let mut blocks = le32(0x04);
+    if le32(0x60) & 0x80 != 0 {
+        blocks |= le32(0x150) << 32; // INCOMPAT_64BIT: s_blocks_count_hi
+    }
+    let fs_sectors = blocks * ((1024u64 << log) / 512);
+    part_sectors >= fs_sectors + MIN_GAIN_SECTORS
 }
 
 #[cfg(test)]
@@ -238,6 +286,46 @@ mod tests {
         let mut empty = m;
         empty[P4 + 4] = 0;
         assert_eq!(p4_new_len(&empty, 31_116_288), None);
+    }
+
+    fn superblock(blocks: u64, log_block: u32, bit64: bool) -> [u8; 1024] {
+        let mut sb = [0u8; 1024];
+        sb[0x04..0x08].copy_from_slice(&(blocks as u32).to_le_bytes());
+        sb[0x18..0x1c].copy_from_slice(&log_block.to_le_bytes());
+        sb[0x38..0x3a].copy_from_slice(&0xef53u16.to_le_bytes());
+        if bit64 {
+            sb[0x60..0x64].copy_from_slice(&0x80u32.to_le_bytes());
+            sb[0x150..0x154].copy_from_slice(&((blocks >> 32) as u32).to_le_bytes());
+        }
+        sb
+    }
+
+    #[test]
+    fn fs_grows_when_it_lags_the_partition_even_after_the_table_grew() {
+        // The image's data.ext4: 64 MiB in 1 KiB blocks (mkfs.ext4 -d ... 64M).
+        let seed = superblock(65_536, 0, false);
+        assert!(
+            !ext4_lags_partition(&seed, 131_072),
+            "same size: nothing to do"
+        );
+        assert!(
+            !ext4_lags_partition(&seed, 131_072 + 2047),
+            "under 1 MiB: nothing to do"
+        );
+        assert!(ext4_lags_partition(&seed, 131_072 + 2048));
+        // Table already grown to a 32 GB card by an earlier boot, resize2fs never ran.
+        assert!(ext4_lags_partition(&seed, 60_000_000));
+        // After resize2fs: 4 KiB blocks filling the partition.
+        let grown = superblock(60_000_000 / 8, 2, true);
+        assert!(!ext4_lags_partition(&grown, 60_000_000));
+        // 64-bit block count (the high word counts).
+        let big = superblock(1 << 32, 2, true);
+        assert!(!ext4_lags_partition(&big, 1 << 34));
+        // Not ext4, or nonsense block size: never resize.
+        let mut junk = seed;
+        junk[0x38] = 0;
+        assert!(!ext4_lags_partition(&junk, 60_000_000));
+        assert!(!ext4_lags_partition(&superblock(1, 40, false), 60_000_000));
     }
 
     #[test]

@@ -136,9 +136,25 @@ the image is immutable and replaced whole. Card layout grows from 2 to 4 partiti
 Update flow: CI builds `system-<ver>.tar` = {zImage, modules, rootfs.ext4.zst, sha256}. The container
 ships it under `/api/artifacts/`. The agent sees `system_version` change, streams the rootfs into the
 standby slot, copies the kernel to `zImage.<slot>`, sets `slot=<new> tries=3` in `uEnv.txt`, reboots.
-U-Boot's `boot.scr` (already has a counter in the ormarch build) decrements `tries`; after three failed
-boots it falls back to the old slot. On success the agent's first heartbeat sets `tries=0`, marking the
-slot good. The server shows each frame's slot, version and last-good in `/admin`.
+U-Boot's `boot.scr` (already has a counter in the ormarch build) decrements `tries` before it loads the
+kernel, and the start that takes it to 0 boots the old slot: `tries=3` means two starts on the new slot,
+then the third start is the old one **[V]** (QEMU A/B test: "tries left 2", "1", then "slot b, tries left
+0"). On success the agent's first heartbeat sets `tries=0`, marking the slot good. The server shows each
+frame's slot, version and last-good in `/admin`.
+
+Boot-state invariants (boot.cmd.patch, slot.rs, sysupdate.rs):
+- A fresh card has `slot=a tries=0` (image/boot/uEnv.txt), no `zImage.b` and an all-zero p3 **[V]**
+  (read from image/out/thinframe-sd.img). With tries=0 U-Boot never writes uEnv.txt and never flips,
+  and the agent's unconfirmed-slot reboot needs tries>0, so a frame waiting at the Wi-Fi page is never
+  rebooted towards the empty slot. `rollback` refuses while the other slot has no kernel.
+- uEnv.txt that names no slot (lost in a power cut: FAT has no journal) falls back to `uEnv.bak`, the
+  copy tfctl keeps of the state before its last write; tfctl reads the same fallback
+  (`UEnv::load_effective`). A slot value other than a or b means a. **[U]** until the QEMU journey runs it.
+- `tries` stays below 10: U-Boot's `setexpr` prints hex and `test` reads decimal.
+- /data and /boot mount `/dev/thinframe-{data,boot}`, links `tfctl boot fsck` makes to the card found
+  by MBR signature (eMMC skipped via sysfs `device/type`), not `LABEL=`, which could match an eMMC
+  partition. The data file system is grown whenever its superblock is smaller than p4, so a power cut
+  between the table write and resize2fs is finished on the next boot.
 
 Why not `apk upgrade` in place: no atomicity, no rollback, drift between frames, and a half-applied
 upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edge case.

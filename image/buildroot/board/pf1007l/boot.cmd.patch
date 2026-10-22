@@ -1,14 +1,26 @@
 --- a/boot.cmd
 +++ b/boot.cmd
-@@ -30,6 +30,23 @@
+@@ -30,6 +30,35 @@
  	env import -t -r ${ramdisk_addr_r} ${filesize}
  fi
  
-+# thinframe A/B (TASK 3). uEnv.txt carries slot=a|b and tries=N. tfctl sets tries=3 after it
-+# writes the standby slot, and tries=0 once the new slot is up. Each start here spends one try;
-+# the start that spends the last one boots the other slot. pf_mode=linux in uEnv.txt keeps the
-+# USB disk fallback below for an explicit pf_mode=ums only.
-+if test -z "${slot}"; then setenv slot a; fi
++# thinframe A/B (TASK 3). uEnv.txt carries slot=a|b and tries=N (tfctl slot.rs writes it).
++# tries=0: confirmed slot or fresh card; nothing is written. tries=N>0: this start spends one
++# try BEFORE the kernel loads, so a later power cut cannot undo it, and the start that takes it
++# to 0 boots the other slot (tries=3 = two starts on the new slot). setexpr prints hex and test
++# reads decimal, so N stays below 10 (sysupdate.rs). pf_mode=linux in uEnv.txt keeps the USB
++# disk fallback below for an explicit pf_mode=ums only.
++# uEnv.txt naming no slot (lost or torn by a power cut; FAT has no journal): uEnv.bak, tfctl's
++# copy of the state before its last write. Neither file: slot a, tries 0.
++if test "${slot}" != "a" -a "${slot}" != "b"; then
++	setenv slot
++	setenv tries
++	if load mmc 0:1 ${ramdisk_addr_r} /uEnv.bak; then
++		env import -t -r ${ramdisk_addr_r} ${filesize} slot tries pf_mode
++		echo "thinframe: uEnv.txt names no slot, using uEnv.bak"
++	fi
++fi
++if test "${slot}" != "b"; then setenv slot a; fi
 +if test -z "${tries}"; then setenv tries 0; fi
 +if test ${tries} -gt 0; then
 +	setexpr tries ${tries} - 1
