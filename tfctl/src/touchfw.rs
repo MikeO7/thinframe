@@ -226,7 +226,10 @@ impl<'a> Elf<'a> {
 pub fn table_from_module(ko: &[u8], table: &str) -> R<Vec<u8>> {
     let elf = Elf::parse(ko)?;
     let (sec, start, size) = elf.object("gslx680_fw_grp")?;
-    for o in (start..start + size / 12 * 12).step_by(12) {
+    let end = start
+        .checked_add(size / 12 * 12)
+        .ok_or_else(|| bad("symbol past 4 GiB"))?;
+    for o in (start..end).step_by(12) {
         let (nsec, noff) = elf.pointer(sec, o)?;
         let s = elf.secs.get(nsec).ok_or_else(|| bad("name section"))?;
         if cstr(elf.d, s.1 + noff as usize)? != table {
@@ -234,7 +237,8 @@ pub fn table_from_module(ko: &[u8], table: &str) -> R<Vec<u8>> {
         }
         let records = u32_at(elf.bytes(sec, o as usize + 4, 4)?, 0)? as usize;
         let (fsec, foff) = elf.pointer(sec, o + 8)?;
-        return Ok(elf.bytes(fsec, foff as usize, records * 8)?.to_vec());
+        let len = records.checked_mul(8).ok_or_else(|| bad("record count"))?;
+        return Ok(elf.bytes(fsec, foff as usize, len)?.to_vec());
     }
     Err(bad(&format!("no table entry {table}")))
 }
@@ -362,7 +366,7 @@ pub(crate) mod tests {
     use super::*;
 
     /// One page: {0xf0, 0} + registers 0x00..0x7c.
-    fn page_fw() -> Vec<u8> {
+    pub(crate) fn page_fw() -> Vec<u8> {
         let mut v = Vec::new();
         for (r, val) in std::iter::once((PAGE_REG, 0)).chain((0..32).map(|k| (4 * k, 0x1000 + k))) {
             v.extend_from_slice(&r.to_le_bytes());
@@ -439,7 +443,7 @@ pub(crate) mod tests {
         out
     }
 
-    fn cpio(files: &[(&str, &[u8])]) -> Vec<u8> {
+    pub(crate) fn cpio(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut a = Vec::new();
         let trailer: &[u8] = &[];
         for (name, body) in files
@@ -475,7 +479,7 @@ pub(crate) mod tests {
     }
 
     /// gzip with stored deflate blocks and a file name.
-    fn gzip(d: &[u8]) -> Vec<u8> {
+    pub(crate) fn gzip(d: &[u8]) -> Vec<u8> {
         let mut g = vec![0x1f, 0x8b, 8, 8, 0, 0, 0, 0, 0, 3];
         g.extend_from_slice(b"ramdisk.cpio\0");
         let chunks: Vec<&[u8]> = d.chunks(65535).collect();
@@ -489,7 +493,7 @@ pub(crate) mod tests {
         g
     }
 
-    fn boot_image(ramdisk: &[u8]) -> Vec<u8> {
+    pub(crate) fn boot_image(ramdisk: &[u8]) -> Vec<u8> {
         let kernel = vec![0xaa; 5000];
         let mut b = vec![0u8; 2048];
         b[..8].copy_from_slice(b"ANDROID!");
@@ -532,6 +536,21 @@ pub(crate) mod tests {
         let e = extract(&read, 4096, SHA256).unwrap_err().to_string();
         assert!(e.contains("not the tested firmware"), "{e}");
         assert!(extract(&read, 0, &want).is_err(), "no ANDROID! magic at 0");
+    }
+
+    /// Found by fuzz.rs: a `gslx680_fw_grp` symbol with value 0xfffffffe overflowed
+    /// `start + size` (a panic in debug, a wrapped empty range in release).
+    #[test]
+    fn symbol_near_4gib_is_refused() {
+        let mut ko = module(&page_fw());
+        // The symbol entry: name 1, value 0, size 24, info 0x11.
+        let pat = [1, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0x11];
+        let at = ko.windows(pat.len()).position(|w| w == pat).unwrap();
+        ko[at + 4..at + 8].copy_from_slice(&0xffff_fffeu32.to_le_bytes());
+        let e = table_from_module(&ko, "gsl_m86_hd")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("past 4 GiB"), "{e}");
     }
 
     #[test]

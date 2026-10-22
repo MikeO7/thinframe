@@ -54,6 +54,8 @@ type Server struct {
 	pageCheck time.Duration
 	// pair: open one-press pairing requests (pair.go), guarded by mu.
 	pair pairings
+	// patterns: what Routes registered.
+	patterns []string
 }
 
 // New wires a Server.
@@ -69,45 +71,58 @@ func New(st *store.Store, opts Options) *Server {
 	return s
 }
 
-// Routes returns the full mux.
+// Routes returns the full mux. Every pattern it registers is recorded for Patterns.
 func (s *Server) Routes() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /", s.handleIndex)
-	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	m.HandleFunc("GET /frame/{id}", s.handleFramePage)
-	m.HandleFunc("GET /api/stream/{id}", s.handleSSE)
-	m.HandleFunc("GET /api/data/photo/next", s.handlePhotoNext)
-	m.HandleFunc("GET /api/data/weather", s.handleDataWeather)
-	m.HandleFunc("GET /api/data/calendar", s.handleDataCalendar)
-	m.HandleFunc("POST /api/frames/{id}/beacon", s.handleBeacon)
-	m.HandleFunc("POST /api/frames/{id}/alive", s.handleAlive)
-	m.HandleFunc("POST /api/pair", s.handlePairRequest)
-	m.HandleFunc("GET /api/pair/{id}", s.handlePairPoll)
-	m.HandleFunc("POST /pair/{id}/accept", s.handlePairAccept)
+	s.patterns = nil
+	handle := func(pattern string, h http.Handler) {
+		m.Handle(pattern, h)
+		s.patterns = append(s.patterns, pattern)
+	}
+	fn := func(pattern string, h http.HandlerFunc) { handle(pattern, h) }
+	fn("GET /", s.handleIndex)
+	fn("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	fn("GET /frame/{id}", s.handleFramePage)
+	// Page plane: the dashboard has no token (cog loads a plain URL, sendBeacon cannot set
+	// headers), so these are public like the page itself.
+	fn("GET /api/stream/{id}", s.handleSSE)
+	fn("GET /api/data/photo/next", s.handlePhotoNext)
+	fn("GET /api/data/weather", s.handleDataWeather)
+	fn("GET /api/data/calendar", s.handleDataCalendar)
+	fn("POST /api/frames/{id}/beacon", s.handleBeacon)
+	fn("POST /api/frames/{id}/alive", s.handleAlive)
+	// Pairing: a frame without a token asks for one (pair.go).
+	fn("POST /api/pair", s.handlePairRequest)
+	fn("GET /api/pair/{id}", s.handlePairPoll)
+	fn("POST /pair/{id}/accept", s.handlePairAccept)
 	// Protected by token when set. "frame" routes also take that frame's paired token,
 	// "anyFrame" routes any paired frame's token; the rest need FRAME_TOKEN.
-	m.Handle("GET /api/frames", s.auth(http.HandlerFunc(s.handleList)))
-	m.Handle("GET /api/frames/{id}", s.authFrame(http.HandlerFunc(s.handleGetFrame)))
-	m.Handle("DELETE /api/frames/{id}", s.auth(http.HandlerFunc(s.handleDeleteFrame)))
-	m.Handle("GET /api/frames/{id}/config", s.authFrame(http.HandlerFunc(s.handleGetConfig)))
-	m.Handle("PUT /api/frames/{id}/config", s.auth(http.HandlerFunc(s.handlePutConfig)))
-	m.Handle("PUT /api/frames/{id}/layout", s.auth(http.HandlerFunc(s.handlePutLayout)))
-	m.Handle("POST /api/frames/{id}/heartbeat", s.authFrame(http.HandlerFunc(s.handleHeartbeat)))
-	m.Handle("POST /api/frames/{id}/actions", s.auth(http.HandlerFunc(s.handlePostAction)))
-	m.Handle("GET /api/frames/{id}/ws", s.authFrame(http.HandlerFunc(s.handleWS)))
-	m.Handle("GET /api/release", s.authAnyFrame(http.HandlerFunc(s.handleRelease)))
+	handle("GET /api/frames", s.auth(http.HandlerFunc(s.handleList)))
+	handle("GET /api/frames/{id}", s.authFrame(http.HandlerFunc(s.handleGetFrame)))
+	handle("DELETE /api/frames/{id}", s.auth(http.HandlerFunc(s.handleDeleteFrame)))
+	handle("GET /api/frames/{id}/config", s.authFrame(http.HandlerFunc(s.handleGetConfig)))
+	handle("PUT /api/frames/{id}/config", s.auth(http.HandlerFunc(s.handlePutConfig)))
+	handle("PUT /api/frames/{id}/layout", s.auth(http.HandlerFunc(s.handlePutLayout)))
+	handle("POST /api/frames/{id}/heartbeat", s.authFrame(http.HandlerFunc(s.handleHeartbeat)))
+	handle("POST /api/frames/{id}/actions", s.auth(http.HandlerFunc(s.handlePostAction)))
+	handle("GET /api/frames/{id}/ws", s.authFrame(http.HandlerFunc(s.handleWS)))
+	handle("GET /api/release", s.authAnyFrame(http.HandlerFunc(s.handleRelease)))
 	if s.opts.Artifacts != nil {
-		m.Handle("GET /api/artifacts/{name}", s.authAnyFrame(s.opts.Artifacts.Handler()))
+		handle("GET /api/artifacts/{name}", s.authAnyFrame(s.opts.Artifacts.Handler()))
 	}
 	// Admin: HTTP Basic (password = FRAME_TOKEN) when set; POSTs also refuse cross-origin forms.
 	cop := http.NewCrossOriginProtection()
-	m.Handle("GET /admin", s.authAdmin(http.HandlerFunc(s.handleAdmin)))
-	m.Handle("POST /admin/{id}/config", cop.Handler(s.authAdmin(adminForm(s.handleAdminConfig))))
-	m.Handle("POST /admin/{id}/layout", cop.Handler(s.authAdmin(adminForm(s.handleAdminLayout))))
-	m.Handle("POST /admin/{id}/action", cop.Handler(s.authAdmin(adminForm(s.handleAdminAction))))
-	m.Handle("POST /admin/{id}/unpair", cop.Handler(s.authAdmin(adminForm(s.handleAdminUnpair))))
+	handle("GET /admin", s.authAdmin(http.HandlerFunc(s.handleAdmin)))
+	handle("POST /admin/{id}/config", cop.Handler(s.authAdmin(adminForm(s.handleAdminConfig))))
+	handle("POST /admin/{id}/layout", cop.Handler(s.authAdmin(adminForm(s.handleAdminLayout))))
+	handle("POST /admin/{id}/action", cop.Handler(s.authAdmin(adminForm(s.handleAdminAction))))
+	handle("POST /admin/{id}/unpair", cop.Handler(s.authAdmin(adminForm(s.handleAdminUnpair))))
 	return logRequests(m)
 }
+
+// Patterns lists the mux patterns the last Routes call registered (the route x auth test
+// checks that every one of them has a row).
+func (s *Server) Patterns() []string { return append([]string(nil), s.patterns...) }
 
 // ---- auth -----------------------------------------------------------------
 
@@ -235,12 +250,36 @@ func (s *Server) SetConfig(id string, patch map[string]any) (store.Frame, error)
 	return f, nil
 }
 
+// Limits on config strings. Every config message carries them to the frame, and MCP bodies
+// may be up to 1 MiB, so the field itself is bounded, not just the transport.
+const (
+	maxConfigText = 256  // name, splash_text, screen_off, screen_on, each tag
+	maxConfigURL  = 2048 // url
+	maxConfigTags = 32
+)
+
+// configString accepts a string (or null, meaning "") of at most max bytes.
+func configString(k string, v any, max int) (string, error) {
+	if v == nil {
+		return "", nil
+	}
+	str, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("%w: %s must be a string", ErrInvalid, k)
+	}
+	if len(str) > max {
+		return "", fmt.Errorf("%w: %s is %d bytes, limit %d", ErrInvalid, k, len(str), max)
+	}
+	return str, nil
+}
+
 // applyConfig writes patch into c and name, stopping at the first invalid field.
 func applyConfig(c *store.Config, name *string, patch map[string]any) error {
 	for k, v := range patch {
+		var err error
 		switch k {
 		case "url":
-			c.URL, _ = v.(string)
+			c.URL, err = configString(k, v, maxConfigURL)
 		case "rotation":
 			n, ok := asInt(v)
 			if !ok || n < 0 || n > 3 {
@@ -254,32 +293,54 @@ func applyConfig(c *store.Config, name *string, patch map[string]any) error {
 			}
 			c.Brightness = n
 		case "screen_off":
-			c.ScreenOff, _ = v.(string)
+			c.ScreenOff, err = configString(k, v, maxConfigText)
 		case "screen_on":
-			c.ScreenOn, _ = v.(string)
+			c.ScreenOn, err = configString(k, v, maxConfigText)
 		case "tags":
-			c.Tags = asStrings(v)
+			c.Tags, err = configTags(v)
 		case "name":
-			*name, _ = v.(string)
+			*name, err = configString(k, v, maxConfigText)
 		case "splash_text":
-			c.SplashText, _ = v.(string)
+			c.SplashText, err = configString(k, v, maxConfigText)
 		case "splash_bg":
-			str, _ := v.(string)
-			if str != "" && !rgbRe.MatchString(str) {
-				return fmt.Errorf("%w: splash_bg must be #rrggbb", ErrInvalid)
+			var str string
+			if str, err = configString(k, v, maxConfigText); err == nil && str != "" && !rgbRe.MatchString(str) {
+				err = fmt.Errorf("%w: splash_bg must be #rrggbb", ErrInvalid)
 			}
 			c.SplashBG = str
 		case "splash_png":
-			str, _ := v.(string)
-			if err := checkSplashPNG(str); err != nil {
-				return err
+			var str string
+			if str, err = configString(k, v, 2*MaxSplashPNG); err == nil {
+				err = checkSplashPNG(str)
 			}
 			c.SplashPNG = str
 		default:
 			return fmt.Errorf("%w: unknown config field %q", ErrInvalid, k)
 		}
+		if err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// configTags accepts a list of strings or one comma-separated string, within the limits.
+func configTags(v any) ([]string, error) {
+	switch v.(type) {
+	case nil, string, []string, []any:
+	default:
+		return nil, fmt.Errorf("%w: tags must be a list of strings", ErrInvalid)
+	}
+	tags := asStrings(v)
+	if len(tags) > maxConfigTags {
+		return nil, fmt.Errorf("%w: %d tags, limit %d", ErrInvalid, len(tags), maxConfigTags)
+	}
+	for _, t := range tags {
+		if len(t) > maxConfigText {
+			return nil, fmt.Errorf("%w: a tag is %d bytes, limit %d", ErrInvalid, len(t), maxConfigText)
+		}
+	}
+	return tags, nil
 }
 
 // SetLayout validates and stores a layout, bumps page_version and tells the page to reload.
@@ -457,7 +518,7 @@ func writeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
-	case errors.Is(err, ErrInvalid):
+	case errors.Is(err, ErrInvalid), errors.Is(err, store.ErrInvalidID):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)

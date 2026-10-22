@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -24,11 +25,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFramePage(w http.ResponseWriter, r *http.Request) {
+	// Public, so it must not write: an unknown id renders the default dashboard without
+	// creating a record (the frame's own authenticated socket does that).
 	id := r.PathValue("id")
-	f, err := s.Store.Ensure(id)
-	if err != nil {
-		writeErr(w, err)
+	if !store.ValidID(id) {
+		http.NotFound(w, r)
 		return
+	}
+	f, err := s.Store.Get(id)
+	if err != nil {
+		f = store.Frame{ID: id, Config: store.DefaultConfig(), Layout: store.DefaultLayout()}
 	}
 	// Simulator: ?sim=WxH renders at the panel size; &fit=WxH scales it into the surface.
 	simW, simH := parseSize(r.URL.Query().Get("sim"))
@@ -178,7 +184,11 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 		PaintedAtMS int64  `json:"painted_at_ms"`
 		Widget      string `json:"widget"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in)
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in)
+	if _, big := errors.AsType[*http.MaxBytesError](err); big {
+		http.Error(w, "beacon too large", http.StatusRequestEntityTooLarge)
+		return
+	}
 	if in.LatencyMS > 0 && in.LatencyMS < 10000 {
 		if _, err := s.Store.Get(r.PathValue("id")); err == nil {
 			_, _ = s.Store.Update(r.PathValue("id"), func(f *store.Frame) {
@@ -260,6 +270,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	ch, unsub := s.sse.subscribe(id)
 	defer unsub()
+	// Send the headers now: the client sees the stream open without waiting for the first event.
+	w.WriteHeader(http.StatusOK)
+	fl.Flush()
 	// Initial state so a fresh page has data without waiting.
 	if f, err := s.Store.Get(id); err == nil && f.Last != nil {
 		s.recordHeartbeatSSE(f)

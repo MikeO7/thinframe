@@ -124,6 +124,8 @@ impl fmt::Display for Value {
         match self {
             Value::Null => f.write_str("null"),
             Value::Bool(b) => write!(f, "{b}"),
+            // NaN and the infinities have no JSON form ("NaN" would break the reader).
+            Value::Num(n) if !n.is_finite() => f.write_str("null"),
             Value::Num(n) if n.fract() == 0.0 && n.abs() < 1e15 => write!(f, "{}", *n as i64),
             Value::Num(n) => write!(f, "{n}"),
             Value::Str(s) => write_str(f, s),
@@ -194,6 +196,42 @@ mod tests {
         assert!(parse("tru").is_err());
         assert!(parse("{} x").is_err());
         assert!(parse("\"abc").is_err());
+    }
+
+    /// Found by fuzz.rs: `"\uDBFF\u0000"` overflowed u32 in the surrogate arithmetic (a panic
+    /// in debug, a wrong char in release).
+    #[test]
+    fn unpaired_high_surrogate_is_replaced_not_combined() {
+        assert_eq!(
+            parse(r#""\uDBFF\u0000x""#).unwrap().as_str(),
+            Some("\u{FFFD}\u{0}x")
+        );
+        assert_eq!(parse(r#""\uD800A""#).unwrap().as_str(), Some("\u{FFFD}A"));
+        assert_eq!(parse(r#""\uD800""#).unwrap().as_str(), Some("\u{FFFD}"));
+        assert_eq!(parse(r#""􏿿""#).unwrap().as_str(), Some("\u{10FFFF}"));
+    }
+
+    /// Deep `[[[[` recursed once per level until the stack overflowed (an abort, not an Err).
+    #[test]
+    fn nesting_is_limited() {
+        let ok = format!(
+            "{}{}",
+            "[".repeat(parse::MAX_DEPTH),
+            "]".repeat(parse::MAX_DEPTH)
+        );
+        assert!(parse(&ok).is_ok());
+        let deep = format!("{}1{}", "[".repeat(65), "]".repeat(65));
+        assert!(parse(&deep).unwrap_err().contains("nested deeper"));
+        assert!(parse(&"[{\"a\":".repeat(200_000)).is_err());
+    }
+
+    /// `1e999` parsed to infinity and was written back as `inf`, which no JSON reader takes.
+    #[test]
+    fn non_finite_numbers_are_refused_and_never_written() {
+        assert!(parse("1e999").is_err());
+        assert!(parse("[-1e400]").is_err());
+        assert_eq!(Value::Num(f64::NAN).to_string(), "null");
+        assert_eq!(Value::Num(f64::INFINITY).to_string(), "null");
     }
 
     #[test]
