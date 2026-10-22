@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -86,12 +87,7 @@ func main() {
 	if d, err := time.ParseDuration(os.Getenv("PAGE_STALE")); err == nil && d > 0 {
 		opts.PageStale = d
 	}
-	srv := api.New(st, opts)
-	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcp.Handler(srv, Version))
-	mux.Handle("/", srv.Routes())
-
-	hs := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second} // no WriteTimeout: SSE
+	hs := newHTTPServer(":"+env("PORT", "8080"), handler(api.New(st, opts)))
 	go func() {
 		log.Printf("frameserver %s listening on %s (data %s)", Version, hs.Addr, dataDir)
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -101,7 +97,31 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdown, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	_ = hs.Shutdown(shutdown)
+	if err := hs.Shutdown(shutdown); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+}
+
+// shutdownTimeout bounds a graceful stop.
+const shutdownTimeout = 5 * time.Second
+
+// handler is everything the server answers: MCP at /mcp, the rest from api.
+func handler(srv *api.Server) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", mcp.Handler(srv, Version))
+	mux.Handle("/", srv.Routes())
+	return mux
+}
+
+// newHTTPServer wraps h. Every request context derives from one base context that Shutdown
+// cancels, so long-lived SSE streams and control sockets end at once instead of holding
+// Shutdown until its deadline (Shutdown alone waits for them and never closes hijacked sockets).
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	base, cancel := context.WithCancel(context.Background())
+	hs := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second, // no WriteTimeout: SSE
+		BaseContext: func(net.Listener) context.Context { return base }}
+	hs.RegisterOnShutdown(cancel)
+	return hs
 }

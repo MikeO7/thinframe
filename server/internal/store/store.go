@@ -203,6 +203,9 @@ func Open(dir string) (*Store, error) {
 	return s, nil
 }
 
+// ErrInvalidID is returned for ids ValidID refuses.
+var ErrInvalidID = errors.New("invalid frame id")
+
 // ErrNotFound is returned for unknown frame ids.
 var ErrNotFound = errors.New("frame not found")
 
@@ -232,7 +235,7 @@ func (s *Store) List() []Frame {
 // Ensure returns the frame, creating it with defaults when unknown.
 func (s *Store) Ensure(id string) (Frame, error) {
 	if !ValidID(id) {
-		return Frame{}, fmt.Errorf("invalid frame id %q", id)
+		return Frame{}, fmt.Errorf("%w %q", ErrInvalidID, id)
 	}
 	return s.Update(id, func(f *Frame) {})
 }
@@ -240,7 +243,7 @@ func (s *Store) Ensure(id string) (Frame, error) {
 // Update applies fn under the lock and persists. Creates the frame if needed.
 func (s *Store) Update(id string, fn func(*Frame)) (Frame, error) {
 	if !ValidID(id) {
-		return Frame{}, fmt.Errorf("invalid frame id %q", id)
+		return Frame{}, fmt.Errorf("%w %q", ErrInvalidID, id)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

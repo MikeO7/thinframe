@@ -100,3 +100,38 @@ func TestAliveAndStreamRejectBadIDs(t *testing.T) {
 		}
 	}
 }
+
+// Unauthenticated pings for ids the store does not know are answered the same but not kept,
+// so they cannot grow the map.
+func TestAliveIgnoresUnknownFrames(t *testing.T) {
+	s, ts := newTest(t, "secret")
+	_, _ = s.Store.Ensure("kitchen")
+	for _, id := range []string{"kitchen", "ghost1", "ghost2"} {
+		if resp, _ := do(t, "POST", ts.URL+"/api/frames/"+id+"/alive", "", nil); resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("alive %s: %d", id, resp.StatusCode)
+		}
+	}
+	s.page.mu.Lock()
+	n := len(s.page.last)
+	_, known := s.page.last["kitchen"]
+	s.page.mu.Unlock()
+	if n != 1 || !known {
+		t.Fatalf("page pings kept: %d (kitchen %v)", n, known)
+	}
+}
+
+// The SSE stream sends its headers at once, before any event, so a client knows it is open.
+func TestSSEHeadersImmediately(t *testing.T) {
+	_, ts := newTest(t, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/stream/nobody", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("no headers within 2 s: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("%d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}
