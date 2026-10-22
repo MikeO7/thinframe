@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::path::Path;
 
 pub const DEFAULT_PATH: &str = "/etc/thinframe.conf";
 
@@ -165,8 +166,23 @@ pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
         Err(e) => return Err(e),
     };
     let tmp = format!("{path}.tmp");
-    fs::write(&tmp, apply_overrides(&text, kv))?;
+    write_private(Path::new(&tmp), apply_overrides(&text, kv).as_bytes())?;
     fs::rename(&tmp, path)
+}
+
+/// Write a file that may hold a secret (the token, a Wi-Fi passphrase): created mode 0600
+/// before any byte lands in it, and flushed to disk so a rename right after is durable.
+pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
 }
 
 pub fn apply_overrides(text: &str, kv: &[(&str, &str)]) -> String {
@@ -233,6 +249,12 @@ mod tests {
         let c = load(ps).unwrap();
         assert_eq!(c.frame_id, "kitchen");
         assert_eq!(c.token, "t0k");
+        // The file holds the token: only root reads it.
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

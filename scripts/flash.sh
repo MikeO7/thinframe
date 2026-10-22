@@ -27,18 +27,21 @@ provision_txt() {
 # list_cards: "dev<TAB>bytes<TAB>label" for every removable disk that passes card_ok and has
 # no mounted system volume.
 list_cards() {
-	local name size rm model mnt
+	local name size rm model mnt sys='^(/|/System(/.*)?|/private/var/vm|/boot.*|/home|/usr|/var)$'
 	if [ "$(uname)" = Darwin ]; then
 		for name in $(diskutil list external physical | awk '/^\/dev\/disk/ {sub("/dev/",""); print $1}'); do
 			size=$(diskutil info "$name" | awk -F'[()]' '/Disk Size/ {split($2,a," "); print a[1]; exit}')
 			rm=$(diskutil info "$name" | grep -qE 'Removable Media: +(Removable|Yes)' && echo 1 || echo 0)
 			card_ok "${size:-0}" "$rm" || continue
+			# a disk the Mac booted from, or that holds a system volume, is never a card
+			mnt=$(mount | awk -v d="/dev/${name}s" 'index($1, d) == 1 {print $3}' | grep -E "$sys" || true)
+			[ -z "$mnt" ] || continue
 			printf '%s\t%s\t%s\n' "$name" "$size" "$(diskutil info "$name" | awk -F': +' '/Media Name/ {print $2; exit}')"
 		done
 	else
 		while read -r name size rm model; do
 			card_ok "$size" "$rm" || continue
-			mnt=$(lsblk -nr -o MOUNTPOINT "/dev/$name" | grep -E '^(/|/boot.*|/home|/usr|/var)$' || true)
+			mnt=$(lsblk -nr -o MOUNTPOINT "/dev/$name" | grep -E "$sys" || true)
 			[ -z "$mnt" ] || continue
 			printf '%s\t%s\t%s\n' "$name" "$size" "$model"
 		done < <(lsblk -dnb -o NAME,SIZE,RM,MODEL | grep -v '^loop\|^zram')
@@ -60,14 +63,16 @@ fetch_image() {
 	zstd -d -q -f "$IMG.zst" -o "$IMG" && rm -f "$IMG.zst" && printf '%s' "$want" > "$IMG.zsum"
 }
 
-# write_card DEV: unmount, one sudo to write and read back, compare hashes.
+# write_card DEV SIZE: re-check the card, unmount, one sudo to write and read back, compare hashes.
 write_card() {
 	local dev="$1" bytes want got raw="/dev/$1" bs=4M
+	# the name was confirmed a moment ago; make sure the same card is still behind it
+	list_cards | grep -q "^$dev	$2	" || stop "$dev is no longer the card that was listed; re-run"
 	bytes=$(wc -c < "$IMG" | tr -d ' '); want=$(sha "$IMG")
 	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"; bs=4m; fi
 	say "Writing $bytes bytes to $raw (sudo asks for your password once)"
-	got=$(sudo bash -c "dd if='$IMG' of='$raw' bs=$bs conv=sync 2>/dev/null; sync; \
-		head -c $bytes '$raw' | { sha256sum 2>/dev/null || shasum -a 256; }" | cut -d' ' -f1)
+	got=$(sudo bash -c 'dd if="$1" of="$2" bs="$3" conv=sync 2>/dev/null; sync; \
+		head -c "$4" "$2" | { sha256sum 2>/dev/null || shasum -a 256; }' _ "$IMG" "$raw" "$bs" "$bytes" | cut -d' ' -f1)
 	[ "$got" = "$want" ] || stop "readback mismatch ($got != $want); do not use this card"
 	echo "verified"
 }
@@ -111,7 +116,7 @@ main() {
 	echo "Found: $dev  $((size / 1000000000)) GB  $label"
 	read -r -p "Type the disk name ($dev) to erase it and continue: " ans </dev/tty
 	[ "$ans" = "$dev" ] || stop "confirmation did not match"
-	[ "${1:-}" = "--settings-only" ] || write_card "$dev"
+	[ "${1:-}" = "--settings-only" ] || write_card "$dev" "$size"
 	put_provision "$dev"
 	say "Done. Card in the frame, power on. On its screen: pick Wi-Fi if asked, then press PAIR. Then open $SERVER_URL/admin"
 }
