@@ -412,14 +412,3 @@ Dated evidence for every gate in TASKS.md. Newest at the bottom.
   collector moves single readings by about 50 MB.
 - armv7 tfctl: 963,036 bytes (under 1 MB). `cargo clippy -D warnings`, `cargo test` (117 passed, 3 ignored), `shellcheck`: clean.
 - Not seen on the panel yet.
-
-## 2026-10-22 Audit chunk 9: A/B slot guards
-- `sysupdate::system` overwrote the standby slot even while U-Boot was still counting tries for
-  the running one, so a second update arriving before the first was confirmed could leave no slot
-  known to boot. It now refuses with "not confirmed" until `confirm_slot` has zeroed the counter.
-- `rollback` wrote `tries=0`, so a damaged other slot (a dd that died mid-write) would boot-loop
-  with no fallback. It now writes `tries=3`, like a fresh update; `confirm_slot` clears it.
-- `http_poll` never confirmed anything, so a frame that only reached the server over HTTP stayed
-  unconfirmed and two power cuts reverted a healthy update. A successful poll now runs the same
-  `on_connect` as a WebSocket connect. Tests updated [V].
-- `cargo test`: 117 passed. clippy clean.
