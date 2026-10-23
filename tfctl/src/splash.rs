@@ -15,6 +15,30 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 pub const DEVICE: &str = "/dev/dri/card0";
+
+/// Open the first DRM card that can drive a panel. On the A33 card0 is lima (3D only, no mode
+/// setting: GETRESOURCES fails) and the display engine is card1 [V 2026-10-22]; the order is
+/// whichever driver probed first, so try them all.
+fn open_display() -> io::Result<drm::Display> {
+    let mut why = Vec::new();
+    for n in 0..8 {
+        let path = format!("/dev/dri/card{n}");
+        if !std::path::Path::new(&path).exists() {
+            continue;
+        }
+        match drm::Display::open(&path) {
+            Ok(d) => {
+                eprintln!("tfctl: splash: using {path}");
+                return Ok(d);
+            }
+            Err(e) => why.push(format!("{path}: {e}")),
+        }
+    }
+    if why.is_empty() {
+        return drm::Display::open(DEVICE);
+    }
+    Err(io::Error::other(why.join("; ")))
+}
 pub const SCALE: usize = 4;
 pub const TEXT_COLOR: u32 = 0xdfe3e8;
 
@@ -367,7 +391,7 @@ fn backdrop(cfg: &Config, path: &str, titled: bool) -> io::Result<Option<String>
 const FRAME: Duration = Duration::from_millis(100);
 
 pub fn show(look: &Look) -> io::Result<Splash> {
-    let mut d = drm::Display::open(DEVICE)?;
+    let mut d = open_display()?;
     let (w, h) = (d.mode_size.width as usize, d.mode_size.height as usize);
     let c = render(look, w, h);
     d.write(&c.px);
