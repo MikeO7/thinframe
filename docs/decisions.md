@@ -493,3 +493,19 @@ targets, not hardware limits: each root slot is 1 GB and the board has 1 GB of R
 targets to measure against; the only gate is tfctl under 2 MB in CI, raised from 1 MB because a
 few kilobytes of headroom was costing iteration time (report, log mirror and debug mode cost
 12 KB together). The point is still that the OS stays small so the dashboard gets the machine.
+
+## Boot time and Wi-Fi that stays up (2026-10-22)
+Measured on the frame, kernel start to dashboard: from about 25 s (status page at 18.4 s) to
+14.8 s, and the link no longer drops in the first minute [V]. What cost the time, and the fix:
+
+| Cost | Fix |
+|---|---|
+| udev and iwd waited ~3 s for the RNG ("crng init done" at 4.2 s) | `seedrng` at sysinit with the seed on /data; the kiosk saves a creditable seed once the RNG is ready, and shutdown saves one more. RNG ready at 1.0 s. |
+| Two software renders of the splash scene, ~4 s each on the A33, before cog started | `rendercache.rs`: the pixels and the status page backdrop are kept on /data, keyed by every input plus the tfctl binary and logo; a torn file is a miss. The first frame of an animated splash leaves out the address (new every boot), the animation adds it. |
+| Wi-Fi joins declined at boot, then iwd waited 60 s and more (blacklist, up to a day by default) | `he_on=0` for the AIC8800 (with 802.11ax the access point declined joins and dropped the frame ~31 s after each, reason 34); iwd's blacklist 10 s flat; the agent asks iwd to rejoin the strongest saved network while Wi-Fi is down. |
+| "Connected" before DHCP: the agent hit "network unreachable" and moved its server | online means an IPv4 address on wlan0; dhcpcd without the ARP probe, IPv4 only |
+| A failed cable probe waited 20 s | retried after 2 s; the move off the cable address asks each interface's broadcast address, every minute |
+
+Radio power save is off too: the frame is on mains power. The reasons came from `wifitrace.rs`,
+which runs iwmon (kernel `CONFIG_NLMON`) and logs only link events and their codes, so the next
+Wi-Fi problem on a frame no one is near is readable in its log.

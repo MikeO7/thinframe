@@ -265,6 +265,39 @@ pub fn ext4_lags_partition(sb: &[u8; 1024], part_sectors: u64) -> bool {
     part_sectors >= fs_sectors + MIN_GAIN_SECTORS
 }
 
+/// Where seedrng keeps the entropy seed across boots (inittab feeds it in at sysinit).
+pub const SEED_DIR: &str = "/data/thinframe/seedrng";
+
+/// Save a fresh seed once the kernel's RNG is ready, in the background. The seed inittab saves at
+/// sysinit is taken before the RNG is ready, so seedrng marks it not creditable and the next boot
+/// still waited ~3 s for "crng init done" [V 2026-10-22]; one saved after that is credited, and
+/// the boot after starts with a ready RNG. Reading /dev/random blocks exactly until then.
+pub fn save_seed_when_ready() {
+    let r = std::thread::Builder::new()
+        .name("seedrng".into())
+        .spawn(|| {
+            use std::io::Read;
+            let mut b = [0u8; 1];
+            if std::fs::File::open("/dev/random")
+                .and_then(|mut f| f.read_exact(&mut b))
+                .is_err()
+            {
+                return;
+            }
+            match std::process::Command::new("/usr/sbin/seedrng")
+                .args(["-d", SEED_DIR])
+                .status()
+            {
+                Ok(s) if s.success() => {}
+                Ok(s) => eprintln!("tfctl: seedrng: {s}"),
+                Err(e) => eprintln!("tfctl: seedrng: {e}"),
+            }
+        });
+    if let Err(e) = r {
+        eprintln!("tfctl: seedrng: thread: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

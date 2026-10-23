@@ -41,6 +41,7 @@ mod logmirror;
 mod pair;
 mod png;
 mod provision;
+mod rendercache;
 mod report;
 mod retro;
 mod screen;
@@ -59,6 +60,7 @@ mod update;
 mod watchdog;
 mod wifi;
 mod wifisetup;
+mod wifitrace;
 mod ws;
 
 #[cfg(test)]

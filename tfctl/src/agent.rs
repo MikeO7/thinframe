@@ -48,7 +48,7 @@ pub fn should_reboot_unconfirmed(
 /// Failures in a row between two LAN discoveries (with the backoff, about a minute at first).
 const REDISCOVER_EVERY: u32 = 3;
 /// How often a frame on the USB-C server address looks for the same server over Wi-Fi.
-const LEAVE_USB_EVERY: Duration = Duration::from_secs(300);
+const LEAVE_USB_EVERY: Duration = Duration::from_secs(60);
 
 pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
     serve(Agent::new(cfg, kiosk, &cfg.path)?)
@@ -139,6 +139,8 @@ pub struct Agent {
     pub(crate) radio: Arc<dyn crate::wifi::Radio>,
     pub(crate) wifi_ui: Option<crate::wifisetup::Shared>,
     pub(crate) wifi_down_since: Option<Instant>,
+    /// Last time the agent asked iwd to rejoin the saved network (`wifisetup::kick_due`).
+    pub(crate) wifi_kicked: Option<Instant>,
     pub(crate) wifi_setup: bool,
     pub(crate) wifi_page_up: bool,
     /// Last look for the server over Wi-Fi while on the USB-C address (`leave_usb_link`).
@@ -180,6 +182,7 @@ impl Agent {
             radio: Arc::new(crate::wifi::Iwctl),
             wifi_ui: None,
             wifi_down_since: None,
+            wifi_kicked: None,
             wifi_setup: false,
             wifi_page_up: false,
             usb_checked: None,
@@ -334,10 +337,7 @@ impl Agent {
             id: &self.cfg.frame_id,
             token,
         };
-        let lan = [std::net::SocketAddr::from((
-            std::net::Ipv4Addr::BROADCAST,
-            crate::discover::PORT,
-        ))];
+        let lan = crate::discover::lan_targets();
         if let Ok(Some(url)) = crate::discover::find(&lan, crate::discover::WAIT, &who, &nonce) {
             let usb = Url::parse(&url)
                 .and_then(|u| u.host.parse().ok())
@@ -532,8 +532,14 @@ impl Agent {
                 crate::dbg::log("ws tx", &hb);
                 c.send_text(&hb)?;
                 last_hb = Instant::now();
-                // On the USB-C address: Wi-Fi may have come up since connect.
+                // On the USB-C address: Wi-Fi may have come up since connect (and is asked to).
                 let was = self.cfg.server_url.clone();
+                if Url::parse(&was)
+                    .and_then(|u| u.host.parse().ok())
+                    .is_some_and(crate::discover::is_usb)
+                {
+                    self.kick_wifi();
+                }
                 self.leave_usb_link();
                 if self.cfg.server_url != was {
                     c.close();

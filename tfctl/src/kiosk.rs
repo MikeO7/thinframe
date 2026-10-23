@@ -96,6 +96,8 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
     let mut k = Kiosk::new(cfg);
     crate::logmirror::start(LOG, crate::logmirror::DIR);
+    crate::boot::save_seed_when_ready();
+    crate::wifitrace::start();
     if cfg.server_url.is_empty() {
         // Flashed without a server: find one on the LAN, then carry on as if it was set.
         let (cfg, tx) = (cfg.clone(), tx.clone());
@@ -176,6 +178,11 @@ fn start_agent(cfg: &Config, tx: &mpsc::Sender<KioskCmd>, k: Option<&mut Kiosk>)
     }
 }
 
+/// The styles whose splash redraws itself (splash::show).
+fn animated(style: &str) -> bool {
+    matches!(style, "dawn" | "seventies")
+}
+
 pub struct Kiosk {
     url: String,
     platform: String,
@@ -235,7 +242,13 @@ impl Kiosk {
             title: &self.splash_text,
             status,
             rotation: self.rotation,
-            ip: splash::lan_ip(),
+            // The address changes every boot (random MAC), so a first frame with it is never in
+            // the render cache and costs ~4 s before cog starts; the animation adds it within 2 s.
+            ip: if animated(&self.splash_style) {
+                None
+            } else {
+                splash::lan_ip()
+            },
         };
         match splash::show(&look) {
             Ok(s) => self.splash = Some(s),
