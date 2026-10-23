@@ -7,8 +7,9 @@
 //! `tfctl splash [--png FILE] [STATUS]` draws and holds until SIGTERM (or writes a preview);
 //! the kiosk draws it in process and keeps it up while cog starts (see `Splash::hand_over`).
 use crate::config::Config;
-use crate::{dawn, drm, font, png, retro, seventies, sys};
+use crate::{dawn, drm, font, png, rendercache, retro, seventies, sys};
 use std::io;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -162,11 +163,15 @@ pub const LOGO_PATH: &str = "/etc/thinframe/splash.png";
 pub const DATA_LOGO_PATH: &str = "/data/thinframe/splash.png";
 
 /// The logo, if one is installed and decodes; a bad file is logged and ignored.
-fn load_logo() -> Option<png::Image> {
-    let path = std::env::var("TFCTL_SPLASH_PNG").unwrap_or_else(|_| {
+fn logo_path() -> String {
+    std::env::var("TFCTL_SPLASH_PNG").unwrap_or_else(|_| {
         let data = std::path::Path::new(DATA_LOGO_PATH).exists();
         (if data { DATA_LOGO_PATH } else { LOGO_PATH }).into()
-    });
+    })
+}
+
+fn load_logo() -> Option<png::Image> {
+    let path = logo_path();
     let bytes = std::fs::read(&path).ok()?;
     match png::decode(&bytes) {
         Ok(i) => Some(i),
@@ -347,6 +352,37 @@ pub fn render(look: &Look, w: usize, h: usize) -> Canvas {
     c
 }
 
+/// `render`, from the render cache when this exact picture was drawn on an earlier boot.
+fn render_cached(look: &Look, w: usize, h: usize) -> Canvas {
+    let (wh, bg, rot) = (
+        format!("{w}x{h}"),
+        look.bg.to_string(),
+        look.rotation.to_string(),
+    );
+    let ip = look.ip.as_deref().unwrap_or("");
+    let key = rendercache::key(
+        &[
+            "splash",
+            look.style,
+            look.title,
+            look.status,
+            ip,
+            &bg,
+            &rot,
+            &wh,
+        ],
+        &logo_path(),
+    );
+    let b = rendercache::get_or_make(Path::new(rendercache::DIR), &key, Some(w * h * 4), || {
+        rendercache::to_bytes(&render(look, w, h).px)
+    });
+    Canvas {
+        w,
+        h,
+        px: rendercache::from_bytes(&b),
+    }
+}
+
 /// The scene without a status line, upright, as a PNG for the status page's background (TASK 15:
 /// the same picture from splash to status page). Panel 800x1280 turned by COG_ROTATION. None for
 /// `SPLASH_STYLE=plain`. Written once per boot (tmpfs).
@@ -364,24 +400,32 @@ fn backdrop(cfg: &Config, path: &str, titled: bool) -> io::Result<Option<String>
     if cfg.splash_style == "plain" {
         return Ok(None);
     }
-    if !std::path::Path::new(path).exists() {
+    if !Path::new(path).exists() {
         let (lw, lh) = Canvas::new(800, 1280, 0).logical(cfg.rotation);
         let title = if titled || cfg.splash_style != "dawn" {
             cfg.splash_text.as_str()
         } else {
             ""
         };
-        let px = if let Some(scene) = Scene::new(&cfg.splash_style, lw, lh, title, "", None) {
-            let mut l = vec![0; lw * lh];
-            scene.frame(0, &mut l);
-            l
-        } else {
-            let mut l = Canvas::new(lw, lh, 0);
-            retro::draw(&mut l, &cfg.splash_text, "", load_logo().as_ref());
-            l.px
-        };
+        let rot = cfg.rotation.to_string();
+        let key = rendercache::key(
+            &["backdrop", &cfg.splash_style, title, &cfg.splash_text, &rot],
+            &logo_path(),
+        );
+        let png = rendercache::get_or_make(Path::new(rendercache::DIR), &key, None, || {
+            let px = if let Some(scene) = Scene::new(&cfg.splash_style, lw, lh, title, "", None) {
+                let mut l = vec![0; lw * lh];
+                scene.frame(0, &mut l);
+                l
+            } else {
+                let mut l = Canvas::new(lw, lh, 0);
+                retro::draw(&mut l, &cfg.splash_text, "", load_logo().as_ref());
+                l.px
+            };
+            png::encode_rgb(lw, lh, &px)
+        });
         let tmp = format!("{path}.tmp");
-        std::fs::write(&tmp, png::encode_rgb(lw, lh, &px))?;
+        std::fs::write(&tmp, png)?;
         std::fs::rename(&tmp, path)?;
     }
     Ok(Some(path.to_string()))
@@ -393,7 +437,7 @@ const FRAME: Duration = Duration::from_millis(100);
 pub fn show(look: &Look) -> io::Result<Splash> {
     let mut d = open_display()?;
     let (w, h) = (d.mode_size.width as usize, d.mode_size.height as usize);
-    let c = render(look, w, h);
+    let c = render_cached(look, w, h);
     d.write(&c.px);
     d.commit()?;
     eprintln!(

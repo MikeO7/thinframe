@@ -6,6 +6,10 @@
 # while it is still unmounted (a power cut can leave it dirty), then mount everything.
 ::sysinit:/usr/bin/tfctl boot fsck
 ::sysinit:/bin/mount -a
+# Credit last boot's saved entropy before anything asks getrandom(): without it udev and iwd
+# sat ~3 s waiting for "crng init done" [V 2026-10-22]. The kiosk saves a creditable seed once
+# the RNG is ready (boot.rs), and shutdown saves one more.
+::sysinit:/bin/sh -c 'exec /usr/sbin/seedrng -d /data/thinframe/seedrng >/dev/kmsg 2>&1'
 ::sysinit:/bin/mkdir -p /run/lock/subsys
 ::sysinit:/bin/hostname -F /etc/hostname
 ::sysinit:/etc/init.d/rcS
@@ -16,5 +20,6 @@ console::respawn:/sbin/getty -L console 115200 vt100
 ::respawn:/bin/sh -c 'exec /usr/bin/tfctl kiosk >>/var/log/thinframe.log 2>&1'
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/etc/init.d/rcK
+::shutdown:/usr/sbin/seedrng -d /data/thinframe/seedrng
 ::shutdown:/bin/umount -a -r
 ::restart:/sbin/init
