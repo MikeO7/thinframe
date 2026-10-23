@@ -24,10 +24,10 @@ with a gate after each step. `docs/log.md` has the evidence for every checked ga
 
 [pangoleen/ormarch-picture-frame](https://github.com/pangoleen/ormarch-picture-frame)
 already runs a full Omarchy/Hyprland desktop on this frame. It proved the boot
-chain, panel driver, touch, and Wi-Fi. thinframe vendors the board sources that
-work came up with (`image/inputs/`, MIT), builds everything itself from pinned
-mainline U-Boot, mainline Linux and Buildroot, and swaps the Arch desktop for a
-~150 MB root whose only job is to render a web page. Memory and CPU go to the content.
+chain, panel driver, touch, and Wi-Fi. thinframe keeps the board description that
+work produced (`docs/third-party.md`), builds everything itself from pinned mainline
+U-Boot, mainline Linux and Buildroot, and swaps the Arch desktop for a ~150 MB root
+whose only job is to render a web page. Memory and CPU go to the content.
 
 The OS is built with Buildroot: nothing is installed that is not in our defconfig, and every
 version (WPE, cog, kernel, mesa) is pinned in this repo and bumped on purpose.
@@ -62,14 +62,14 @@ version (WPE, cog, kernel, mesa) is pinned in this repo and bumped on purpose.
 On the card:
 ```
 microSD (MBR)
-  8 KiB      u-boot-pf1007l-L.bin         (mainline v2025.10 + image/inputs/uboot patches)
+  8 KiB      u-boot-pf1007l.bin           (mainline v2025.10 + image/uboot/patches)
   4 MiB      p1 FAT32 PFBOOT 256 MiB      zImage.a/.b, DTBs, extlinux/slot-{a,b}.conf, boot.scr, uEnv.txt
   260 MiB    p2 ext4 rootA 1 GiB          Buildroot rootfs, read-only (slot a)
              p3 ext4 rootB 1 GiB          slot b, written by A/B updates
              p4 ext4 data, rest of card   thinframe.conf, ssh keys, iwd profiles
 
 OS      : Buildroot (musl, BusyBox init), WPE WebKit 2.50 + cog 0.18.4 on DRM, mesa lima
-Kernel  : mainline 7.2.x + the image/inputs panel patch and DTS + aic8800 module package
+Kernel  : mainline 7.2.x + the board DTS and panel patch (image/buildroot/board/pf1007l) + aic8800 module package
 Init    : BusyBox init
 Net     : iwd (Wi-Fi) + dhcpcd, USB-C gadget (CDC ECM 192.168.7.2) as fallback
 Control : one outbound WebSocket from tfctl; server pushes, frame acks. No inbound ports. SSH for humans only.
@@ -131,6 +131,7 @@ Change the dashboard: edit the frame's layout in `/admin` (or via MCP); widget t
 | `docs/decisions.md` | Why Buildroot, why cog on DRM, why the boot inputs are vendored |
 | `docs/hardware.md` | Facts copied from the upstream project, with confidence tags |
 | `docs/flashing.md` | The three-step user guide for a new frame |
+| `docs/third-party.md` | Where the board description came from, and its licence |
 | `docs/update-and-ssh.md` | How to get in and how to change things on a running frame |
 | `image/build.sh` | Builds the SD image in Docker (Buildroot external tree in `image/buildroot/`) |
 | `image/boot/` | extlinux.conf and uEnv.txt templates for the FAT partition |

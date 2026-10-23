@@ -3,7 +3,7 @@ CONFIG_FAT_WRITE=y
 CONFIG_CMD_SETEXPR=y
 CONFIG_CMD_SYSBOOT=y
 CONFIG_BOOTDELAY=0
-# Like the frame's build L: run /boot.scr from the card's first partition, not standard boot's
+# Like the frame's U-Boot: run /boot.scr from the card's first partition, not standard boot's
 # extlinux scan (which would skip the slot logic).
 CONFIG_USE_BOOTCOMMAND=y
 CONFIG_BOOTCOMMAND="virtio scan; load virtio 0:1 ${scriptaddr} /boot.scr && source ${scriptaddr}"

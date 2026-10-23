@@ -19,13 +19,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: CI green, binary size logged.
 
 ## 1. Build the boot inputs (Mac, no frame)
-- [x] `image/inputs/` carries the board sources Buildroot does not have (vendored from ormarch at
-      one commit, MIT; `image/inputs/README.md`): the board DTS and its min/pmic/full variants, the
-      v7.2.10 panel patch, the two U-Boot patches and `boot.cmd` with the A/B block.
-      `image/build.sh uboot` (`image/uboot-build.sh`) builds `u-boot-pf1007l-L.bin` (+ `.config`)
-      and `u-boot-qemu-opipc.bin` (QEMU test only) from pinned mainline U-Boot in Docker, with a
-      fixed build time, and checks the SPL and config before use. Kernel, panel driver, DTBs and
-      the aic8800 modules are built by Buildroot in TASK 2 from these sources. Hashes in
+- [x] `image/uboot/`: three patches on mainline U-Boot v2025.10 (a console UART with no pins, a
+      read-only `ums`, the PF1007L board + a QEMU orangepi-pc test config), `boot.cmd` (boot
+      counter, A/B slot choice, USB disk fallback), and `build.sh` + `build-in-container.sh`
+      that build `u-boot-pf1007l.bin` (+ `.config`, `.dtb`) and `u-boot-qemu-opipc.bin` in
+      Docker with a fixed build time and check the SPL and config before use. The board DTS and
+      the v7.2.10 panel patch live in `image/buildroot/board/pf1007l/{dts,patches/linux}`;
+      Buildroot builds the kernel, the DTB and the aic8800 modules from them in TASK 2. Hashes in
       `image/out/uboot.sha256`. No build step clones another project.
 - Gate: `ls image/work/uboot` shows both binaries; `uboot.sha256` matches a second run.
 

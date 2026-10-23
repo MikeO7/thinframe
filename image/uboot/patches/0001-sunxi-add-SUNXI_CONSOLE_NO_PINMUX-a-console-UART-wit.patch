@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MikeO7 <mike.d.ornelas@gmail.com>
+Date: Thu, 22 Oct 2026 18:20:55 -0600
+Subject: [PATCH 1/3] sunxi: add SUNXI_CONSOLE_NO_PINMUX, a console UART with
+ no pins
+
+The SPL normally switches two pins to the console UART that
+CONFIG_CONS_INDEX selects. On the PF1007L photo frame every candidate
+pin has another job (PL2 = Wi-Fi chip enable, PB0/PB1 = keys, PG6/PG7 =
+Bluetooth UART, PF2/PF4 = SD card). With this option the SPL leaves every
+pin alone; the UART still runs but its output reaches no pin, and the
+default environment sets stdin=nulldev so nothing on a UART can stop
+autoboot, a script or ums.
+
+diff --git a/arch/arm/mach-sunxi/Kconfig b/arch/arm/mach-sunxi/Kconfig
+index b04ec671..c3e91ece 100644
+--- a/arch/arm/mach-sunxi/Kconfig
++++ b/arch/arm/mach-sunxi/Kconfig
+@@ -887,6 +887,22 @@ config SUNXI_MINIMUM_DRAM_MB
+ 	the default payload addresses must be shifted down.
+ 	This is expected to be fixed by the SoC selection.
+ 
++config SUNXI_CONSOLE_NO_PINMUX
++	bool "Do not set a pin mux for the console UART"
++	select SYS_CONSOLE_IS_IN_ENV
++	select SYS_DEVICE_NULLDEV
++	---help---
++	The SPL normally switches two pins to the console UART selected by
++	CONFIG_CONS_INDEX. With this option it leaves every pin as it is.
++	The UART still runs, but its output reaches no pin. Use this on a
++	board where each possible console pin has another function (PF1007L:
++	PL2 = Wi-Fi chip enable, PB0/PB1 = keys, PG6/PG7 = Bluetooth UART,
++	PF2/PF4 = SD card). The device tree must not give the console UART a
++	pinctrl property either.
++	With no pins there is no console input: the default environment sets
++	stdin=nulldev, so that nothing on a UART can stop autoboot, a script
++	or the ums command.
++
+ config UART0_PORT_F
+ 	bool "UART0 on MicroSD breakout board"
+ 	---help---
+diff --git a/arch/arm/mach-sunxi/board.c b/arch/arm/mach-sunxi/board.c
+index 432b1c10..03d6fb1d 100644
+--- a/arch/arm/mach-sunxi/board.c
++++ b/arch/arm/mach-sunxi/board.c
+@@ -81,7 +81,9 @@ phys_addr_t board_get_usable_ram_top(phys_size_t total_size)
+ static int gpio_init(void)
+ {
+ 	__maybe_unused uint val;
+-#if CONFIG_CONS_INDEX == 1 && defined(CONFIG_UART0_PORT_F)
++#if defined(CONFIG_SUNXI_CONSOLE_NO_PINMUX)
++	/* The console UART gets no pins, on purpose. */
++#elif CONFIG_CONS_INDEX == 1 && defined(CONFIG_UART0_PORT_F)
+ #if defined(CONFIG_MACH_SUN4I) || \
+     defined(CONFIG_MACH_SUN7I) || \
+     defined(CONFIG_MACH_SUN8I_R40)
+diff --git a/include/configs/sunxi-common.h b/include/configs/sunxi-common.h
+index b29a25d5..605b24fb 100644
+--- a/include/configs/sunxi-common.h
++++ b/include/configs/sunxi-common.h
+@@ -244,7 +244,11 @@
+ 
+ #include <config_distro_bootcmd.h>
+ 
+-#ifdef CONFIG_USB_KEYBOARD
++#if defined(CONFIG_SUNXI_CONSOLE_NO_PINMUX)
++/* The console UART has no pins, so it gives no input. */
++#define CONSOLE_STDIN_SETTINGS \
++	"stdin=nulldev\0"
++#elif defined(CONFIG_USB_KEYBOARD)
+ #define CONSOLE_STDIN_SETTINGS \
+ 	"stdin=serial,usbkbd\0"
+ #else

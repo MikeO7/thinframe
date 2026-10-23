@@ -20,7 +20,7 @@ layout_ok() { [ "$s2" -eq $((p1s + p1n)) ] && [ "$n2" -eq 2097152 ] && [ "$n3" -
 check "MBR disk signature 0x$SIG" eq "$(hex "$IMG" 440 4)" "${SIG:6:2}${SIG:4:2}${SIG:2:2}${SIG:0:2}"
 check "MBR boot signature 55aa" eq "$(hex "$IMG" 510 2)" 55aa
 ub_ok() { cmp -s "$UB" <(tail -c +8193 "$IMG" | head -c "$(wc -c < "$UB")"); }
-check "U-Boot build L at 8 KiB is byte-equal to the input" ub_ok
+check "U-Boot at 8 KiB is byte-equal to the build" ub_ok
 check "eGON.BT0 header at 8 KiB + 4" eq "$(str 8196 8)" eGON.BT0
 check "p1: FAT32 LBA, bootable, starts at 4 MiB, 256 MiB" eq "$p1t $p1f $p1s $p1n" "0c 80 8192 524288"
 check "p2 p3 p4 are Linux (83)" eq "$types" "83 83 83"

@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MikeO7 <mike.d.ornelas@gmail.com>
+Date: Thu, 22 Oct 2026 18:20:55 -0600
+Subject: [PATCH 2/3] ums: add CMD_UMS_READ_ONLY and CMD_UMS_NO_ABORT
+
+CMD_UMS_READ_ONLY reports the LUN as write-protected and refuses every
+write the host sends anyway: for a device whose card must never change
+over USB. CMD_UMS_NO_ABORT keeps ums running through console CTRL+C
+(noise on a floating RX pin) and the host's eject; only a lost cable or
+an I/O error ends it.
+
+diff --git a/cmd/Kconfig b/cmd/Kconfig
+index 29de857b..87d0dab4 100644
+--- a/cmd/Kconfig
++++ b/cmd/Kconfig
+@@ -1747,6 +1747,24 @@ config CMD_USB_MASS_STORAGE
+ 	  export a block device: U-Boot, the USB device, acts as a simple
+ 	  external hard drive plugged on the host USB port.
+ 
++config CMD_UMS_READ_ONLY
++	bool "UMS: export the block device read-only"
++	depends on CMD_USB_MASS_STORAGE
++	help
++	  Report the exported LUN as write-protected and refuse every write
++	  the host sends anyway (a message on the console, status OK). For a
++	  device whose storage must never be changed over USB.
++
++config CMD_UMS_NO_ABORT
++	bool "UMS: do not stop on console CTRL+C or on host eject"
++	depends on CMD_USB_MASS_STORAGE
++	help
++	  The ums command normally ends when the console receives CTRL+C or
++	  when the host sends START STOP UNIT (eject). On a board with a
++	  floating console RX pin, noise can look like CTRL+C. With this
++	  option ums ends only when the USB cable check fails or on an I/O
++	  error.
++
+ config CMD_UMS_ABORT_KEYED
+ 	bool "UMS abort with any key"
+ 	depends on CMD_USB_MASS_STORAGE
+diff --git a/cmd/usb_mass_storage.c b/cmd/usb_mass_storage.c
+index 47e8b70c..e480d2b0 100644
+--- a/cmd/usb_mass_storage.c
++++ b/cmd/usb_mass_storage.c
+@@ -34,6 +34,10 @@ static int ums_write_sector(struct ums *ums_dev,
+ 	struct blk_desc *block_dev = &ums_dev->block_dev;
+ 	lbaint_t blkstart = start + ums_dev->start_sector;
+ 
++	if (IS_ENABLED(CONFIG_CMD_UMS_READ_ONLY)) {
++		printf("ums: refused write of " LBAF " blocks at " LBAF "\n", blkcnt, start);
++		return 0;
++	}
+ 	return blk_dwrite(block_dev, blkstart, blkcnt, buf);
+ }
+ 
+@@ -193,7 +197,7 @@ static int do_usb_mass_storage(struct cmd_tbl *cmdtp, int flag,
+ 		puts("Please connect USB cable.\n");
+ 
+ 		while (!g_dnl_board_usb_cable_connected()) {
+-			if (ctrlc()) {
++			if (!IS_ENABLED(CONFIG_CMD_UMS_NO_ABORT) && ctrlc()) {
+ 				puts("\rCTRL+C - Operation aborted.\n");
+ 				rc = CMD_RET_SUCCESS;
+ 				goto cleanup_register;
+diff --git a/drivers/usb/gadget/f_mass_storage.c b/drivers/usb/gadget/f_mass_storage.c
+index 71dc58da..02922284 100644
+--- a/drivers/usb/gadget/f_mass_storage.c
++++ b/drivers/usb/gadget/f_mass_storage.c
+@@ -664,13 +664,15 @@ static int sleep_thread(struct fsg_common *common)
+ 		}
+ 
+ 		if (k == 10) {
+-			/* Handle START-STOP UNIT */
+-			if (common->eject)
+-				return -EPIPE;
+-
+-			/* Handle CTRL+C */
+-			if (ctrlc())
+-				return -EPIPE;
++			if (!IS_ENABLED(CONFIG_CMD_UMS_NO_ABORT)) {
++				/* Handle START-STOP UNIT */
++				if (common->eject)
++					return -EPIPE;
++
++				/* Handle CTRL+C */
++				if (ctrlc())
++					return -EPIPE;
++			}
+ 
+ 			/* Check cable connection */
+ 			if (!g_dnl_board_usb_cable_connected())
+@@ -1323,6 +1325,10 @@ static int do_start_stop(struct fsg_common *common)
+ 		return -EINVAL;
+ 	}
+ 
++	/* The host's eject is accepted but does not end the ums command. */
++	if (IS_ENABLED(CONFIG_CMD_UMS_NO_ABORT))
++		return 0;
++
+ 	common->eject = 1;
+ 
+ 	return 0;
+@@ -2488,6 +2494,8 @@ static struct fsg_common *fsg_common_init(struct fsg_common *common,
+ 
+ 	for (i = 0; i < nluns; i++) {
+ 		common->luns[i].removable = 1;
++		if (IS_ENABLED(CONFIG_CMD_UMS_READ_ONLY))
++			common->luns[i].initially_ro = 1;
+ 
+ 		rc = fsg_lun_open(&common->luns[i], ums[i].num_sectors, ums->block_dev.blksz, "");
+ 		if (rc)

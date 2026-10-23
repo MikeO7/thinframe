@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MikeO7 <mike.d.ornelas@gmail.com>
+Date: Thu, 22 Oct 2026 18:20:55 -0600
+Subject: [PATCH 3/3] sunxi: add the EFERCRO PF1007L photo frame and its QEMU
+ test config
+
+pf1007l_defconfig: A33, DRAM 456 MHz / ZQ 31739, the vendor PMIC
+voltages, SD only (no eMMC slot, no Wi-Fi, no display, no UART pins),
+boot.scr from the card's first partition, and a read-only USB disk
+(ums) as the fallback when no script boots. pf1007l_qemu_opipc_defconfig
+is the same boot command for qemu-system-arm -M orangepi-pc.
+
+diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
+index 7c8cf3a5..0870deb1 100644
+--- a/arch/arm/dts/Makefile
++++ b/arch/arm/dts/Makefile
+@@ -608,6 +608,7 @@ dtb-$(CONFIG_MACH_SUN8I_A33) += \
+ 	sun8i-a33-ippo-q8h-v1.2.dtb \
+ 	sun8i-a33-olinuxino.dtb \
+ 	sun8i-a33-q8-tablet.dtb \
++	sun8i-a33-pf1007l.dtb \
+ 	sun8i-a33-sinlinx-sina33.dtb \
+ 	sun8i-r16-bananapi-m2m.dtb \
+ 	sun8i-r16-nintendo-nes-classic.dtb \
+diff --git a/arch/arm/dts/sun8i-a33-pf1007l.dts b/arch/arm/dts/sun8i-a33-pf1007l.dts
+new file mode 100644
+index 00000000..f19e09f8
+--- /dev/null
++++ b/arch/arm/dts/sun8i-a33-pf1007l.dts
+@@ -0,0 +1,71 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * EFERCRO PF1007L (Humblestead HM-PF1007-BK photo frame), Allwinner A33.
++ * U-Boot that boots Linux from the MicroSD card and nothing else.
++ *
++ * Base: the Q8 A33 tablet reference design. Changes:
++ *  - USB OTG forced to peripheral, no VBUS drive, no ID pin: the frame is
++ *    powered by the host (the computer stays the host).
++ *  - eMMC (MMC2) absent: this U-Boot has no device for the internal
++ *    storage, so it cannot touch the Android that lives there.
++ *  - SDIO Wi-Fi (MMC1) off: U-Boot must not touch the Wi-Fi power pins
++ *    (PL2 = chip_en, PL6 = wl_reg_on).
++ *  - R_UART (PL2/PL3) off: PL2 is the Wi-Fi chip_en output.
++ *  - Console = UART0 with NO pins (CONFIG_SUNXI_CONSOLE_NO_PINMUX). The
++ *    UART runs, the text goes nowhere. No pad is switched to a UART.
++ *  - Display off: the panel is MIPI-DSI, U-Boot cannot drive it.
++ */
++
++#include "sun8i-a33-q8-tablet.dts"
++
++/ {
++	model = "EFERCRO PF1007L";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
++	};
++};
++
++&uart0 {
++	/* No pinctrl on purpose. See arch/arm/mach-sunxi/board.c,
++	 * CONFIG_SUNXI_CONSOLE_NO_PINMUX. */
++	status = "okay";
++};
++
++&r_uart {
++	/delete-property/ pinctrl-names;
++	/delete-property/ pinctrl-0;
++	status = "disabled";
++};
++
++&mmc1 {
++	/delete-property/ mmc-pwrseq;
++	status = "disabled";
++};
++
++&de {
++	status = "disabled";
++};
++
++&tcon0 {
++	/delete-property/ pinctrl-names;
++	/delete-property/ pinctrl-0;
++	status = "disabled";
++};
++
++&ehci0 {
++	status = "disabled";
++};
++
++&usb_otg {
++	dr_mode = "peripheral";
++};
++
++&usbphy {
++	/delete-property/ usb0_vbus-supply;
++	/delete-property/ usb0_id_det-gpios;
++};
+diff --git a/configs/pf1007l_defconfig b/configs/pf1007l_defconfig
+new file mode 100644
+index 00000000..488a899c
+--- /dev/null
++++ b/configs/pf1007l_defconfig
+@@ -0,0 +1,26 @@
++CONFIG_ARM=y
++CONFIG_ARCH_SUNXI=y
++CONFIG_DEFAULT_DEVICE_TREE="sun8i-a33-pf1007l"
++CONFIG_SPL=y
++CONFIG_MACH_SUN8I_A33=y
++CONFIG_DRAM_CLK=456
++CONFIG_DRAM_ZQ=31739
++# CONFIG_VIDEO_SUNXI is not set
++# CONFIG_SYS_MALLOC_CLEAR_ON_INIT is not set
++CONFIG_CONS_INDEX=1
++CONFIG_SUNXI_CONSOLE_NO_PINMUX=y
++CONFIG_AXP_DCDC1_VOLT=3300
++CONFIG_AXP_DCDC2_VOLT=1200
++CONFIG_AXP_ALDO1_VOLT=3300
++CONFIG_BOOTDELAY=-2
++CONFIG_USE_BOOTCOMMAND=y
++CONFIG_BOOTCOMMAND="setenv stdin nulldev; if load mmc 0:1 ${scriptaddr} /boot.scr; then source ${scriptaddr}; fi; while true; do ums 0 mmc 0; sleep 3; done"
++CONFIG_SYS_CONSOLE_IS_IN_ENV=y
++CONFIG_SYS_DEVICE_NULLDEV=y
++CONFIG_ENV_IS_NOWHERE=y
++# CONFIG_ENV_IS_IN_FAT is not set
++CONFIG_USB_MUSB_GADGET=y
++CONFIG_CMD_USB_MASS_STORAGE=y
++CONFIG_CMD_UMS_READ_ONLY=y
++CONFIG_CMD_UMS_NO_ABORT=y
++CONFIG_CRC32_VERIFY=y
+diff --git a/configs/pf1007l_qemu_opipc_defconfig b/configs/pf1007l_qemu_opipc_defconfig
+new file mode 100644
+index 00000000..f847f5ec
+--- /dev/null
++++ b/configs/pf1007l_qemu_opipc_defconfig
+@@ -0,0 +1,28 @@
++CONFIG_ARM=y
++CONFIG_ARCH_SUNXI=y
++CONFIG_DEFAULT_DEVICE_TREE="sun8i-h3-orangepi-pc"
++CONFIG_SPL=y
++CONFIG_MACH_SUN8I_H3=y
++CONFIG_DRAM_CLK=624
++# CONFIG_SYS_MALLOC_CLEAR_ON_INIT is not set
++CONFIG_SPL_I2C=y
++CONFIG_SPL_SYS_I2C_LEGACY=y
++CONFIG_SYS_I2C_MVTWSI=y
++CONFIG_SY8106A_POWER=y
++# TEST ONLY: U-Boot for `qemu-system-arm -M orangepi-pc`. Same source, same
++# boot command and same options as pf1007l_defconfig, but the Orange Pi PC
++# board (Allwinner H3). QEMU does not model the pin mux, so the serial output
++# of this test build stays visible; stdin is nulldev as on the frame.
++CONFIG_SUNXI_CONSOLE_NO_PINMUX=y
++CONFIG_BOOTDELAY=-2
++CONFIG_USE_BOOTCOMMAND=y
++CONFIG_BOOTCOMMAND="setenv stdin nulldev; if load mmc 0:1 ${scriptaddr} /boot.scr; then source ${scriptaddr}; fi; while true; do ums 0 mmc 0; sleep 3; done"
++CONFIG_SYS_CONSOLE_IS_IN_ENV=y
++CONFIG_SYS_DEVICE_NULLDEV=y
++CONFIG_ENV_IS_NOWHERE=y
++# CONFIG_ENV_IS_IN_FAT is not set
++CONFIG_USB_MUSB_GADGET=y
++CONFIG_CMD_USB_MASS_STORAGE=y
++CONFIG_CMD_UMS_READ_ONLY=y
++CONFIG_CMD_UMS_NO_ABORT=y
++CONFIG_CRC32_VERIFY=y

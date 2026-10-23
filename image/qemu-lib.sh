@@ -5,7 +5,7 @@
 # (the A33 has no QEMU model; the H3 shares the SPL/MMC path). Everything else is the real image.
 # A provision.txt points the frame at a frameserver on this machine. Writes only image/work/qemu/.
 # BOARD=virt (M2): the QEMU=1 image (image/out/qemu) under `-M virt` with its U-Boot; boot.scr is
-# the same image/inputs/uboot/boot.cmd with "mmc 0:1" read as "virtio 0:1", the slots lose the A33 DTB.
+# the same image/uboot/boot.cmd with "mmc 0:1" read as "virtio 0:1", the slots lose the A33 DTB.
 # SCREEN=1 (virt): add the panel (virtio-gpu 800x1280), a multitouch screen and QMP/monitor sockets.
 # FRESH=1 (virt): provision.txt as flash.sh writes it when no Wi-Fi is typed: no Wi-Fi, no token.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
@@ -46,7 +46,7 @@ prepare_image() {
 		mcopy -o -i $i$o /w/sun8i-h3-orangepi-pc.dtb /w/provision.txt ::/
 		for s in a b; do
 			mcopy -n -i $i$o ::/extlinux/slot-$s.conf /w/slot-$s.conf
-			sed -i "s|/sun8i-a33-pf1007l-full.dtb|/sun8i-h3-orangepi-pc.dtb|; s|console=ttyGS0,115200|console=ttyS0,115200|; s| quiet loglevel=0||" /w/slot-$s.conf
+			sed -i "s|/sun8i-a33-pf1007l.dtb|/sun8i-h3-orangepi-pc.dtb|; s|console=ttyGS0,115200|console=ttyS0,115200|; s| quiet loglevel=0||" /w/slot-$s.conf
 			mcopy -o -i $i$o /w/slot-$s.conf ::/extlinux/slot-$s.conf
 		done'
 	(cd "$ROOT/server" && go build -o "$W/frameserver" ./cmd/frameserver)
@@ -60,7 +60,7 @@ prepare_virt() {
 	mkdir -p "$W"; : > "$RES"; rm -f "$IMG" "$W/serial.log"
 	cp -c "$OUT/thinframe-sd.img" "$IMG" 2>/dev/null || cp "$OUT/thinframe-sd.img" "$IMG"
 	truncate -s 4G "$IMG"
-	cp "$HERE/inputs/uboot/boot.cmd" "$W/"
+	cp "$HERE/uboot/boot.cmd" "$W/"
 	printf 'SERVER_URL=http://10.0.2.2:%s\nFRAME_ID=%s\nSSH_PUBKEY=%s\n' "$PORT" "$ID" "$(cat "$KEY.pub")" > "$W/provision.txt"
 	# The QEMU=1 image has a (simulated) radio, so Wi-Fi comes first: join the sim's own network.
 	[ -n "${FRESH:-}" ] || printf 'FRAME_TOKEN=%s\nWIFI_SSID=%s\nWIFI_PSK=%s\n' \

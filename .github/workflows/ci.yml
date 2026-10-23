@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: |
-          shellcheck -x -e SC1091,SC2034,SC2317 image/*.sh image/buildroot/board/pf1007l/*.sh scripts/*.sh image/rootfs/etc/init.d/*
+          shellcheck -x -e SC1091,SC2034,SC2317 image/*.sh image/uboot/*.sh image/buildroot/board/pf1007l/*.sh scripts/*.sh image/rootfs/etc/init.d/*
       - run: grep -q '<title>thinframe</title>' www/index.html
       - run: image/build.sh check
       - run: shellcheck -x -e SC1091,SC2034 tests/*.sh

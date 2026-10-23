@@ -6,9 +6,9 @@ All copied from `pangoleen/ormarch-picture-frame` (`docs/hardware.md`, `docs/exp
 | Item | Value | Tag |
 |---|---|---|
 | SoC | Allwinner A33 (sun8i), FEL id 00001667 | D |
-| Boot | Boot ROM reads SPL from 8 KiB of SD before eMMC. U-Boot v2025.10 + Wes Bos patch + "build L" patch. Console UART0 unused; `CONFIG_SUNXI_CONSOLE_NO_PINMUX=y` because PL2 is Wi-Fi enable | D |
+| Boot | Boot ROM reads SPL from 8 KiB of SD before eMMC. U-Boot v2025.10 + `image/uboot/patches`. Console UART0 unused; `CONFIG_SUNXI_CONSOLE_NO_PINMUX=y` because PL2 is Wi-Fi enable | D |
 | Kernel | Arch `linux-armv7 7.2.10-1`, release `7.2.10-1-armv7-ARCH` | D |
-| DTB | `sun8i-a33-pf1007l-full.dtb` (panel + touch + Wi-Fi + BT UART). `-min` and `-pmic` are debug steps | D |
+| DTB | `sun8i-a33-pf1007l.dtb` (panel + touch + Wi-Fi + PMIC), from `image/buildroot/board/pf1007l/dts` | V |
 | Panel | DSI 4-lane RGB888 800x1280 @ 59.7 Hz, `panel-jadard-jd9365da-h3` with added pf1007l entry | D |
 | Rotation | Hyprland `transform 3` gave correct landscape; Android used `ro.sf.rotation 90` | D |
 | Touch | Silead, I2C0 0x40, firmware `/lib/firmware/silead/gsl_m86_hd.fw` (sha256 e11ffa8a…). Hyprland needed touch transform 6 (vertical flip) on top of output transform 3 | D |

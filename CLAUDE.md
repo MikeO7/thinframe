@@ -28,14 +28,14 @@ If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the ga
   `image/vendor/`, `image/cache/`, `image/work/`, `image/out/`, `image/secrets/`.
 - Secrets (SSH host key, Wi-Fi PSK) go in `image/secrets/` (mode 700), never in Git.
 
-## Boot inputs are vendored, not fetched
+## Everything is built here, from pinned mainline
 
-`image/inputs/` holds the hardware-tested board sources we did not write: the board DTS and its
-three variants, the v7.2.10 panel patch, the two U-Boot patches and `boot.cmd`, all from
-`pangoleen/ormarch-picture-frame` at one commit (MIT, `image/inputs/README.md` has the table).
-U-Boot is built from pinned mainline by `image/uboot-build.sh`; the kernel, DTBs and the AIC8800
-modules by Buildroot. No build step clones another project. Change a vendored file only with a
-reason in `docs/decisions.md`, and keep `image/inputs/README.md` true.
+No build step clones another project. U-Boot: `image/uboot/` (mainline v2025.10 at one commit
+plus three small patches, built by `image/uboot/build.sh` in Docker, reproducible). Kernel: mainline
+v7.2.10 built by Buildroot with the board DTS and the panel patch in `image/buildroot/board/pf1007l/`,
+plus the AIC8800 module package. The board facts behind those files came from the upstream project
+(`docs/third-party.md`); the files themselves are ours to change, with a reason in `docs/decisions.md`
+and the hardware re-verified (the DTS and the U-Boot SPL settings are what boots the frame).
 
 ## Tags
 

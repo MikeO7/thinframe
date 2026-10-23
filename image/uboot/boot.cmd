@@ -1,4 +1,4 @@
-# PF1007L boot script: image/inputs/uboot/boot.cmd (upstream build L script + the thinframe A/B block).
+# PF1007L boot script (image/uboot/boot.cmd): boot counter, A/B slot choice, USB disk fallback.
 # U-Boot loads /boot.scr from partition 1 (FAT) of the SD card and runs it.
 # post-image.sh makes boot.scr from it with mkimage on every image/build.sh rootfs.
 # For a change with no tools: put variables in /uEnv.txt (plain text).
@@ -11,9 +11,9 @@
 #   4. Writes /pf/uboot.env again (one small file) BEFORE it starts Linux.
 #   5. Starts Linux with /extlinux/extlinux.conf. If no label can load: USB disk mode.
 #
-# This script writes only to "mmc 0:1" (the SD card). Build L has no eMMC device.
+# This script writes only to "mmc 0:1" (the SD card). This U-Boot has no eMMC device.
 
-setenv pf_script L1
+setenv pf_script tf1
 setenv pf_mode auto
 setenv pf_extlinux /extlinux/extlinux.conf
 setenv pf_boots 0
@@ -84,5 +84,5 @@ if test "${pf_next}" = "linux"; then
 fi
 
 # USB disk mode: the Mac sees the SD card as a read-only USB disk ("USB download gadget").
-# This script ends here; the built-in boot command of build L then runs: ums 0 mmc 0
+# This script ends here; the built-in boot command (pf1007l_defconfig) then runs: ums 0 mmc 0
 echo "pf1007l: USB disk mode"

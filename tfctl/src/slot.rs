@@ -95,7 +95,7 @@ impl UEnv {
         Ok(UEnv::parse(&fs::read_to_string(path)?))
     }
 
-    /// What U-Boot acts on (image/inputs/uboot/boot.cmd): `uEnv.txt` when it names a slot, else `uEnv.bak`
+    /// What U-Boot acts on (image/uboot/boot.cmd): `uEnv.txt` when it names a slot, else `uEnv.bak`
     /// (the copy `save` keeps), else `uEnv.txt` as it is (U-Boot then defaults to slot a,
     /// tries 0). Err only when neither file can be read.
     pub fn load_effective(path: &Path) -> io::Result<UEnv> {

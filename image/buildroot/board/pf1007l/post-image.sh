@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Buildroot post-image ($BINARIES_DIR = output/images). Builds PFBOOT's files (boot.scr from
-# image/inputs/uboot/boot.cmd, per-slot extlinux, uEnv.txt), the data partition, the card image
+# image/uboot/boot.cmd, per-slot extlinux, uEnv.txt), the data partition, the card image
 # (genimage.cfg) and the OS bundle system-<ver>.tar the container ships (TASK 3).
 set -euo pipefail
 BOARD="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$BOARD/../../../.." && pwd)"
 WORK="${THINFRAME_WORK:-$REPO/image/work}"
-IN="$REPO/image/inputs/uboot"
+IN="$REPO/image/uboot"
 VER="${THINFRAME_VERSION:-dev}"
 B="$BINARIES_DIR"
 S="$B/stage"
@@ -15,14 +15,15 @@ CMDLINE="$CMDLINE fbcon=map:9 panic=10 psi=1 g_cdc.dev_addr=02:50:46:10:07:01 g_
 
 rm -rf "$S" && mkdir -p "$S"
 cp "$B/zImage" "$S/zImage.a"
-cp "$B"/sun8i-a33-pf1007l-{full,min,pmic}.dtb "$WORK/uboot/u-boot-pf1007l-L.bin" "$B/rootfs.ext4" "$S/"
+cp "$B/sun8i-a33-pf1007l.dtb" "$WORK/uboot/u-boot-pf1007l.bin" "$B/rootfs.ext4" "$S/"
 cp "$REPO/image/boot/uEnv.txt" "$IN/boot.cmd" "$S/"
-"$HOST_DIR/bin/mkimage" -C none -A arm -T script -n "thinframe A/B boot script (U-Boot build L)" \
+"$HOST_DIR/bin/mkimage" -C none -A arm -T script -n "thinframe A/B boot script" \
 	-d "$S/boot.cmd" "$S/boot.scr" >/dev/null
 render() { # slot part other otherpart
 	sed -e "s|@SLOT@|$1|g; s|@PART@|$2|g; s|@OTHER@|$3|g; s|@OTHERPART@|$4|g; s|@CMDLINE@|$CMDLINE|g" \
 		"$REPO/image/boot/extlinux.conf.in" > "$S/slot-$1.conf"
 }
+printf "pf_boots=0\npf_last=none\n" > "$S/uboot.env"
 render a 2 b 3
 render b 3 a 2
 
