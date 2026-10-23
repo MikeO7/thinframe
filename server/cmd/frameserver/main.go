@@ -17,11 +17,14 @@
 //	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
 //	TZ            frames receive this time zone
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
+//	DISCOVERY     udp address frames probe to find this server (default :41007, "off" disables;
+//	              needs host networking in a container)
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -34,6 +37,7 @@ import (
 
 	"github.com/MikeO7/thinframe/server/internal/api"
 	"github.com/MikeO7/thinframe/server/internal/artifacts"
+	"github.com/MikeO7/thinframe/server/internal/discover"
 	"github.com/MikeO7/thinframe/server/internal/mcp"
 	"github.com/MikeO7/thinframe/server/internal/photos"
 	"github.com/MikeO7/thinframe/server/internal/store"
@@ -98,6 +102,23 @@ func main() {
 	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if addr := env("DISCOVERY", fmt.Sprintf(":%d", discover.Port)); addr != "off" {
+		go func() {
+			keys := func(id string) []string {
+				var k []string
+				if f, err := st.Get(id); err == nil && f.TokenHash != "" {
+					k = append(k, f.TokenHash)
+				}
+				if opts.Token != "" {
+					k = append(k, discover.HashToken(opts.Token))
+				}
+				return k
+			}
+			if err := discover.Serve(ctx, addr, env("PORT", "8080"), keys); err != nil {
+				log.Printf("discovery: %v (frames need SERVER_URL)", err)
+			}
+		}()
+	}
 	<-ctx.Done()
 	shutdown, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()

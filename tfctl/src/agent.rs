@@ -45,6 +45,9 @@ pub fn should_reboot_unconfirmed(
         && secs_since_last_contact >= UNCONFIRMED_REBOOT_S
 }
 
+/// Failures in a row between two LAN discoveries (with the backoff, about a minute at first).
+const REDISCOVER_EVERY: u32 = 3;
+
 pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
     serve(Agent::new(cfg, kiosk, &cfg.path)?)
 }
@@ -92,6 +95,7 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
                     Err(e) => {
                         eprintln!("tfctl: agent: http poll: {e}");
                         a.server_failed();
+                        a.rediscover();
                     }
                 }
             }
@@ -267,6 +271,59 @@ impl Agent {
             &self.cfg.fallback_url
         } else {
             &self.cfg.url
+        }
+    }
+
+    /// Every REDISCOVER_EVERY failures in a row, ask the LAN where the server went
+    /// (discover.rs) and move there when a server proves it knows our token.
+    pub(crate) fn rediscover(&mut self) {
+        if self.failures == 0 || !self.failures.is_multiple_of(REDISCOVER_EVERY) {
+            return;
+        }
+        let Ok(nonce) = crate::pair::nonce() else {
+            return;
+        };
+        let token = Some(self.cfg.token.as_str()).filter(|t| !t.is_empty());
+        let who = crate::discover::Asker {
+            id: &self.cfg.frame_id,
+            token,
+        };
+        match crate::discover::find(
+            &crate::discover::targets(),
+            crate::discover::WAIT,
+            &who,
+            &nonce,
+        ) {
+            Ok(Some(url)) => self.move_server(&url),
+            Ok(None) => eprintln!("tfctl: agent: discovery: no server answered"),
+            Err(e) => eprintln!("tfctl: agent: discovery: {e}"),
+        }
+    }
+
+    /// Point the agent (and the dashboard URL, unless FRAME_URL pinned it) at `url`, persisted.
+    pub(crate) fn move_server(&mut self, url: &str) {
+        let old = self.cfg.server_url.trim_end_matches('/').to_string();
+        let Some(base) = Url::parse(url) else {
+            return;
+        };
+        if url == old {
+            return;
+        }
+        let id = self.cfg.frame_id.clone();
+        if self.cfg.url == format!("{old}/frame/{id}") {
+            self.cfg.url = format!("{url}/frame/{id}");
+        }
+        self.base = base;
+        self.cfg.server_url = url.to_string();
+        self.persist(&[("SERVER_URL", url)]);
+        eprintln!("tfctl: agent: server moved: {old} -> {url} (found on the LAN)");
+        self.event(
+            "server",
+            &format!("server found on the LAN at {url} (was {old})"),
+        );
+        self.failures = 0;
+        if !self.on_fallback {
+            let _ = self.send(KioskCmd::SetUrl(self.cfg.url.clone()));
         }
     }
 

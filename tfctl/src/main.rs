@@ -31,6 +31,7 @@ mod config;
 mod dawn;
 mod dawnpage;
 mod dbg;
+mod discover;
 mod drm;
 mod font;
 mod http;
