@@ -22,6 +22,8 @@ ln -sfn ../tmp "$T/var/db"
 # Nothing periodic and no logging daemon (README budget): drop BusyBox's syslog/klogd and
 # crond, and seedrng (it writes to the read-only root).
 rm -f "$T"/etc/init.d/S01syslogd "$T"/etc/init.d/S02klogd "$T"/etc/init.d/S*seedrng "$T"/etc/init.d/S50crond
+# iwd, dhcpcd, dropbear run under init's respawn (inittab), not Buildroot's start-once scripts.
+rm -f "$T"/etc/init.d/S40iwd "$T"/etc/init.d/S41dhcpcd "$T"/etc/init.d/S50dropbear
 
 # Offline fallback page (the dashboard itself comes from frameserver).
 rm -rf "$T/var/lib/thinframe/www" && cp -a "$REPO/www" "$T/var/lib/thinframe/www"

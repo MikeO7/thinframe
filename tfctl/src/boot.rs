@@ -4,7 +4,7 @@
 //!  2. first boot: apply /boot/provision.txt with PFBOOT remounted rw for the duration
 //!  3. grow the data partition (p4) to the end of the card, then the ext4 on it (online)
 //!  4. hostname = FRAME_ID, so the router's DHCP table names the frame
-//!  5. udhcpd on the USB-C link, so the Mac gets 192.168.7.1
+//!  5. (udhcpd on the USB-C link, so the Mac gets 192.168.7.1, is an inittab respawn line)
 //!  6. touch firmware from the frame's own Android eMMC when the image has none (`touchfw`)
 //!
 //! `tfctl boot fsck` is a separate, earlier step: the inittab line between `mount proc` and
@@ -77,9 +77,6 @@ pub fn run(conf: &str) -> io::Result<()> {
     let cfg = config::load(conf)?;
     if provision::valid_hostname(&cfg.frame_id) {
         step("hostname", sh("hostname", &[&cfg.frame_id]));
-    }
-    if Path::new("/sys/class/net/usb0").exists() {
-        step("usb dhcp", sh("udhcpd", &["/etc/udhcpd.conf"]));
     }
     step("touch firmware", touchfw::ensure());
     Ok(())

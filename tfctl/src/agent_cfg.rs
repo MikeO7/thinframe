@@ -173,9 +173,7 @@ impl Agent {
             return Ok(());
         }
         std::fs::create_dir_all(&self.paths.data)?;
-        let tmp = path.with_extension("png.tmp");
-        std::fs::write(&tmp, &bytes)?;
-        std::fs::rename(&tmp, &path)?;
+        update::write_synced(&path, &bytes)?;
         self.event("splash", &format!("logo stored, {} bytes", bytes.len()));
         Ok(())
     }
@@ -282,11 +280,6 @@ impl Agent {
             .name("sysupdate".into())
             .spawn(move || {
                 let res = sysupdate::system(&cfg, &arts, &ver, &paths);
-                if res.is_ok() {
-                    if let Err(e) = sysupdate::mark_attempt(&paths, &ver) {
-                        eprintln!("tfctl: agent: {e}");
-                    }
-                }
                 let (kind, text) = match &res {
                     Ok(slot) => (
                         "system-update",

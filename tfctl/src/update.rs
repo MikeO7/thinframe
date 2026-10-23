@@ -1,9 +1,12 @@
-//! Software update (TASK 11): `tfctl-armv7` + `overlay.tar.gz` from the server's
-//! `/api/artifacts/`, sha256 from the config object, `tfctl.prev` kept, then `exit(0)` so the
-//! BusyBox `inittab` respawn line starts the new binary. Rollback: every start appends to
-//! `/data/thinframe/starts`; when an update is pending (`update-pending` marker) and the two
-//! previous starts were both within 60 s, the old binary is swapped back and an event is queued
+//! Software update (TASK 11): `tfctl-armv7` from the server's `/api/artifacts/`, sha256 from the config object, `tfctl.prev` kept, then `exit(0)` so the
+//! BusyBox `inittab` respawn line starts the new binary. Rollback: every start appends its boot
+//! and uptime to `/data/thinframe/starts`; when an update is pending (`update-pending` marker)
+//! and the two previous starts were both in this boot and within 60 s, the old binary is swapped back and an event is queued
 //! for the agent. The system (A/B slot) update lives in `sysupdate.rs`.
+//!
+//! An `overlay` artifact is no longer unpacked: `tar` into the running root, with power pulled
+//! halfway, left a root that was neither release. Every root change ships as a system update,
+//! written to the other slot and checked before it boots.
 //!
 //! All file-system code takes a [`Paths`] so tests run against a temp dir. The frame's root is
 //! mounted read-only; it is remounted rw only while an update writes to it.
@@ -15,14 +18,12 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime};
+use std::process::Command;
+use std::time::Duration;
 
 pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 const CRASH_WINDOW_S: u64 = 60;
 const STARTS_KEEP: usize = 20;
-/// Paths the overlay must never touch (provisioned once, live on the data partition).
-pub const OVERLAY_EXCLUDES: [&str; 3] = ["etc/thinframe.conf", "etc/dropbear", "var/lib/iwd"];
 
 /// Where things live. `Paths::system()` on the frame; tests point everything at a temp dir.
 #[derive(Debug, Clone)]
@@ -156,20 +157,13 @@ pub fn sync_disks() {
     let _ = Command::new("sync").status();
 }
 
-pub fn now_s() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// Queue an event for the agent to send on its next connect (kind, text).
 pub fn queue_event(p: &Paths, kind: &str, text: &str) {
     let _ = fs::create_dir_all(&p.data);
     let line = format!("{kind}\t{}\n", text.replace(['\t', '\n'], " "));
     let mut cur = fs::read_to_string(p.events_file()).unwrap_or_default();
     cur.push_str(&line);
-    let _ = fs::write(p.events_file(), cur);
+    let _ = write_synced(&p.events_file(), cur.as_bytes());
 }
 
 pub fn drain_events(p: &Paths) -> Vec<(String, String)> {
@@ -181,42 +175,34 @@ pub fn drain_events(p: &Paths) -> Vec<(String, String)> {
         .collect()
 }
 
-/// TASK 11. Installs tfctl (and the overlay when offered), writes the version file and the
+/// TASK 11. Installs tfctl, writes the version file and the
 /// pending marker. The caller exits(0) afterwards; the init respawn starts the new binary.
 pub fn software(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::Result<()> {
     let (bin_file, bin_sha) = arts.get("tfctl")?;
-    let overlay = arts.get("overlay").ok();
     fs::create_dir_all(p.tmp())?;
     let new_bin = p.tmp().join("tfctl.new");
     fetch(cfg, bin_file, bin_sha, &new_bin)?;
     fs::set_permissions(&new_bin, fs::Permissions::from_mode(0o755))?;
-    let overlay_tgz = p.tmp().join("overlay.tar.gz");
-    if let Some((file, sha)) = overlay {
-        fetch(cfg, file, sha, &overlay_tgz)?;
-    }
     remount_root(p, true)?;
-    let res = install(p, &new_bin, overlay.map(|_| overlay_tgz.as_path()), version);
+    let res = install(p, &new_bin, version);
     sync_disks();
     let ro = remount_root(p, false);
     res.and(ro)
 }
 
-/// Order matters: the overlay is extracted first, while the old binary still runs, so a failed
-/// `tar` leaves the known-good binary and no marker. Then the binary is swapped and the version
-/// file and marker written; if any of that fails, the old binary and version are put back.
-fn install(p: &Paths, new_bin: &Path, overlay: Option<&Path>, version: &str) -> io::Result<()> {
+/// Every step leaves a working state if power goes: the new binary is staged and synced next to
+/// the old one, the old one is linked to `tfctl.prev`, the marker is synced, and only then is
+/// the new binary renamed over the old (one atomic step). The version file follows the same way.
+/// A cut before the rename leaves the old binary with a marker for a version it does not carry,
+/// which `confirm_software` drops. If any step fails, the old binary and version are put back.
+fn install(p: &Paths, new_bin: &Path, version: &str) -> io::Result<()> {
     let bin = p.binary();
     fs::create_dir_all(bin.parent().unwrap())?;
     // Same file system as the target so the final rename is atomic.
     let staged = bin.with_extension("new");
     fs::copy(new_bin, &staged)?;
     fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
-    if let Some(tgz) = overlay {
-        if let Err(e) = extract_overlay(p, tgz) {
-            let _ = fs::remove_file(&staged);
-            return Err(e);
-        }
-    }
+    fs::File::open(&staged)?.sync_all()?;
     fs::create_dir_all(p.version_file().parent().unwrap())?;
     let ver_prev = version_prev(p);
     if p.version_file().is_file() {
@@ -232,11 +218,12 @@ fn install(p: &Paths, new_bin: &Path, overlay: Option<&Path>, version: &str) -> 
     if had_bin {
         keep_copy(&bin, &prev)?;
     }
+    sync_dir(bin.parent().unwrap());
     let res = (|| {
-        fs::rename(&staged, &bin)?;
-        fs::write(p.version_file(), format!("{version}\n"))?;
         fs::create_dir_all(&p.data)?;
-        fs::write(p.marker(), format!("{version}\n"))
+        write_synced(&p.marker(), format!("{version}\n").as_bytes())?;
+        fs::rename(&staged, &bin)?;
+        write_synced(&p.version_file(), format!("{version}\n").as_bytes())
     })();
     if let Err(e) = res {
         let _ = fs::remove_file(p.marker());
@@ -249,12 +236,35 @@ fn install(p: &Paths, new_bin: &Path, overlay: Option<&Path>, version: &str) -> 
         }
         return Err(e);
     }
+    sync_dir(bin.parent().unwrap());
     let _ = fs::remove_file(new_bin);
-    if let Some(tgz) = overlay {
-        let _ = fs::remove_file(tgz);
-    }
     eprintln!("tfctl: update: software {version} installed, restarting");
     Ok(())
+}
+
+/// Replace `path` with `b`: a synced temporary file renamed over it, so a power cut leaves the
+/// old content or the new, never a torn or empty file.
+pub fn write_synced(path: &Path, b: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    let tmp = path.with_file_name(name);
+    let mut f = fs::File::create(&tmp)?;
+    f.write_all(b)?;
+    f.sync_all()?;
+    drop(f);
+    fs::rename(&tmp, path)?;
+    if let Some(d) = path.parent() {
+        sync_dir(d);
+    }
+    Ok(())
+}
+
+/// Make renames and links in `dir` durable (best effort).
+pub fn sync_dir(dir: &Path) {
+    if let Ok(d) = fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
 }
 
 /// `dst` becomes another name for `src` (a hard link, or a copy on a file system without
@@ -265,47 +275,6 @@ fn keep_copy(src: &Path, dst: &Path) -> io::Result<()> {
         return Ok(());
     }
     fs::copy(src, dst).map(|_| ())
-}
-
-fn extract_overlay(p: &Paths, tgz: &Path) -> io::Result<()> {
-    // `gunzip -c | tar -x`: the frame's BusyBox tar has no -z (measured 2026-10-22), and a
-    // failed overlay blocked every software update.
-    let ex: Vec<String> = OVERLAY_EXCLUDES
-        .iter()
-        .flat_map(|e| [format!("--exclude={e}"), format!("--exclude=./{e}")])
-        .collect();
-    let mut gz = Command::new("gunzip")
-        .arg("-c")
-        .arg(tgz)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let tar = Command::new("tar")
-        .args(["-xf", "-", "-C"])
-        .arg(&p.root)
-        .args(&ex)
-        .stdin(
-            gz.stdout
-                .take()
-                .ok_or_else(|| io::Error::other("gunzip: no stdout"))?,
-        )
-        .output()?;
-    let gz = gz.wait_with_output()?;
-    if !gz.status.success() {
-        return Err(io::Error::other(format!(
-            "gunzip {}: {}",
-            tgz.display(),
-            String::from_utf8_lossy(&gz.stderr).trim()
-        )));
-    }
-    if !tar.status.success() {
-        return Err(io::Error::other(format!(
-            "tar -x into {}: {}",
-            p.root.display(),
-            String::from_utf8_lossy(&tar.stderr).trim()
-        )));
-    }
-    Ok(())
 }
 
 /// `etc/thinframe.version.prev`: the version `tfctl.prev` carries, restored with it.
@@ -333,29 +302,41 @@ pub enum StartCheck {
 /// Called once at `tfctl kiosk` start. Appends to the starts log and decides whether the
 /// pending update has crashed the binary twice in a row.
 pub fn record_start(p: &Paths) -> StartCheck {
-    record_start_at(p, now_s())
+    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
+    let up = fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|t| crate::agent::uptime_s(&t))
+        .unwrap_or(0);
+    record_start_at(p, boot.trim(), up)
 }
 
-pub fn record_start_at(p: &Paths, now: u64) -> StartCheck {
+/// `now` is seconds since boot `boot`. Only starts of this same boot count: power pulled twice
+/// within a minute of boot (the A33 has no clock battery, so wall time says nothing) is not a
+/// crash loop, and must not roll a good update back.
+pub fn record_start_at(p: &Paths, boot: &str, now: u64) -> StartCheck {
     let _ = fs::create_dir_all(&p.data);
     let log = p.data.join("starts");
-    let mut starts: Vec<u64> = fs::read_to_string(&log)
+    let mut starts: Vec<(String, u64)> = fs::read_to_string(&log)
         .unwrap_or_default()
         .lines()
-        .filter_map(|l| l.trim().parse().ok())
+        .filter_map(|l| {
+            let (b, t) = l.trim().split_once(' ')?;
+            Some((b.to_string(), t.parse().ok()?))
+        })
         .collect();
     let recent = starts
         .iter()
         .rev()
         .take(2)
-        // A start logged after `now` is from before a reboot: the A33 has no RTC battery and
-        // comes up in 1970, so with saturating_sub every earlier start would look recent.
-        .filter(|&&t| t <= now && now - t <= CRASH_WINDOW_S)
+        .filter(|(b, t)| b == boot && *t <= now && now - t <= CRASH_WINDOW_S)
         .count();
-    starts.push(now);
+    starts.push((boot.to_string(), now));
     let keep = starts.len().saturating_sub(STARTS_KEEP);
-    let text: String = starts[keep..].iter().map(|t| format!("{t}\n")).collect();
-    let _ = fs::write(&log, text);
+    let text: String = starts[keep..]
+        .iter()
+        .map(|(b, t)| format!("{b} {t}\n"))
+        .collect();
+    let _ = write_synced(&log, text.as_bytes());
     let pending = fs::read_to_string(p.marker()).ok();
     match pending {
         Some(ver) if recent >= 2 => {
@@ -363,7 +344,10 @@ pub fn record_start_at(p: &Paths, now: u64) -> StartCheck {
             match swap_back(p) {
                 Ok(()) => {
                     let _ = fs::remove_file(p.marker());
-                    let _ = fs::write(p.data.join("software-failed"), format!("{ver}\n"));
+                    let _ = write_synced(
+                        &p.data.join("software-failed"),
+                        format!("{ver}\n").as_bytes(),
+                    );
                     queue_event(
                         p,
                         "software-rollback",
@@ -406,11 +390,15 @@ fn swap_back(p: &Paths) -> io::Result<()> {
 
 /// Events the agent sends right after connecting: a pending software update that has now
 /// survived long enough to talk to the server is confirmed (marker removed).
+/// A marker for a version this root does not carry (power cut before the binary was swapped) is
+/// dropped without an event: the server sees the old version and offers the update again.
 pub fn confirm_software(p: &Paths) -> Option<(String, String)> {
     let ver = fs::read_to_string(p.marker()).ok()?;
+    let ver = ver.trim().to_string();
     let _ = fs::remove_file(p.marker());
     let _ = fs::remove_file(p.binary().with_extension("bad"));
-    Some(("software-updated".into(), ver.trim().to_string()))
+    (installed_version(p).as_deref() == Some(ver.as_str()))
+        .then(|| ("software-updated".into(), ver))
 }
 
 /// Software version this root carries (written by `software()`; the image writes the initial one).
@@ -505,28 +493,6 @@ pub(crate) mod tests {
         (cfg, Artifacts(arts))
     }
 
-    fn tar_gz(dir: &Path, members: &[(&str, &str)]) -> Vec<u8> {
-        let src = dir.join("ovl");
-        for (path, content) in members {
-            let f = src.join(path);
-            fs::create_dir_all(f.parent().unwrap()).unwrap();
-            fs::write(f, content).unwrap();
-        }
-        let tgz = dir.join("overlay.tar.gz");
-        let st = Command::new("tar")
-            .args([
-                "-czf",
-                tgz.to_str().unwrap(),
-                "-C",
-                src.to_str().unwrap(),
-                ".",
-            ])
-            .status()
-            .unwrap();
-        assert!(st.success());
-        fs::read(tgz).unwrap()
-    }
-
     #[test]
     fn parses_artifact_map() {
         let v = json::parse(&format!(
@@ -547,23 +513,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn software_update_installs_and_keeps_prev_and_excludes() {
+    fn software_update_installs_keeps_prev_and_ignores_an_overlay() {
         let base = tmp_base("sw");
         let p = Paths::under(&base);
         fs::create_dir_all(p.root.join("usr/bin")).unwrap();
         fs::create_dir_all(p.root.join("etc")).unwrap();
         fs::write(p.binary(), b"old binary").unwrap();
         fs::write(p.root.join("etc/thinframe.conf"), "FRAME_ID=keep\n").unwrap();
-        let ovl = tar_gz(
-            &base,
-            &[
-                ("etc/thinframe.conf", "FRAME_ID=clobbered\n"),
-                ("etc/motd", "hello\n"),
-                ("var/lib/iwd/x.psk", "secret"),
-            ],
-        );
-        let (cfg, arts) =
-            artifact_server(vec![("tfctl", b"new binary".to_vec()), ("overlay", ovl)]);
+        // An older server still offers an overlay; it is not even downloaded.
+        let (cfg, arts) = artifact_server(vec![
+            ("tfctl", b"new binary".to_vec()),
+            ("overlay", b"not a tarball".to_vec()),
+        ]);
         software(&cfg, &arts, "2026.10.2", &p).unwrap();
         assert_eq!(fs::read(p.binary()).unwrap(), b"new binary");
         assert_eq!(
@@ -575,14 +536,10 @@ pub(crate) mod tests {
             0o755
         );
         assert_eq!(
-            fs::read_to_string(p.root.join("etc/motd")).unwrap(),
-            "hello\n"
-        );
-        assert_eq!(
             fs::read_to_string(p.root.join("etc/thinframe.conf")).unwrap(),
             "FRAME_ID=keep\n"
         );
-        assert!(!p.root.join("var/lib/iwd/x.psk").exists());
+        assert!(!p.tmp().join("overlay.tar.gz").exists());
         assert_eq!(installed_version(&p).unwrap(), "2026.10.2");
         assert_eq!(fs::read_to_string(p.marker()).unwrap().trim(), "2026.10.2");
         assert!(!p.tmp().join("tfctl.new").exists());
@@ -620,15 +577,15 @@ pub(crate) mod tests {
         fs::write(p.binary(), b"new").unwrap();
         fs::write(p.binary().with_extension("prev"), b"old").unwrap();
         // No marker: fast restarts are just cog trouble, never a rollback.
-        assert_eq!(record_start_at(&p, 1000), StartCheck::Normal);
-        assert_eq!(record_start_at(&p, 1005), StartCheck::Normal);
-        assert_eq!(record_start_at(&p, 1010), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "b", 1000), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "b", 1005), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "b", 1010), StartCheck::Normal);
         fs::write(p.marker(), "9.9\n").unwrap();
         // Two starts long ago do not count.
-        assert_eq!(record_start_at(&p, 5000), StartCheck::Normal);
-        assert_eq!(record_start_at(&p, 5010), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "b", 5000), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "b", 5010), StartCheck::Normal);
         assert_eq!(
-            record_start_at(&p, 5020),
+            record_start_at(&p, "b", 5020),
             StartCheck::RolledBack("9.9".into())
         );
         assert_eq!(fs::read(p.binary()).unwrap(), b"old");
@@ -656,35 +613,28 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn failed_overlay_leaves_old_binary_and_no_marker() {
-        let base = tmp_base("badtar");
-        let p = old_install(&base);
-        let tgz = p.tmp().join("overlay.tar.gz");
-        fs::write(&tgz, b"not a tarball").unwrap();
-        let e = install(&p, &p.tmp().join("tfctl.new"), Some(&tgz), "2.0").unwrap_err();
-        assert!(e.to_string().contains("tar"), "{e}");
-        assert_eq!(fs::read(p.binary()).unwrap(), b"old binary");
-        assert_eq!(
-            fs::read(p.binary().with_extension("prev")).unwrap(),
-            b"older binary",
-            "known-good prev kept"
-        );
-        assert!(!p.binary().with_extension("new").exists());
-        assert!(!p.marker().exists());
-        assert_eq!(installed_version(&p).unwrap(), "1.0");
-        fs::remove_dir_all(&base).unwrap();
-    }
-
-    #[test]
     fn failure_after_the_swap_puts_the_old_binary_back() {
         let base = tmp_base("postswap");
         let p = old_install(&base);
         // A directory where the marker goes: the last write fails after the swap.
         fs::create_dir_all(p.marker()).unwrap();
-        assert!(install(&p, &p.tmp().join("tfctl.new"), None, "2.0").is_err());
+        assert!(install(&p, &p.tmp().join("tfctl.new"), "2.0").is_err());
         assert_eq!(fs::read(p.binary()).unwrap(), b"old binary");
         assert_eq!(installed_version(&p).unwrap(), "1.0");
         assert!(!p.binary().with_extension("new").exists());
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Power cut after the marker, before the swap: the old binary runs with a marker for a
+    /// version it does not carry. No "updated" event; the server offers the update again.
+    #[test]
+    fn a_marker_without_its_binary_is_dropped_quietly() {
+        let base = tmp_base("cut");
+        let p = old_install(&base);
+        fs::create_dir_all(&p.data).unwrap();
+        fs::write(p.marker(), "2.0\n").unwrap();
+        assert_eq!(confirm_software(&p), None);
+        assert!(!p.marker().exists());
         fs::remove_dir_all(&base).unwrap();
     }
 
@@ -692,14 +642,14 @@ pub(crate) mod tests {
     fn rollback_restores_the_version_file() {
         let base = tmp_base("rbver");
         let p = old_install(&base);
-        install(&p, &p.tmp().join("tfctl.new"), None, "2.0").unwrap();
+        install(&p, &p.tmp().join("tfctl.new"), "2.0").unwrap();
         assert_eq!(installed_version(&p).unwrap(), "2.0");
         assert_eq!(fs::read_to_string(version_prev(&p)).unwrap(), "1.0\n");
         assert_eq!(failed_version(&p), None);
-        assert_eq!(record_start_at(&p, 100), StartCheck::Normal);
-        assert_eq!(record_start_at(&p, 110), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "b", 100), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "b", 110), StartCheck::Normal);
         assert_eq!(
-            record_start_at(&p, 120),
+            record_start_at(&p, "b", 120),
             StartCheck::RolledBack("2.0".into())
         );
         assert_eq!(fs::read(p.binary()).unwrap(), b"old binary");
@@ -709,8 +659,8 @@ pub(crate) mod tests {
         fs::remove_dir_all(&base).unwrap();
     }
 
-    /// Power cut after a good update: the next boot has no RTC and `now` is tiny, so the earlier
-    /// starts lie in the future. They are not a crash loop.
+    /// Power pulled twice right after a good update: three starts within seconds of boot, but in
+    /// three boots. Not a crash loop. Lines of the old format (a bare number) are ignored.
     #[test]
     fn starts_from_before_a_reboot_are_not_recent() {
         let base = tmp_base("rtc");
@@ -720,9 +670,10 @@ pub(crate) mod tests {
         fs::write(p.binary(), b"new").unwrap();
         fs::write(p.binary().with_extension("prev"), b"old").unwrap();
         fs::write(p.marker(), "9.9\n").unwrap();
-        assert_eq!(record_start_at(&p, 1_760_000_000), StartCheck::Normal);
-        assert_eq!(record_start_at(&p, 1_760_000_005), StartCheck::Normal);
-        assert_eq!(record_start_at(&p, 20), StartCheck::Normal);
+        fs::write(p.data.join("starts"), "5\n6\n").unwrap();
+        assert_eq!(record_start_at(&p, "boot1", 6), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "boot2", 6), StartCheck::Normal);
+        assert_eq!(record_start_at(&p, "boot3", 6), StartCheck::Normal);
         assert_eq!(fs::read(p.binary()).unwrap(), b"new");
         assert!(p.marker().exists());
         fs::remove_dir_all(&base).unwrap();

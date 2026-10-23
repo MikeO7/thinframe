@@ -10,12 +10,20 @@
 # sat ~3 s waiting for "crng init done" [V 2026-10-22]. The kiosk saves a creditable seed once
 # the RNG is ready (boot.rs), and shutdown saves one more.
 ::sysinit:/bin/sh -c 'exec /usr/sbin/seedrng -d /data/thinframe/seedrng >/dev/kmsg 2>&1'
-::sysinit:/bin/mkdir -p /run/lock/subsys
+::sysinit:/bin/mkdir -p /run/lock/subsys /tmp/iwd/hotspot
 ::sysinit:/bin/hostname -F /etc/hostname
 ::sysinit:/etc/init.d/rcS
 # Login prompt on the kernel console (ttyGS0 over USB-C on the frame, ttyS0 in QEMU). Key-only
 # accounts: this is a prompt, not a way in. Recovery is ssh over the USB link.
 console::respawn:/sbin/getty -L console 115200 vt100
+# The daemons the frame cannot do without, supervised: init restarts any that ends. Buildroot's
+# start-once scripts for them are removed in post-build.sh; at boot iwd once exited and the frame
+# sat without Wi-Fi until a reboot [V 2026-10-22]. Foreground, output off the console (the USB
+# serial, which can block a writer nobody reads); iwd's goes to a log, to know why next time.
+::respawn:/bin/sh -c 'exec /usr/libexec/iwd >>/var/log/iwd.log 2>&1'
+::respawn:/bin/sh -c 'exec /sbin/dhcpcd -B -f /etc/dhcpcd.conf >/dev/null 2>&1'
+::respawn:/bin/sh -c 'umask 077; exec /usr/sbin/dropbear -F -R -s -w >/dev/null 2>&1'
+::respawn:/bin/sh -c 'exec /usr/sbin/udhcpd -f /etc/udhcpd.conf >/dev/null 2>&1'
 # The kiosk: cog supervisor + control agent. Respawned if it exits (software updates rely on it).
 ::respawn:/bin/sh -c 'exec /usr/bin/tfctl kiosk >>/var/log/thinframe.log 2>&1'
 ::ctrlaltdel:/sbin/reboot

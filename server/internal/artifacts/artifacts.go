@@ -1,5 +1,5 @@
 // Package artifacts serves the frame software the container carries:
-// tfctl-armv7, overlay.tar.gz, system-<ver>.tar, each with a .sha256 sidecar,
+// tfctl-armv7, system-<ver>.tar, each with a .sha256 sidecar,
 // and versions.json describing them. Frames learn versions from their config.
 package artifacts
 
@@ -18,7 +18,7 @@ import (
 
 // Versions is the content of versions.json in the artifacts dir.
 type Versions struct {
-	Software string            `json:"software"` // tfctl + overlay version
+	Software string            `json:"software"` // tfctl version
 	System   string            `json:"system"`   // OS bundle version
 	Files    map[string]string `json:"files"`    // logical name -> file name, e.g. "tfctl": "tfctl-armv7"
 }

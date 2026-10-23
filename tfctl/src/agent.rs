@@ -141,6 +141,10 @@ pub struct Agent {
     pub(crate) wifi_down_since: Option<Instant>,
     /// Last time the agent asked iwd to rejoin the saved network (`wifisetup::kick_due`).
     pub(crate) wifi_kicked: Option<Instant>,
+    /// Last status page write while waiting for Wi-Fi (every STEP, not every WAIT_STEP).
+    pub(crate) status_written: Option<Instant>,
+    /// Last look for the server over the USB-C link while Wi-Fi is down.
+    pub(crate) cable_asked: Option<Instant>,
     pub(crate) wifi_setup: bool,
     pub(crate) wifi_page_up: bool,
     /// Last look for the server over Wi-Fi while on the USB-C address (`leave_usb_link`).
@@ -183,6 +187,8 @@ impl Agent {
             wifi_ui: None,
             wifi_down_since: None,
             wifi_kicked: None,
+            status_written: None,
+            cable_asked: None,
             wifi_setup: false,
             wifi_page_up: false,
             usb_checked: None,

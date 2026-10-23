@@ -133,7 +133,7 @@ pub fn add_authorized_key(path: &Path, key: &str) -> io::Result<()> {
     }
     cur.push_str(key.trim());
     cur.push('\n');
-    fs::write(path, cur)?;
+    crate::update::write_synced(path, cur.as_bytes())?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o644))
 }
 
@@ -148,7 +148,18 @@ pub fn apply(t: &Targets) -> io::Result<bool> {
     let res = apply_text(t, &text);
     // The file holds the Wi-Fi passphrase and the token on a FAT partition anyone can read
     // by pulling the card: it goes whether or not applying it worked, and a failure is
-    // reported once rather than retried on every boot.
+    // reported once rather than retried on every boot. The one exception is storage that was
+    // not there to write to (/data not mounted yet: the read-only root underneath): then the
+    // settings would be lost for good, and the next boot tries again.
+    if let Err(e) = &res {
+        if e.kind() == io::ErrorKind::ReadOnlyFilesystem {
+            eprintln!(
+                "tfctl: provision: storage read-only, keeping {}",
+                file.display()
+            );
+            return res;
+        }
+    }
     if file.exists() {
         if let Err(e) = fs::remove_file(&file) {
             eprintln!("tfctl: provision: cannot remove {}: {e}", file.display());
@@ -212,6 +223,8 @@ fn apply_text(t: &Targets, text: &str) -> io::Result<bool> {
             let _ = Command::new("hostname").arg(name).status();
         }
     }
+    // Everything above on the card before the only copy of it goes.
+    let _ = Command::new("sync").status();
     fs::remove_file(&file)?;
     let _ = Command::new("sync").status();
     eprintln!("tfctl: provision: done, {} removed", file.display());

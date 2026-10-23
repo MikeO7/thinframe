@@ -3,8 +3,8 @@
 //! `/data/thinframe/log/current.log` every 15 s (the only card writes the log causes); the first
 //! run of a new boot moves the last boot's file to `previous.log`. Both are plain 0644 files, so
 //! `frame` reads them over ssh, and the report (report.rs) carries their tails. `current.log` is
-//! capped like the live log; `/data` not mounted means nothing is written.
-use crate::kiosk::cap_log;
+//! capped like the live log, but by a synced copy renamed over it (a power cut mid-trim keeps
+//! the old file, where truncating in place would leave an empty one); `/data` not mounted means nothing is written.
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -33,10 +33,23 @@ pub fn start(src: &'static str, dir: &'static str) {
                 if let Err(e) = copy_new(Path::new(src), &dst, &mut offset) {
                     eprintln!("tfctl: logmirror: {e}");
                 }
-                let _ = cap_log(&dst.to_string_lossy(), MAX, KEEP);
+                let _ = cap(&dst, MAX, KEEP);
                 thread::sleep(EVERY);
             }
         });
+}
+
+/// Over `max` bytes: the last `keep` replace the file (this thread is its only writer).
+fn cap(path: &Path, max: u64, keep: u64) -> io::Result<()> {
+    let len = fs::metadata(path)?.len();
+    if len <= max {
+        return Ok(());
+    }
+    let mut f = fs::File::open(path)?;
+    f.seek(SeekFrom::Start(len - keep.min(len)))?;
+    let mut tail = Vec::new();
+    f.read_to_end(&mut tail)?;
+    crate::update::write_synced(path, &tail)
 }
 
 /// A new boot id: current.log becomes previous.log. The same boot (tfctl respawned): nothing.
@@ -51,7 +64,7 @@ pub fn rotate(dir: &Path, boot_id: &str) -> io::Result<()> {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
-    fs::write(&id_file, format!("{boot_id}\n"))
+    crate::update::write_synced(&id_file, format!("{boot_id}\n").as_bytes())
 }
 
 /// Append the bytes of `src` past `*offset` to `dst`. A `src` shorter than the offset was
@@ -115,5 +128,20 @@ mod tests {
         fs::remove_file(&src).unwrap();
         copy_new(&src, &dst, &mut off).unwrap();
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cap_keeps_the_tail() {
+        let dir = std::env::temp_dir().join(format!("tfctl-cap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("current.log");
+        fs::write(&p, "0123456789").unwrap();
+        cap(&p, 20, 4).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"0123456789");
+        cap(&p, 8, 4).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"6789");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "no temp file left");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -53,6 +53,12 @@ const BG_COLOR: &str = "#0b0d10";
 /// page is the server watchdog's job (restart-kiosk).
 const WEB_MEM_LIMIT_MIB: u32 = 256;
 
+/// At boot cog first waits this long for the server, under the splash (which shows the same
+/// "warming up"), and then opens the dashboard directly. Opening the status page first and
+/// switching cost a second cog start: 1.3 s to end the first and 2.5 s to load again
+/// [V 2026-10-22]. Any page the agent asks for (dashboard, Wi-Fi setup, PAIR) starts cog at once;
+/// after the hold the status page says what the frame waits for.
+const FIRST_PAGE_HOLD: Duration = Duration::from_secs(12);
 const RESTART_DELAY: Duration = Duration::from_secs(3);
 const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 const FAST_FAIL: Duration = Duration::from_secs(60);
@@ -85,6 +91,7 @@ pub fn cap_log(path: &str, max: u64, keep: u64) -> io::Result<()> {
 }
 
 pub fn run(cfg: &Config) -> io::Result<()> {
+    crate::logstamp::start();
     sys::trap_term();
     crate::watchdog::start();
     // TASK 11 rollback: two fast crashes after an update put tfctl.prev back; exit so the
@@ -96,6 +103,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
     let mut k = Kiosk::new(cfg);
     crate::logmirror::start(LOG, crate::logmirror::DIR);
+    crate::prewarm::start();
     crate::boot::save_seed_when_ready();
     crate::wifitrace::start();
     if cfg.server_url.is_empty() {
@@ -158,7 +166,10 @@ fn start_agent(cfg: &Config, tx: &mpsc::Sender<KioskCmd>, k: Option<&mut Kiosk>)
                 if !cfg.fallback_url.is_empty() {
                     a.start_on_status_page();
                     match k {
-                        Some(k) => k.url = cfg.fallback_url.clone(),
+                        Some(k) => {
+                            k.url = cfg.fallback_url.clone();
+                            k.next_spawn = Instant::now() + FIRST_PAGE_HOLD;
+                        }
                         None => {
                             let _ = tx.send(KioskCmd::SetUrl(cfg.fallback_url.clone()));
                         }

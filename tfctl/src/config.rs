@@ -92,8 +92,10 @@ pub fn path() -> String {
 /// wins over a `FRAME_TOKEN` line left in the file by an older tfctl. A reader that may not
 /// open the token file (not root) gets an empty token, not an error.
 pub fn load(path: &str) -> io::Result<Config> {
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
+    // Bytes, not a string: one bad byte (a torn write, a card fault) must not stop the boot or
+    // the kiosk; the lines that parse still count.
+    let text = match fs::read(path) {
+        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
@@ -185,8 +187,10 @@ pub fn parse_rgb(s: &str) -> Option<u32> {
 pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
     let real = resolve_target(Path::new(path));
     let path = real.to_str().unwrap_or(path);
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
+    // Bytes, not a string: one bad byte (a torn write, a card fault) must not stop the boot or
+    // the kiosk; the lines that parse still count.
+    let text = match fs::read(path) {
+        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };

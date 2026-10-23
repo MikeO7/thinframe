@@ -1,0 +1,6 @@
+# Read by Buildroot's /etc/init.d/S10udev. Do not wait for udev to finish the coldplug: the
+# wait held every later start (dbus, iwd, dhcpcd, the kiosk) 3.9 s while the Wi-Fi and touch
+# firmware loaded [V 2026-10-22]. Nothing after it needs it: iwd and dhcpcd pick up wlan0 when it
+# appears, the display exists from the kernel, and tfctl rebinds the touch driver itself once
+# its firmware is in place (touchfw.rs).
+SETTLE_TIMEOUT=0

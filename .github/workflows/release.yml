@@ -101,7 +101,7 @@ jobs:
         with: { name: image, path: image/out }
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: armv7-unknown-linux-musleabihf }
-      - name: stage frame software (tfctl-armv7, overlay, system bundle, versions.json)
+      - name: stage frame software (tfctl-armv7, system bundle, versions.json)
         run: |
           pip install cargo-zigbuild
           (cd tfctl && cargo zigbuild --release --target armv7-unknown-linux-musleabihf)

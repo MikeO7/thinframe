@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fast iteration on a connected frame: build tfctl for armv7, stage it with the rootfs overlay
+# Fast iteration on a connected frame: build tfctl for armv7, stage it
 # as a dev software version in the server's artifacts directory, and ask the frame to update now.
 #   scripts/dev-push.sh [ARTIFACTS_DIR]     default $THINFRAME_ARTIFACTS or ~/.thinframe/artifacts
 # The server reads versions.json on every config request, so no restart. With SERVER_URL,
