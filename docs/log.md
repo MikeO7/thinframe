@@ -662,3 +662,26 @@ Goal: the frame can be run, debugged and updated from the server with no one at 
   .209. Discovery makes that harmless for the server; a fixed address is still open.
 - Server on the Mac as a launchd service (`scripts/server-mac.sh install`); `status` lists
   `frame office online ip 192.168.1.209 system 2026.10.23-iwctl` (PR #95).
+
+## 2026-10-22 (boot time and Wi-Fi, PR #98)
+Measured on the office frame over SSH after server-sent reboots (`dmesg`, `/proc/<pid>/stat`
+start times, cog's own timestamps against `/proc/uptime`), system updates fastboot1 to fastboot9.
+- Before [V]: `random: crng init done` at 4.19 s with udev waiting on it; `tfctl kiosk` at 6.41 s,
+  cog at 14.86 s (two ~4 s software renders: `tfctl splash --png` took `user 4.07s`), status page
+  loaded at ~18.4 s, server contact ~25 s.
+- seedrng [V]: the sysinit seed alone stayed non-creditable (taken before the RNG is ready);
+  with the kiosk's seed: `[1.153326] Seeding 256 bits and crediting`, `[1.153484] random: crng
+  init done`. iwd started at 3.2 s, the kiosk at 3.5 s.
+- Render cache [V]: `/data/thinframe/cache` holds the backdrop PNG (3073098 bytes) and splash
+  pixels (4096000 bytes); later boots draw from it.
+- Wi-Fi trace (iwmon, `CONFIG_NLMON=y`) [V]: with 802.11ax on, joins at boot were refused
+  (`Status Code: 37`, `1`, `30`) and the access point dropped the frame ~31 s after each join:
+  `Event: Disconnect`, `Reason Code: Disassociated because excessive number of frames need to be
+  acknowledged…`, `Disconnect by AP: true` (12.5 to 43.8 s, 44.7 to 76.0 s, 18.4 to 49.9 s, 50.2 to
+  82.7 s on three boots). iwd then sat each access point out 60 s (default blacklist).
+- With `he_on=0` [V] (`HE supp 0`, `/sys/module/aic8800_fdrv/parameters/he_on` = N): one join,
+  `Status Code: 0` at the first attempt, no disconnect in 154 s and in 238 s, two boots.
+- Result [V]: dashboard loaded 14.8 s after kernel start (`22:54:28.177 … /frame/office> Loaded
+  successfully`, boot at 22:54:13.35), straight from the server at 192.168.1.172 over Wi-Fi.
+- Touch: the tap listener on `/dev/input/event2` saw no events before it timed out; taps are
+  still [U].
