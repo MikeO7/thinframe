@@ -81,7 +81,7 @@ write_card() {
 	local dev="$1" bytes want got raw="/dev/$1"
 	[ "$(list_cards | grep -c "^$dev	$2	")" = 1 ] || stop "$dev is no longer the card that was listed; re-run"
 	bytes=$(wc -c < "$IMG" | tr -d ' '); printf '  %sreading the image (%s MB) to check the card against it…%s' "$D" $((bytes / 1000000)) "$N"
-	want="$(head -c 1048576 "$IMG" | sha -) $(tail -c +1048577 "$IMG" | sha -)"; printf '\r\033[K'
+	want="$(dd if="$IMG" bs=1048576 count=1 2>/dev/null | sha -) $(dd if="$IMG" bs=1048576 skip=1 2>/dev/null | sha -)"; printf '\r\033[K'
 	[ $((bytes % 1048576)) = 0 ] || stop "image size is not whole MiB"
 	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"; fi
 	# shellcheck disable=SC2024  # the prompt reads the terminal, not a file
