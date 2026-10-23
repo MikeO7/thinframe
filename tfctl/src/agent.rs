@@ -45,6 +45,11 @@ pub fn should_reboot_unconfirmed(
         && secs_since_last_contact >= UNCONFIRMED_REBOOT_S
 }
 
+/// Failures in a row between two LAN discoveries (with the backoff, about a minute at first).
+const REDISCOVER_EVERY: u32 = 3;
+/// How often a frame on the USB-C server address looks for the same server over Wi-Fi.
+const LEAVE_USB_EVERY: Duration = Duration::from_secs(300);
+
 pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
     serve(Agent::new(cfg, kiosk, &cfg.path)?)
 }
@@ -66,6 +71,7 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
             thread::sleep(a.pair_step());
             continue;
         }
+        a.leave_usb_link();
         let ws_url = a.api(&format!("/api/frames/{}/ws", a.cfg.frame_id));
         match ws::Client::connect(&ws_url, &a.cfg.token, CONNECT_TIMEOUT) {
             Ok(mut c) => {
@@ -92,6 +98,7 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
                     Err(e) => {
                         eprintln!("tfctl: agent: http poll: {e}");
                         a.server_failed();
+                        a.rediscover();
                     }
                 }
             }
@@ -134,6 +141,8 @@ pub struct Agent {
     pub(crate) wifi_down_since: Option<Instant>,
     pub(crate) wifi_setup: bool,
     pub(crate) wifi_page_up: bool,
+    /// Last look for the server over Wi-Fi while on the USB-C address (`leave_usb_link`).
+    pub(crate) usb_checked: Option<Instant>,
     /// Last probe of the server without Wi-Fi (USB-C link to a computer): when, and the answer.
     pub(crate) direct: Option<(Instant, bool)>,
     /// Process start and the last answer from the server, for `maybe_reboot_unconfirmed`.
@@ -173,6 +182,7 @@ impl Agent {
             wifi_down_since: None,
             wifi_setup: false,
             wifi_page_up: false,
+            usb_checked: None,
             direct: None,
             started: Instant::now(),
             last_contact: None,
@@ -273,6 +283,98 @@ impl Agent {
         }
     }
 
+    /// Every REDISCOVER_EVERY failures in a row, ask the LAN where the server went
+    /// (discover.rs) and move there when a server proves it knows our token.
+    pub(crate) fn rediscover(&mut self) {
+        if self.failures == 0 || !self.failures.is_multiple_of(REDISCOVER_EVERY) {
+            return;
+        }
+        let Ok(nonce) = crate::pair::nonce() else {
+            return;
+        };
+        let token = Some(self.cfg.token.as_str()).filter(|t| !t.is_empty());
+        let who = crate::discover::Asker {
+            id: &self.cfg.frame_id,
+            token,
+        };
+        match crate::discover::find(
+            &crate::discover::targets(),
+            crate::discover::WAIT,
+            &who,
+            &nonce,
+        ) {
+            Ok(Some(url)) => self.move_server(&url),
+            Ok(None) => eprintln!("tfctl: agent: discovery: no server answered"),
+            Err(e) => eprintln!("tfctl: agent: discovery: {e}"),
+        }
+    }
+
+    /// On the USB-C cable's server address: look for the same server on the
+    /// network and move there, so pulling the cable does not cut the frame off. At most every
+    /// LEAVE_USB_EVERY, before a connect.
+    pub(crate) fn leave_usb_link(&mut self) {
+        let on_usb = self.base.host.parse().is_ok_and(crate::discover::is_usb);
+        // No Wi-Fi check: iwd's view can lag the address, and with no network the broadcast
+        // simply finds nothing.
+        if !on_usb {
+            return;
+        }
+        if self
+            .usb_checked
+            .is_some_and(|t| t.elapsed() < LEAVE_USB_EVERY)
+        {
+            return;
+        }
+        self.usb_checked = Some(Instant::now());
+        let Ok(nonce) = crate::pair::nonce() else {
+            return;
+        };
+        let token = Some(self.cfg.token.as_str()).filter(|t| !t.is_empty());
+        let who = crate::discover::Asker {
+            id: &self.cfg.frame_id,
+            token,
+        };
+        let lan = [std::net::SocketAddr::from((
+            std::net::Ipv4Addr::BROADCAST,
+            crate::discover::PORT,
+        ))];
+        if let Ok(Some(url)) = crate::discover::find(&lan, crate::discover::WAIT, &who, &nonce) {
+            let usb = Url::parse(&url)
+                .and_then(|u| u.host.parse().ok())
+                .is_some_and(crate::discover::is_usb);
+            if !usb {
+                self.move_server(&url);
+            }
+        }
+    }
+
+    /// Point the agent (and the dashboard URL, unless FRAME_URL pinned it) at `url`, persisted.
+    pub(crate) fn move_server(&mut self, url: &str) {
+        let old = self.cfg.server_url.trim_end_matches('/').to_string();
+        let Some(base) = Url::parse(url) else {
+            return;
+        };
+        if url == old {
+            return;
+        }
+        let id = self.cfg.frame_id.clone();
+        if self.cfg.url == format!("{old}/frame/{id}") {
+            self.cfg.url = format!("{url}/frame/{id}");
+        }
+        self.base = base;
+        self.cfg.server_url = url.to_string();
+        self.persist(&[("SERVER_URL", url)]);
+        eprintln!("tfctl: agent: server moved: {old} -> {url} (found on the LAN)");
+        self.event(
+            "server",
+            &format!("server found on the LAN at {url} (was {old})"),
+        );
+        self.failures = 0;
+        if !self.on_fallback {
+            let _ = self.send(KioskCmd::SetUrl(self.cfg.url.clone()));
+        }
+    }
+
     pub(crate) fn server_ok(&mut self) {
         self.failures = 0;
         self.last_contact = Some(Instant::now());
@@ -349,6 +451,18 @@ impl Agent {
         }
     }
 
+    /// GET the config and apply it (versions, artifacts), nothing else.
+    pub(crate) fn refresh_config(&mut self) -> io::Result<()> {
+        let url = self.api(&format!("/api/frames/{}/config", self.cfg.frame_id));
+        let r = http::get(&url, &self.cfg.token, CONNECT_TIMEOUT)?;
+        if r.status != 200 {
+            return Err(io::Error::other(format!("GET config: HTTP {}", r.status)));
+        }
+        let v = json::parse(&String::from_utf8_lossy(&r.body)).map_err(io::Error::other)?;
+        self.apply_config(&v);
+        Ok(())
+    }
+
     fn http_poll(&mut self) -> io::Result<()> {
         let url = self.api(&format!("/api/frames/{}/config", self.cfg.frame_id));
         let r = http::get(&url, &self.cfg.token, CONNECT_TIMEOUT)?;
@@ -418,6 +532,15 @@ impl Agent {
                 crate::dbg::log("ws tx", &hb);
                 c.send_text(&hb)?;
                 last_hb = Instant::now();
+                // On the USB-C address: Wi-Fi may have come up since connect.
+                let was = self.cfg.server_url.clone();
+                self.leave_usb_link();
+                if self.cfg.server_url != was {
+                    c.close();
+                    return Err(io::Error::other(
+                        "server moved to the network, reconnecting",
+                    ));
+                }
             }
             if last_ping.elapsed() >= PING {
                 c.ping()?;

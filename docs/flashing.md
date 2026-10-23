@@ -6,7 +6,8 @@ Three steps. No SSH, no editing files, no building. About ten minutes, mostly wa
 - The frame (PF1007L family: Humblestead / EFERCRO / Anna Bella 10.1", see upstream device index).
 - A microSD card, 8 to 64 GB. It becomes the frame's disk. The frame's internal storage is never touched.
 - A Mac with a card reader.
-- `frameserver` running somewhere on your network (`docker compose up -d`). Note its URL and token.
+- `frameserver` running on your network: natively, or in a container with host networking so the
+  frame's discovery broadcast (UDP 41007) reaches it. Note its token.
 
 ## 1. Flash the card
 
@@ -20,8 +21,8 @@ The script asks four questions and nothing else:
 |---|---|
 | Wi-Fi network | `HomeWifi` |
 | Wi-Fi password | (hidden) |
-| Server | `http://nas.local:8080` |
-| Frame name | `kitchen` |
+| Server | empty: the frame finds it on the network **[U]**. Or `http://nas.local:8080` |
+| Frame name | `kitchen` (lowercased; spaces become dashes) |
 
 Then it downloads the latest image, shows you the card it found, waits for you to type the
 card's name to confirm, writes it, verifies it, writes your answers onto the card, and ejects it.

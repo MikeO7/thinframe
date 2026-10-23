@@ -112,6 +112,25 @@ pub fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// HMAC-SHA256 (RFC 2104), hex. Used by discover.rs to check a server's proof.
+pub fn hmac_hex(key: &[u8], msg: &[u8]) -> String {
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        let mut h = Sha256::new();
+        h.update(key);
+        k[..32].copy_from_slice(&h.finish());
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(&k.map(|b| b ^ 0x36));
+    inner.update(msg);
+    let mut outer = Sha256::new();
+    outer.update(&k.map(|b| b ^ 0x5c));
+    outer.update(&inner.finish());
+    outer.finish_hex()
+}
+
 pub fn sha256_hex(data: &[u8]) -> String {
     let mut s = Sha256::new();
     s.update(data);
@@ -121,6 +140,14 @@ pub fn sha256_hex(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hmac_rfc4231_case_2() {
+        assert_eq!(
+            hmac_hex(b"Jefe", b"what do ya want for nothing?"),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
 
     /// FIPS 180-4 / NIST example values.
     #[test]

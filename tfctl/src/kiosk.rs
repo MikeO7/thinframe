@@ -96,24 +96,84 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
     let mut k = Kiosk::new(cfg);
     crate::logmirror::start(LOG, crate::logmirror::DIR);
-    if !cfg.server_url.is_empty() {
+    if cfg.server_url.is_empty() {
+        // Flashed without a server: find one on the LAN, then carry on as if it was set.
+        let (cfg, tx) = (cfg.clone(), tx.clone());
+        thread::Builder::new()
+            .name("discover".into())
+            .spawn(move || {
+                if let Some(cfg) = discover_server(&cfg) {
+                    start_agent(&cfg, &tx, None);
+                }
+            })?;
+    } else {
+        start_agent(cfg, &tx, Some(&mut k));
+    }
+    k.supervise(&rx)
+}
+
+/// Probe the LAN every 10 s until a server answers; persist it as SERVER_URL and return the
+/// config reloaded with it. None only when tfctl is asked to stop.
+fn discover_server(cfg: &Config) -> Option<Config> {
+    let token = Some(cfg.token.as_str()).filter(|t| !t.is_empty());
+    let who = crate::discover::Asker {
+        id: &cfg.frame_id,
+        token,
+    };
+    loop {
+        if crate::sys::term_requested() {
+            return None;
+        }
+        let nonce = crate::pair::nonce().unwrap_or_default();
+        if let Ok(Some(url)) = crate::discover::find(
+            &crate::discover::targets(),
+            crate::discover::WAIT,
+            &who,
+            &nonce,
+        ) {
+            eprintln!("tfctl: kiosk: no SERVER_URL; found a server on the LAN at {url}");
+            if let Err(e) = crate::config::save_overrides(&cfg.path, &[("SERVER_URL", &url)]) {
+                eprintln!("tfctl: kiosk: cannot write {}: {e}", cfg.path);
+            }
+            let mut c = crate::config::load(&cfg.path).unwrap_or_else(|_| cfg.clone());
+            if c.server_url.is_empty() {
+                c.server_url = url.clone();
+                c.url = format!("{url}/frame/{}", c.frame_id);
+            }
+            return Some(c);
+        }
+        thread::sleep(Duration::from_secs(10));
+    }
+}
+
+/// Start the agent thread. With the kiosk not supervising yet (`k`), it opens on the status
+/// page; once it runs, the agent's first server answer switches it to the dashboard.
+fn start_agent(cfg: &Config, tx: &mpsc::Sender<KioskCmd>, k: Option<&mut Kiosk>) {
+    {
         match agent::Agent::new(cfg, tx.clone(), &cfg.path) {
             Ok(mut a) => {
                 // Written before cog starts, so cog opens on "joining…"/"reaching…" (TASK 15).
                 if !cfg.fallback_url.is_empty() {
                     a.start_on_status_page();
-                    k.url = cfg.fallback_url.clone();
+                    match k {
+                        Some(k) => k.url = cfg.fallback_url.clone(),
+                        None => {
+                            let _ = tx.send(KioskCmd::SetUrl(cfg.fallback_url.clone()));
+                        }
+                    }
                 }
-                thread::Builder::new().name("agent".into()).spawn(move || {
+                let r = thread::Builder::new().name("agent".into()).spawn(move || {
                     if let Err(e) = agent::serve(a) {
                         eprintln!("tfctl: agent: {e}");
                     }
-                })?;
+                });
+                if let Err(e) = r {
+                    eprintln!("tfctl: agent: thread: {e}");
+                }
             }
             Err(e) => eprintln!("tfctl: agent: {e}"),
         }
     }
-    k.supervise(&rx)
 }
 
 pub struct Kiosk {

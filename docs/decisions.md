@@ -353,9 +353,19 @@ stores only its SHA-256, and hands the token once to the frame's next poll. A pa
 requests until the admin page forgets it, so pairing happens once per frame. The per-frame token
 opens only that frame's own routes (config GET, heartbeat, control socket) plus release info and
 update artifacts; listing, layout, actions and MCP keep needing `FRAME_TOKEN`. A 401 later clears
-the frame's token and brings the button back. Discovery of the server is not automatic: the LAN
-broadcast or mDNS a container would need does not cross Docker's bridge network or QEMU's user
-network, so `SERVER_URL` still comes from the flash script. [V] in QEMU, see docs/log.md.
+the frame's token and brings the button back. [V] in QEMU, see docs/log.md.
+
+## The frame finds its server on the LAN (2026-10-22)
+A UDP probe to port 41007 (limited broadcast plus the USB link's 192.168.7.255); the server
+answers with its HTTP port and the frame takes the address from the reply's source. A frame with
+no `SERVER_URL` probes every 10 s on boot; a frame whose server stops answering probes after every
+third failure and persists the new address. A frame with a token sends its id and a nonce and
+accepts only a reply carrying HMAC-SHA256(sha256-hex(token), "thinframe-discover|id|nonce|port"),
+which only a server holding that token (or its stored hash) can make, so answering a broadcast
+does not collect a token. mDNS was not chosen: it needs a responder on the server host and a
+resolver on the frame, where one datagram each way does the job. Broadcasts do not cross Docker's
+bridge network or QEMU's user network: the server needs host networking there, or `SERVER_URL`
+set by hand (`DISCOVERY=off` turns the responder off). [U] on the frame until measured.
 
 ## Seventies splash and its font
 Chosen by the owner on 2026-10-20 from browser mockups. The lettering is Shrikhand (SIL Open Font
