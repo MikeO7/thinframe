@@ -701,3 +701,15 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   `/var/log/iwd.log` 1215 bytes.
 - Power cut itself (plug pulled during an update or a Wi-Fi save) is still [U]: needs the owner
   at the frame.
+
+## 2026-10-23: frame will not start on its wall brick
+
+- Frame stayed dark on the supplied 5 V / 2 A USB-A brick (Fangxin FX2U-050200U) with the supplied
+  A-to-C cable, an Anker cable and a second charger. Boot counter `pf_boots` on PFBOOT rose only by
+  starts made on the Mac or dock (0x24 to 0x26): nothing started on a brick **[V]**.
+- Data cable into the dock or a powered hub: boots. Power-only cable into the same port: does not
+  **[V]**. So the frame needs the data wires; a bare brick has none.
+- Cause inside the frame (power chip waiting for a host on the data lines) is still **[U]**; its
+  registers are not readable from the `frame` user. Workaround: powered USB hub between brick and frame.
+- The earlier 8 h 49 min run on the dock ended at 08:40 with no shutdown event; the pre-outage log was
+  already rotated away **[V]**. PR 102 logs the power supplies on every boot for next time.
