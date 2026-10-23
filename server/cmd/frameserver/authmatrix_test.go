@@ -381,7 +381,7 @@ func TestPublicRoutesDoNotCreateFrames(t *testing.T) {
 		t.Fatalf("a public request created a frame record")
 	}
 	// Invalid ids are refused, not a 500.
-	if code, _, _ := e.send(t, "GET", "/frame/NOT_VALID", "", "", nil); code != 404 {
-		t.Fatalf("GET /frame/NOT_VALID: %d", code)
+	if code, _, _ := e.send(t, "GET", "/frame/not.valid", "", "", nil); code != 404 {
+		t.Fatalf("GET /frame/not.valid: %d", code)
 	}
 }
