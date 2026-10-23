@@ -145,7 +145,7 @@ func (s *Server) Routes() http.Handler {
 	handle("POST /admin/{id}/layout", cop.Handler(s.authAdmin(adminForm(s.handleAdminLayout))))
 	handle("POST /admin/{id}/action", cop.Handler(s.authAdmin(adminForm(s.handleAdminAction))))
 	handle("POST /admin/{id}/unpair", cop.Handler(s.authAdmin(adminForm(s.handleAdminUnpair))))
-	return logRequests(m)
+	return logRequests(foldIDs(m))
 }
 
 // Patterns lists the mux patterns the last Routes call registered (the route x auth test
@@ -576,6 +576,33 @@ func writeErr(w http.ResponseWriter, err error) {
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// idPrefixes are the paths whose next segment is a frame ID.
+var idPrefixes = []string{"/api/frames/", "/api/pair/", "/api/stream/", "/frame/", "/pair/", "/admin/"}
+
+// foldIDs lowercases the frame ID in the path, so a frame flashed as "Office" is the frame
+// "office". IDs are lowercase on disk (store.ValidID); a person typing a name on the flasher
+// should not have to know that.
+func foldIDs(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, p := range idPrefixes {
+			rest, ok := strings.CutPrefix(r.URL.Path, p)
+			if !ok {
+				continue
+			}
+			id, tail, found := strings.Cut(rest, "/")
+			if low := strings.ToLower(id); low != id {
+				if found {
+					low += "/" + tail
+				}
+				r.URL.Path = p + low
+				r.URL.RawPath = ""
+			}
+			break
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logRequests(next http.Handler) http.Handler {

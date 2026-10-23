@@ -20,6 +20,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/MikeO7/thinframe/server/internal/store"
@@ -71,7 +72,9 @@ func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 		ID    string `json:"id"`
 		Nonce string `json:"nonce"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in); err != nil || !store.ValidID(in.ID) || len(in.Nonce) < 16 || len(in.Nonce) > 128 {
+	err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in)
+	in.ID = strings.ToLower(in.ID) // the same frame as in the path (foldIDs)
+	if err != nil || !store.ValidID(in.ID) || len(in.Nonce) < 16 || len(in.Nonce) > 128 {
 		http.Error(w, "need id and a nonce of 16..128 chars", http.StatusBadRequest)
 		return
 	}

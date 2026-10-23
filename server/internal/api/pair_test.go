@@ -188,3 +188,29 @@ func TestPairCapPerIP(t *testing.T) {
 		t.Fatalf("over the global cap: %d", c)
 	}
 }
+
+// A frame flashed as "Office" pairs and runs as "office" (foldIDs).
+func TestPairMixedCaseID(t *testing.T) {
+	_, ts := newTest(t, "admin-secret")
+	const nonce = "0123456789abcdef0123"
+	if r, _ := do(t, "POST", ts.URL+"/api/pair", "", map[string]string{"id": "Office", "nonce": nonce}); r.StatusCode != 202 {
+		t.Fatalf("request: %d", r.StatusCode)
+	}
+	if code := accept(t, ts.URL, "Office", nonce); code != 200 {
+		t.Fatalf("accept: %d", code)
+	}
+	r, body := do(t, "GET", ts.URL+"/api/pair/Office?nonce="+nonce, "", nil)
+	var got struct{ Token string }
+	_ = json.Unmarshal(body, &got)
+	if r.StatusCode != 200 || len(got.Token) != 64 {
+		t.Fatalf("pickup: %d %s", r.StatusCode, body)
+	}
+	for _, p := range []string{"/api/frames/Office/config", "/api/frames/office/config"} {
+		if r, _ := do(t, "GET", ts.URL+p, got.Token, nil); r.StatusCode != 200 {
+			t.Fatalf("%s: %d", p, r.StatusCode)
+		}
+	}
+	if r, _ := do(t, "GET", ts.URL+"/api/frames/office", "admin-secret", nil); r.StatusCode != 200 {
+		t.Fatalf("stored as office: %d", r.StatusCode)
+	}
+}
