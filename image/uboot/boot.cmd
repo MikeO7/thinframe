@@ -4,27 +4,25 @@
 # For a change with no tools: put variables in /uEnv.txt (plain text).
 #
 # What it does:
-#   1. Reads /pf/uboot.env  (state from the last start, written by this script)
-#      and  /pf/linux-ok.env (written by Linux when the Mac configured the USB gadget).
-#   2. Counts the starts (pf_boots, a HEX number).
-#   3. Decides: Linux, or "USB disk mode" (ums) when the last Linux start gave no sign on USB.
-#   4. Writes /pf/uboot.env again (one small file) BEFORE it starts Linux.
-#   5. Starts Linux with /extlinux/extlinux.conf. If no label can load: USB disk mode.
+#   1. Picks the A/B slot from /uEnv.txt (or /uEnv.bak) and spends one try of a new slot.
+#   2. pf_mode=auto only (never the default): reads /pf/uboot.env and /pf/linux-ok.env, counts
+#      the starts, chooses "USB disk mode" (ums) when the last Linux start gave no sign on USB,
+#      and writes /pf/uboot.env BEFORE it starts Linux.
+#   3. Starts Linux with the slot's extlinux file. If no label can load: USB disk mode.
+#
+# Power can be pulled at any moment, so a normal start writes nothing to the card (FAT has no
+# journal): only a slot that is still counting tries writes uEnv.txt. The default is
+# pf_mode=linux: with "auto" a lost uEnv.txt (and nothing in Linux writes linux-ok.env) sent
+# every second start to USB disk mode, which waits for a Mac until the power is cycled.
 #
 # This script writes only to "mmc 0:1" (the SD card). This U-Boot has no eMMC device.
 
 setenv pf_script tf1
-setenv pf_mode auto
+setenv pf_mode linux
 setenv pf_extlinux /extlinux/extlinux.conf
 setenv pf_boots 0
 setenv pf_last none
 
-if load mmc 0:1 ${ramdisk_addr_r} /pf/uboot.env; then
-	env import -t -r ${ramdisk_addr_r} ${filesize} pf_boots pf_last
-fi
-if load mmc 0:1 ${ramdisk_addr_r} /pf/linux-ok.env; then
-	env import -t -r ${ramdisk_addr_r} ${filesize} pf_ok
-fi
 # Owner settings. Examples: pf_mode=linux | pf_mode=ums | pf_extlinux=/extlinux/other.conf
 if load mmc 0:1 ${ramdisk_addr_r} /uEnv.txt; then
 	env import -t -r ${ramdisk_addr_r} ${filesize}
@@ -59,28 +57,31 @@ fi
 setenv pf_extlinux /extlinux/slot-${slot}.conf
 echo "thinframe: slot ${slot}, tries left ${tries}"
 
-# Did Linux confirm the last start? It copies pf_boots into pf_ok.
-setenv pf_prev_ok no
-if test "${pf_ok}" = "${pf_boots}"; then setenv pf_prev_ok yes; fi
-
 setenv pf_next linux
 if test "${pf_mode}" = "ums"; then setenv pf_next ums; fi
-if test "${pf_mode}" = "auto" -a "${pf_last}" = "linux" -a "${pf_prev_ok}" = "no"; then
-	setenv pf_next ums
+if test "${pf_mode}" = "auto"; then
+	if load mmc 0:1 ${ramdisk_addr_r} /pf/uboot.env; then
+		env import -t -r ${ramdisk_addr_r} ${filesize} pf_boots pf_last
+	fi
+	if load mmc 0:1 ${ramdisk_addr_r} /pf/linux-ok.env; then
+		env import -t -r ${ramdisk_addr_r} ${filesize} pf_ok
+	fi
+	# Did Linux confirm the last start? It copies pf_boots into pf_ok.
+	setenv pf_prev_ok no
+	if test "${pf_ok}" = "${pf_boots}"; then setenv pf_prev_ok yes; fi
+	if test "${pf_last}" = "linux" -a "${pf_prev_ok}" = "no"; then setenv pf_next ums; fi
+	setexpr pf_boots ${pf_boots} + 1
+	setenv pf_last ${pf_next}
+	env export -t ${ramdisk_addr_r} pf_script pf_boots pf_last pf_prev_ok pf_mode
+	fatwrite mmc 0:1 ${ramdisk_addr_r} /pf/uboot.env ${filesize}
+	echo "pf1007l: start ${pf_boots} (hex), last start confirmed: ${pf_prev_ok}"
 fi
-
-setexpr pf_boots ${pf_boots} + 1
-setenv pf_last ${pf_next}
-env export -t ${ramdisk_addr_r} pf_script pf_boots pf_last pf_prev_ok pf_mode
-fatwrite mmc 0:1 ${ramdisk_addr_r} /pf/uboot.env ${filesize}
-echo "pf1007l: start ${pf_boots} (hex), last start confirmed: ${pf_prev_ok}, now: ${pf_next}"
+echo "pf1007l: mode ${pf_mode}, now: ${pf_next}"
 
 if test "${pf_next}" = "linux"; then
 	sysboot mmc 0:1 any ${pxefile_addr_r} ${pf_extlinux}
-	# Only reached when no label could load its files.
-	setenv pf_last loadfail
-	env export -t ${ramdisk_addr_r} pf_script pf_boots pf_last pf_prev_ok pf_mode
-	fatwrite mmc 0:1 ${ramdisk_addr_r} /pf/uboot.env ${filesize}
+	# Only reached when no label could load its files: USB disk mode below, so the card can
+	# be read and fixed from a Mac.
 fi
 
 # USB disk mode: the Mac sees the SD card as a read-only USB disk ("USB download gadget").
