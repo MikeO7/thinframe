@@ -57,9 +57,19 @@ step_inputs() {
 	git -C "$om" cat-file -e "$ORMARCH_COMMIT^{commit}" 2>/dev/null || git -C "$om" fetch -q origin
 	git -C "$om" checkout -q --detach "$ORMARCH_COMMIT"
 	[ -z "$(git -C "$om" status --porcelain --untracked-files=no)" ] || stop "ormarch checkout is modified"
-	bash "$om/image/build.sh" uboot
+	# U-Boot build L + board/pf1007l/uboot-*.patch, by ormarch's own recipe on a copy of its
+	# tracked files (the pinned checkout stays clean; the U-Boot clone in its cache is shared).
+	local ub="$WORK/ormarch-uboot" p
+	rm -rf "$ub"; mkdir -p "$ub"
+	git -C "$om" archive HEAD | tar -xf - -C "$ub"
+	mkdir -p "$om/image/cache"; ln -s "$om/image/cache" "$ub/image/cache"
+	for p in "$HERE"/buildroot/board/pf1007l/uboot-*.patch; do
+		cat "$p" >> "$ub/image/uboot/0002-pf1007l-linux-boot.patch"
+	done
+	bash "$ub/image/build.sh" uboot
+	grep -q "thinframe: take the input from VBUS" "$ub/image/uboot/0002-pf1007l-linux-boot.patch" || stop "U-Boot patch not applied"
 	rm -rf "$in"; mkdir -p "$in/dts/allwinner" "$in/linux-patches"
-	cp "$om"/image/work/uboot/{u-boot-pf1007l-L.bin,u-boot-pf1007l-L.config,u-boot-qemu-opipc.bin,boot.cmd} "$in/"
+	cp "$ub"/image/work/uboot/{u-boot-pf1007l-L.bin,u-boot-pf1007l-L.config,u-boot-qemu-opipc.bin,boot.cmd} "$in/"
 	cp "$om/kernel/dts/sun8i-a33-pf1007l.dts" "$om"/image/dts/sun8i-a33-pf1007l-{min,pmic,full}.dts "$in/dts/allwinner/"
 	cp "$om/kernel/patches/v$KVER/"*.patch "$in/linux-patches/"
 	(cd "$in" && find . -type f | LC_ALL=C sort | xargs shasum -a 256) > "$OUT/inputs.sha256"
