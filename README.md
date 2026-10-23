@@ -117,7 +117,8 @@ TASKS.md, and the only one CI enforces is the tfctl size.
    and answer four questions (Wi-Fi, password, server, frame name).
 3. Card in the frame, power on, wait a minute. It appears in `/admin`.
 
-Full walkthrough and troubleshooting: [docs/flashing.md](docs/flashing.md).
+Full walkthrough and troubleshooting: [docs/flashing.md](docs/flashing.md). Setting up another
+frame from start to finish, with the server on a Mac: [docs/new-frame.md](docs/new-frame.md).
 
 Change the dashboard: edit the frame's layout in `/admin` (or via MCP); widget templates live in `server/internal/widgets/`. The frame is never touched.
 
@@ -130,6 +131,7 @@ Change the dashboard: edit the frame's layout in `/admin` (or via MCP); widget t
 | `docs/decisions.md` | Why Buildroot, why cog on DRM, why reuse the ormarch kernel work |
 | `docs/hardware.md` | Facts copied from the upstream project, with confidence tags |
 | `docs/flashing.md` | The three-step user guide for a new frame |
+| `docs/new-frame.md` | Owner's runbook: server on a Mac (`scripts/server-mac.sh`), touch firmware, each new frame |
 | `docs/update-and-ssh.md` | How to get in and how to change things on a running frame |
 | `image/build.sh` | Builds the SD image in Docker (Buildroot external tree in `image/buildroot/`) |
 | `image/boot/` | extlinux.conf and uEnv.txt templates for the FAT partition |
