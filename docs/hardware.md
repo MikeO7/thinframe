@@ -19,5 +19,5 @@ All copied from `pangoleen/ormarch-picture-frame` (`docs/hardware.md`, `docs/exp
 | USB | MUSB OTG, device mode only in practice. Gadget ACM + NCM used for recovery console | D |
 | Accelerometer | sc7a20 on I2C1 0x19, `st-accel-i2c` works | D |
 | Speaker | A33 codec, amp enable PH09. Not working yet upstream | D |
-| Light sensor | I2C1 0x23 LTR-501 class, no response upstream | D |
+| Light sensor | Analog, behind the hole at the bottom left of the bezel, on LRADC0 (0x01c22800). Vendor mode ctrl `0x00c00041`, 6-bit `LRADC_DATA0` (0x01c2280c): 60..62 lit, 0..2 covered (ormarch E063/E064). The fex `[ls_para]` I2C 0x23 entry is a template leftover: nothing answers there. Mainline has no driver; `tfctl light` reads it through /dev/mem | D |
 | eMMC | 16 GB, kept untouched | D |

@@ -31,6 +31,8 @@ pub struct Config {
     /// "HH:MM" local time; empty = never off (TASK 10)
     pub screen_off: String,
     pub screen_on: String,
+    /// DARK_OFF="0" keeps the screen on in a dark room; default on (light.rs).
+    pub dark_off: bool,
     /// Shared secret with frameserver, sent as `Authorization: Bearer`.
     pub token: String,
     /// Last page_version applied from the server; reload cog when it changes.
@@ -70,6 +72,7 @@ impl Default for Config {
             brightness: 100,
             screen_off: String::new(),
             screen_on: String::new(),
+            dark_off: true,
             token: String::new(),
             page_version: String::new(),
             tz: String::new(),
@@ -141,6 +144,10 @@ pub fn parse(text: &str) -> Config {
     cfg.tz = get("TZ", &cfg.tz);
     cfg.splash_text = get("SPLASH_TEXT", &cfg.splash_text);
     cfg.splash_style = get("SPLASH_STYLE", &cfg.splash_style);
+    cfg.dark_off = !matches!(
+        kv.get("DARK_OFF").copied(),
+        Some("0" | "false" | "no" | "off")
+    );
     cfg.debug = matches!(kv.get("DEBUG").copied(), Some("1" | "true" | "yes" | "on"));
     if let Some(bg) = kv.get("SPLASH_BG").and_then(|v| parse_rgb(v)) {
         cfg.splash_bg = bg;

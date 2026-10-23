@@ -3,10 +3,11 @@
 //! cog on DRM (`cog --platform=drm --platform-params=renderer=gles,rotation=N URL`, or `cage -- cog
 //! --platform=wl URL`), restarted 3 s after it exits, 30 s after 5 fast failures. Commands from
 //! the agent thread arrive over an mpsc channel; the night-mode schedule is evaluated here once
-//! a minute so it keeps working through a server outage. SIGTERM is forwarded to cog.
+//! a minute so it keeps working through a server outage. The light sensor turns the screen off
+//! in a dark room (light.rs); a touch while off wakes it for a minute. SIGTERM is forwarded to cog.
 use crate::config::Config;
 use crate::update::{self, Paths, StartCheck};
-use crate::{agent, screen, splash, sys};
+use crate::{agent, light, screen, splash, sys};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::FileExt;
@@ -63,6 +64,10 @@ const RESTART_DELAY: Duration = Duration::from_secs(3);
 const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 const FAST_FAIL: Duration = Duration::from_secs(60);
 const FAST_FAIL_LIMIT: u32 = 5;
+/// A touch while the screen is off turns it on for this long (decisions.md "Night mode").
+const TOUCH_WAKE: Duration = Duration::from_secs(60);
+/// The light value goes to the log this often, to tune light.rs's thresholds at the frame.
+const LIGHT_LOG: Duration = Duration::from_secs(900);
 /// No cog binary: hold the splash instead of looping on spawn errors.
 const MISSING_DELAY: Duration = Duration::from_secs(3600);
 
@@ -211,6 +216,19 @@ pub struct Kiosk {
     next_spawn: Instant,
     sched_state: Option<bool>,
     last_sched: Instant,
+    /// DARK_OFF: the light sensor may turn the screen off.
+    dark_off: bool,
+    /// The PF1007L sensor; None elsewhere (QEMU, sim, Mac) or with DARK_OFF=0.
+    light: Option<light::Sensor>,
+    dark: light::Dark,
+    last_light: Instant,
+    last_light_log: Instant,
+    touch: light::Touch,
+    /// What the schedule and the light last asked for. They act only when this changes, so a
+    /// server `screen` action holds until the next change.
+    auto_off: bool,
+    /// A touch woke the screen; the schedule and the light wait until then.
+    wake_until: Option<Instant>,
     splash_bg: u32,
     splash_text: String,
     splash_style: String,
@@ -238,6 +256,14 @@ impl Kiosk {
             next_spawn: Instant::now(),
             sched_state: None,
             last_sched: Instant::now() - Duration::from_secs(60),
+            dark_off: cfg.dark_off,
+            light: None,
+            dark: light::Dark::new(),
+            last_light: Instant::now(),
+            last_light_log: Instant::now() - LIGHT_LOG,
+            touch: light::Touch::closed(),
+            auto_off: false,
+            wake_until: None,
             splash_bg: cfg.splash_bg,
             splash_text: cfg.splash_text.clone(),
             splash_style: cfg.splash_style.clone(),
@@ -443,10 +469,84 @@ impl Kiosk {
         let want_off = screen::schedule_wants_off(&self.screen_off, &self.screen_on);
         if want_off.is_some() && want_off != self.sched_state {
             self.sched_state = want_off;
-            let on = !want_off.unwrap_or(false);
-            if on != SCREEN_ON.load(Ordering::SeqCst) {
-                eprintln!("tfctl: schedule: screen {}", if on { "on" } else { "off" });
-                self.set_screen(on);
+            self.apply_auto("schedule");
+        }
+    }
+
+    /// Off when the schedule says so or the room is dark.
+    fn wants_off(&self) -> bool {
+        self.sched_state == Some(true) || (self.dark_off && self.dark.is_dark())
+    }
+
+    fn apply_auto(&mut self, why: &str) {
+        if self.wake_until.is_some() {
+            return; // the end of the touch hold looks again
+        }
+        let off = self.wants_off();
+        if off == self.auto_off {
+            return;
+        }
+        self.auto_off = off;
+        if off == SCREEN_ON.load(Ordering::SeqCst) {
+            eprintln!("tfctl: {why}: screen {}", if off { "off" } else { "on" });
+            self.set_screen(!off);
+        }
+    }
+
+    /// Once a second: read the light sensor, and let a touch wake an off screen.
+    fn tick_light(&mut self) {
+        if self.last_light.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        let now = Instant::now();
+        self.last_light = now;
+        if let Some(s) = &mut self.light {
+            let v = s.read();
+            if self.last_light_log.elapsed() >= LIGHT_LOG {
+                self.last_light_log = now;
+                eprintln!("tfctl: light: {v}");
+            }
+            if let Some(dark) = self.dark.step(v, now) {
+                eprintln!(
+                    "tfctl: light: room {} ({v})",
+                    if dark { "dark" } else { "lit" }
+                );
+                self.apply_auto("light");
+            }
+        }
+        self.tick_touch(now);
+    }
+
+    fn tick_touch(&mut self, now: Instant) {
+        if self.touch.touched() {
+            if !SCREEN_ON.load(Ordering::SeqCst) {
+                eprintln!("tfctl: touch: screen on for {} s", TOUCH_WAKE.as_secs());
+                self.set_screen(true);
+                self.wake_until = Some(now + TOUCH_WAKE);
+            } else if self.wake_until.is_some() {
+                self.wake_until = Some(now + TOUCH_WAKE);
+            }
+        }
+        if self.wake_until.is_some_and(|t| now >= t) {
+            self.wake_until = None;
+            self.auto_off = self.wants_off();
+            if self.auto_off && SCREEN_ON.load(Ordering::SeqCst) {
+                eprintln!("tfctl: touch: hold over, screen off");
+                self.set_screen(false);
+            }
+        }
+    }
+
+    /// The sensor and the touch panel, on the frame only. The touch module loads after tfctl
+    /// starts (touchfw.rs), so the touch device is looked for again until found.
+    fn open_inputs(&mut self) {
+        if self.dark_off && light::on_pf1007l() {
+            match light::Sensor::open() {
+                Ok(s) => {
+                    eprintln!("tfctl: light: sensor on LRADC0, screen off in a dark room");
+                    self.light = Some(s);
+                }
+                Err(e) => eprintln!("tfctl: light: {e}"),
             }
         }
     }
@@ -454,6 +554,7 @@ impl Kiosk {
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
         let _ = screen::set_brightness(self.brightness);
         self.show_splash("warming up");
+        self.open_inputs();
         loop {
             if sys::term_requested() || self.exit {
                 eprintln!("tfctl: kiosk: stopping cog");
@@ -480,6 +581,7 @@ impl Kiosk {
                 self.spawn();
             }
             self.tick_schedule();
+            self.tick_light();
             match rx.recv_timeout(Duration::from_secs(1)) {
                 Ok(cmd) => self.handle(cmd),
                 Err(RecvTimeoutError::Timeout) => {}
@@ -504,6 +606,7 @@ fn uid_of(user: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config;
 
     #[test]
     fn builds_cog_command_lines() {
@@ -604,6 +707,49 @@ mod tests {
         k.restart();
         assert_eq!(k.fast_fails, 0);
         assert!(k.next_spawn <= Instant::now());
+    }
+
+    #[test]
+    fn dark_room_turns_the_screen_off_and_light_or_a_touch_back_on() {
+        // The only test that touches SCREEN_ON.
+        let mut k = Kiosk::new(&Config::default());
+        let t0 = Instant::now();
+        let mut feed = |k: &mut Kiosk, v: u8, from: u64, secs: u64| {
+            for s in from..from + secs {
+                if k.dark.step(v, t0 + Duration::from_secs(s)).is_some() {
+                    k.apply_auto("light");
+                }
+            }
+        };
+        feed(&mut k, 0, 0, 200);
+        assert!(!SCREEN_ON.load(Ordering::SeqCst), "dark: off");
+        feed(&mut k, 60, 200, 10);
+        assert!(SCREEN_ON.load(Ordering::SeqCst), "lit: on");
+        // Schedule off: daylight does not turn it on; the schedule's end does not while dark.
+        k.sched_state = Some(true);
+        k.apply_auto("schedule");
+        assert!(!SCREEN_ON.load(Ordering::SeqCst));
+        feed(&mut k, 0, 210, 200);
+        k.sched_state = Some(false);
+        k.apply_auto("schedule");
+        assert!(!SCREEN_ON.load(Ordering::SeqCst), "still dark");
+        // A touch holds it on; when the hold ends in the dark it goes off again.
+        k.set_screen(true);
+        k.wake_until = Some(Instant::now());
+        feed(&mut k, 60, 410, 10);
+        assert!(SCREEN_ON.load(Ordering::SeqCst), "lit during the hold");
+        feed(&mut k, 0, 420, 200);
+        assert!(SCREEN_ON.load(Ordering::SeqCst), "the hold wins");
+        k.tick_touch(Instant::now());
+        assert!(
+            !SCREEN_ON.load(Ordering::SeqCst),
+            "hold over in the dark: off"
+        );
+        // DARK_OFF=0: the light is read for the log only.
+        let mut k = Kiosk::new(&config::parse("DARK_OFF=0\n"));
+        feed(&mut k, 0, 0, 200);
+        assert!(k.dark.is_dark() && !k.wants_off());
+        SCREEN_ON.store(true, Ordering::SeqCst);
     }
 
     #[test]
