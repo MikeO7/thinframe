@@ -66,10 +66,48 @@ pub fn note(line: &str) {
     }
 }
 
+/// One line on how the frame is powered: each supply's online flag, the USB input current limit
+/// and the battery status. A weak brick or a cut-out leaves this in the kernel log and the report.
+pub fn power_line(dir: &Path) -> String {
+    let rd = |p: &Path, f: &str| {
+        fs::read_to_string(p.join(f))
+            .ok()
+            .map(|s| s.trim().to_string())
+    };
+    let mut names: Vec<_> = fs::read_dir(dir)
+        .map(|d| d.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    names.sort();
+    let parts: Vec<String> = names
+        .iter()
+        .map(|p| {
+            let name = p
+                .file_name()
+                .map_or(String::new(), |n| n.to_string_lossy().into_owned());
+            let mut s = format!(
+                "{name} online={}",
+                rd(p, "online").unwrap_or_else(|| "?".into())
+            );
+            for k in ["input_current_limit", "status", "voltage_now"] {
+                if let Some(v) = rd(p, k) {
+                    s.push_str(&format!(" {k}={v}"));
+                }
+            }
+            s
+        })
+        .collect();
+    if parts.is_empty() {
+        "power: no supplies".into()
+    } else {
+        format!("power: {}", parts.join("; "))
+    }
+}
+
 pub fn run(conf: &str) -> io::Result<()> {
     for (d, mode) in RUN_DIRS {
         let _ = fs::DirBuilder::new().recursive(true).mode(mode).create(d);
     }
+    note(&power_line(Path::new("/sys/class/power_supply")));
     if Path::new("/boot").join(provision::FILE).exists() {
         step("provision", provision_rw());
     }
@@ -382,6 +420,26 @@ mod tests {
         assert!(!is_mounted(m, "/dev/vda1"));
         assert!(!is_mounted(m, "/data"));
         assert!(!is_mounted("", "/dev/mmcblk0p4"));
+    }
+
+    #[test]
+    fn power_line_lists_supplies() {
+        let base = std::env::temp_dir().join(format!("tfctl-power-{}", std::process::id()));
+        let usb = base.join("axp20x-usb");
+        fs::create_dir_all(&usb).unwrap();
+        fs::write(usb.join("online"), "1\n").unwrap();
+        fs::write(usb.join("input_current_limit"), "900000\n").unwrap();
+        fs::create_dir_all(base.join("axp22x-ac")).unwrap();
+        let l = power_line(&base);
+        let _ = fs::remove_dir_all(&base);
+        assert_eq!(
+            l,
+            "power: axp20x-usb online=1 input_current_limit=900000; axp22x-ac online=?"
+        );
+        assert_eq!(
+            power_line(Path::new("/nonexistent-tfctl")),
+            "power: no supplies"
+        );
     }
 
     #[test]
