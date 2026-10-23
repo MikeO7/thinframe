@@ -14,8 +14,7 @@ step() { printf '\n%s[%s/4] %s%s\n' "$B" "$1" "$2" "$N"; }
 ok()   { printf '  %s✓%s %s\n' "$G" "$N" "$*"; }
 stop() { printf '\n  \033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 sha()  { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
-# card_ok SIZE_BYTES REMOVABLE(1|0): the size/removable guard, no side effects.
-card_ok() { [ "$2" = 1 ] && [ "$1" -ge "$MIN_B" ] && [ "$1" -le "$MAX_B" ]; }
+card_ok() { [ "$2" = 1 ] && [ "$1" -ge "$MIN_B" ] && [ "$1" -le "$MAX_B" ]; }	# SIZE_BYTES REMOVABLE(1|0), no side effects
 # provision_txt: the file tfctl consumes on first boot (image/boot/provision.txt.example).
 provision_txt() {
 	printf 'WIFI_SSID="%s"\nWIFI_PSK="%s"\nSERVER_URL=%s\nFRAME_ID=%s\nFRAME_TOKEN=%s\nSSH_PUBKEY=%s\n' \
@@ -81,7 +80,8 @@ echo "$(dd if="$raw" bs=1048576 count=1 2>/dev/null | s256 | cut -c1-64) $(cut -
 write_card() {
 	local dev="$1" bytes want got raw="/dev/$1"
 	[ "$(list_cards | grep -c "^$dev	$2	")" = 1 ] || stop "$dev is no longer the card that was listed; re-run"
-	bytes=$(wc -c < "$IMG" | tr -d ' '); want="$(head -c 1048576 "$IMG" | sha -) $(tail -c +1048577 "$IMG" | sha -)"
+	bytes=$(wc -c < "$IMG" | tr -d ' '); printf '  %sreading the image (%s MB) to check the card against it…%s' "$D" $((bytes / 1000000)) "$N"
+	want="$(head -c 1048576 "$IMG" | sha -) $(tail -c +1048577 "$IMG" | sha -)"; printf '\r\033[K'
 	[ $((bytes % 1048576)) = 0 ] || stop "image size is not whole MiB"
 	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"; fi
 	# shellcheck disable=SC2024  # the prompt reads the terminal, not a file
