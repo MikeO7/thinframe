@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Buildroot post-image ($BINARIES_DIR = output/images). Builds PFBOOT's files (boot.scr from
-# ormarch's boot.cmd + boot.cmd.patch, per-slot extlinux, uEnv.txt), the data partition, the
-# card image (genimage.cfg) and the OS bundle system-<ver>.tar the container ships (TASK 3).
+# image/inputs/uboot/boot.cmd, per-slot extlinux, uEnv.txt), the data partition, the card image
+# (genimage.cfg) and the OS bundle system-<ver>.tar the container ships (TASK 3).
 set -euo pipefail
 BOARD="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$BOARD/../../../.." && pwd)"
 WORK="${THINFRAME_WORK:-$REPO/image/work}"
-IN="$WORK/inputs"
+IN="$REPO/image/inputs/uboot"
 VER="${THINFRAME_VERSION:-dev}"
 B="$BINARIES_DIR"
 S="$B/stage"
@@ -15,11 +15,9 @@ CMDLINE="$CMDLINE fbcon=map:9 panic=10 psi=1 g_cdc.dev_addr=02:50:46:10:07:01 g_
 
 rm -rf "$S" && mkdir -p "$S"
 cp "$B/zImage" "$S/zImage.a"
-cp "$B"/sun8i-a33-pf1007l-{full,min,pmic}.dtb "$IN/u-boot-pf1007l-L.bin" "$B/rootfs.ext4" "$S/"
-cp "$REPO/image/boot/uEnv.txt" "$S/"
-cp "$IN/boot.cmd" "$S/boot.cmd"
-patch -s "$S/boot.cmd" < "$BOARD/boot.cmd.patch"
-"$HOST_DIR/bin/mkimage" -C none -A arm -T script -n "thinframe A/B on ormarch build L" \
+cp "$B"/sun8i-a33-pf1007l-{full,min,pmic}.dtb "$WORK/uboot/u-boot-pf1007l-L.bin" "$B/rootfs.ext4" "$S/"
+cp "$REPO/image/boot/uEnv.txt" "$IN/boot.cmd" "$S/"
+"$HOST_DIR/bin/mkimage" -C none -A arm -T script -n "thinframe A/B boot script (U-Boot build L)" \
 	-d "$S/boot.cmd" "$S/boot.scr" >/dev/null
 render() { # slot part other otherpart
 	sed -e "s|@SLOT@|$1|g; s|@PART@|$2|g; s|@OTHER@|$3|g; s|@OTHERPART@|$4|g; s|@CMDLINE@|$CMDLINE|g" \

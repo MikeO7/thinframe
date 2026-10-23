@@ -12,7 +12,7 @@
 #      SHOT_INTERVAL_S (10), SSHP (2222), RUN_FOR_S,
 #      KEEP_SHOTS=1 (also keep each shot as sim/out/seq/<seconds since start>.png),
 #      SHOW=1 (watch it live in Screen Sharing over VNC on localhost; a click is a mouse click).
-# Build first: image/build.sh inputs && QEMU=1 image/build.sh rootfs. Slow (TCG), for correctness.
+# Build first: image/build.sh uboot && QEMU=1 image/build.sh rootfs. Slow (TCG), for correctness.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 Q="$ROOT/image/out/qemu"; W="$ROOT/sim/qemu/work"; OUT="$ROOT/sim/out"

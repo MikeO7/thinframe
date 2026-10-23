@@ -2,10 +2,10 @@
 # shellcheck disable=SC2329,SC2034  # sourced by qemu-test.sh and qemu-ab-test.sh
 # Shared QEMU harness. A COPY of image/out/thinframe-sd.img gets the test U-Boot for
 # `-M orangepi-pc` at 8 KiB, the Orange Pi PC DTB and a serial console in the slot configs
-# (same trick as ormarch's image/tools/qemu-test.sh). Everything else is the real image.
+# (the A33 has no QEMU model; the H3 shares the SPL/MMC path). Everything else is the real image.
 # A provision.txt points the frame at a frameserver on this machine. Writes only image/work/qemu/.
 # BOARD=virt (M2): the QEMU=1 image (image/out/qemu) under `-M virt` with its U-Boot; boot.scr is
-# the same boot.cmd + boot.cmd.patch with "mmc 0:1" read as "virtio 0:1", the slots lose the A33 DTB.
+# the same image/inputs/uboot/boot.cmd with "mmc 0:1" read as "virtio 0:1", the slots lose the A33 DTB.
 # SCREEN=1 (virt): add the panel (virtio-gpu 800x1280), a multitouch screen and QMP/monitor sockets.
 # FRESH=1 (virt): provision.txt as flash.sh writes it when no Wi-Fi is typed: no Wi-Fi, no token.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
@@ -32,12 +32,12 @@ prepare_image() {
 	for f in thinframe-sd.img sun8i-h3-orangepi-pc.dtb; do
 		[ -f "$HERE/out/$f" ] || { echo "STOP: no image/out/$f, run image/build.sh rootfs" >&2; exit 1; }
 	done
-	[ -f "$HERE/work/inputs/u-boot-qemu-opipc.bin" ] || { echo "STOP: run image/build.sh inputs" >&2; exit 1; }
+	[ -f "$HERE/work/uboot/u-boot-qemu-opipc.bin" ] || { echo "STOP: run image/build.sh uboot" >&2; exit 1; }
 	mkdir -p "$W"; : > "$RES"; rm -f "$IMG" "$W/serial.log"
 	echo "== test copy (4 GiB, so the data partition has room to grow)"
 	cp -c "$HERE/out/thinframe-sd.img" "$IMG" 2>/dev/null || cp "$HERE/out/thinframe-sd.img" "$IMG"
 	truncate -s 4G "$IMG"
-	dd if="$HERE/work/inputs/u-boot-qemu-opipc.bin" of="$IMG" bs=1024 seek=8 conv=notrunc status=none
+	dd if="$HERE/work/uboot/u-boot-qemu-opipc.bin" of="$IMG" bs=1024 seek=8 conv=notrunc status=none
 	cp "$HERE/out/sun8i-h3-orangepi-pc.dtb" "$W/"
 	printf 'SERVER_URL=http://10.0.2.2:%s\nFRAME_ID=%s\nFRAME_TOKEN=%s\nSSH_PUBKEY=%s\n' \
 		"$PORT" "$ID" "$TOKEN" "$(cat "$KEY.pub")" > "$W/provision.txt"
@@ -60,14 +60,14 @@ prepare_virt() {
 	mkdir -p "$W"; : > "$RES"; rm -f "$IMG" "$W/serial.log"
 	cp -c "$OUT/thinframe-sd.img" "$IMG" 2>/dev/null || cp "$OUT/thinframe-sd.img" "$IMG"
 	truncate -s 4G "$IMG"
-	cp "$HERE/work/inputs/boot.cmd" "$HERE/buildroot/board/pf1007l/boot.cmd.patch" "$W/"
+	cp "$HERE/inputs/uboot/boot.cmd" "$W/"
 	printf 'SERVER_URL=http://10.0.2.2:%s\nFRAME_ID=%s\nSSH_PUBKEY=%s\n' "$PORT" "$ID" "$(cat "$KEY.pub")" > "$W/provision.txt"
 	# The QEMU=1 image has a (simulated) radio, so Wi-Fi comes first: join the sim's own network.
 	[ -n "${FRESH:-}" ] || printf 'FRAME_TOKEN=%s\nWIFI_SSID=%s\nWIFI_PSK=%s\n' \
 		"$TOKEN" "Groovy Wifi" "far out man" >> "$W/provision.txt"
 	docker run --rm -v thinframe-br:/br -v "$W":/w thinframe-br bash -euo pipefail -c '
 		o=@@4M; i=/w/test.img
-		cd /w && patch -s boot.cmd < boot.cmd.patch && sed -i "s/mmc 0:1/virtio 0:1/g" boot.cmd
+		cd /w && sed -i "s/mmc 0:1/virtio 0:1/g" boot.cmd
 		/br/output-qemu/host/bin/mkimage -C none -A arm -T script -n "thinframe A/B, virt" -d boot.cmd boot.scr >/dev/null
 		mcopy -o -i $i$o /w/boot.scr /w/provision.txt ::/
 		for s in a b; do

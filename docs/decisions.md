@@ -30,13 +30,13 @@ Verify the exact spelling against the installed cog version. [U]
 If `apk info -L cog` has no drm platform on armv7, the fallback is `cage` + `cog --platform=wl`
 and the service file already has the lines to swap in.
 
-## Kernel: Buildroot builds mainline with the ormarch patches
+## Kernel: Buildroot builds mainline with the vendored patches
 Mainline needs two things this board does not have upstream: the JD9365DA panel init table and
-the AIC8800 SDIO driver. ormarch carries the panel patch, the board DTS and the AIC8800 build
+the AIC8800 SDIO driver. ormarch came up with the panel patch, the board DTS and the AIC8800 build
 recipe, proven on hardware against 7.2.10. Buildroot builds the kernel itself: we point it at a
-pinned mainline tag, apply the ormarch panel patch and DTS from `image/buildroot/board/pf1007l/`,
-and add `aic8800` as a Buildroot kernel-module package. Phase one pins the same 7.2.x line
-ormarch tested; bumping is a one-line change once the frame is verified.
+pinned mainline tag, apply the panel patch and DTS from `image/inputs/`, and add `aic8800` as a
+Buildroot kernel-module package. Phase one pins the same 7.2.x line ormarch tested; bumping is a
+one-line change once the frame is verified.
 
 ## BusyBox init instead of systemd
 Buildroot default. `/etc/inittab` respawns `tfctl kiosk`, which supervises cog itself (a software
@@ -142,7 +142,7 @@ then the third start is the old one **[V]** (QEMU A/B test: "tries left 2", "1",
 0"). On success the agent's first heartbeat sets `tries=0`, marking the slot good. The server shows each
 frame's slot, version and last-good in `/admin`.
 
-Boot-state invariants (boot.cmd.patch, slot.rs, sysupdate.rs):
+Boot-state invariants (image/inputs/uboot/boot.cmd, slot.rs, sysupdate.rs):
 - A fresh card has `slot=a tries=0` (image/boot/uEnv.txt), no `zImage.b` and an all-zero p3 **[V]**
   (read from image/out/thinframe-sd.img). With tries=0 U-Boot never writes uEnv.txt and never flips,
   and the agent's unconfirmed-slot reboot needs tries>0, so a frame waiting at the Wi-Fi page is never
@@ -483,3 +483,18 @@ targets, not hardware limits: each root slot is 1 GB and the board has 1 GB of R
 targets to measure against; the only gate is tfctl under 2 MB in CI, raised from 1 MB because a
 few kilobytes of headroom was costing iteration time (report, log mirror and debug mode cost
 12 KB together). The point is still that the OS stays small so the dashboard gets the machine.
+
+## Boot inputs vendored, U-Boot built here (2026-10-22)
+Until now `image/build.sh inputs` cloned `pangoleen/ormarch-picture-frame` at a pinned commit and
+ran its U-Boot build to get the bootloader, `boot.cmd`, the board DTS files and the panel patch.
+That made a release depend on another project's repository, build script and Docker image staying
+where they were. The owner wants as few dependencies as possible, so the sources now live in
+`image/inputs/` (nine small text files, MIT, byte-identical to upstream except `boot.cmd`, which
+carries the A/B block that used to be `boot.cmd.patch`), and `image/uboot-build.sh` builds U-Boot
+from one pinned mainline commit (v2025.10, `e50b1e87`) in our own container with the same fixed
+`SOURCE_DATE_EPOCH`, so the binary is reproducible and comparable with what upstream shipped.
+Its checks moved with it, in bash in the container: eGON header, SPL end under 0x5e00, the
+read-only `ums` string, and the DRAM, PMIC, console, no-eMMC and bootdelay options. Nothing was
+rewritten in another language: none of this is logic that runs on the frame, it is board data and a
+build. The hard rule stands: build L has no eMMC device, so U-Boot cannot write `/dev/mmcblk0`.
+[V] both binaries rebuild to the same hashes as the ormarch-built ones (docs/log.md).

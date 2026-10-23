@@ -1,5 +1,5 @@
-# /extlinux/slot-@SLOT@.conf on PFBOOT, rendered by post-image.sh. boot.scr (ormarch build L +
-# boot.cmd.patch) picks slot-${slot}.conf from uEnv.txt. No screen, no keyboard: DEFAULT runs.
+# /extlinux/slot-@SLOT@.conf on PFBOOT, rendered by post-image.sh. boot.scr (image/inputs/uboot/
+# boot.cmd) picks slot-${slot}.conf from uEnv.txt. No screen, no keyboard: DEFAULT runs.
 # If a label cannot load its files, U-Boot tries the next one.
 # Kernel text never reaches the panel (TASK 15); the console is the USB-C serial (ttyGS0).
 DEFAULT thinframe

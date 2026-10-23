@@ -1,5 +1,5 @@
 # thinframe for the PF1007L (Allwinner A33). Buildroot 2025.02.18 LTS. Build: image/build.sh rootfs.
-# Paths under ../work/inputs come from `image/build.sh inputs` (ormarch U-Boot, DTS, panel patch).
+# The panel patch and the board DTS come from image/inputs (vendored, see image/inputs/README.md).
 BR2_arm=y
 BR2_cortex_a7=y
 BR2_ARM_FPU_NEON_VFPV4=y
@@ -24,13 +24,13 @@ BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/post-
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="7.2.10"
-BR2_LINUX_KERNEL_PATCH="$(BR2_EXTERNAL_THINFRAME_PATH)/../work/inputs/linux-patches"
+BR2_LINUX_KERNEL_PATCH="$(BR2_EXTERNAL_THINFRAME_PATH)/../inputs/linux-patches"
 BR2_LINUX_KERNEL_DEFCONFIG="sunxi"
 BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/linux.fragment"
 BR2_LINUX_KERNEL_ZIMAGE=y
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_INTREE_DTS_NAME="allwinner/sun8i-h3-orangepi-pc"
-BR2_LINUX_KERNEL_CUSTOM_DTS_DIR="$(BR2_EXTERNAL_THINFRAME_PATH)/../work/inputs/dts"
+BR2_LINUX_KERNEL_CUSTOM_DTS_DIR="$(BR2_EXTERNAL_THINFRAME_PATH)/../inputs/dts"
 BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/busybox.fragment"
 BR2_PACKAGE_MESA3D=y
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_LIMA=y

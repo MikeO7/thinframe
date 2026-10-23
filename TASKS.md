@@ -19,14 +19,15 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: CI green, binary size logged.
 
 ## 1. Build the boot inputs (Mac, no frame)
-- [x] `image/build.sh inputs` clones ormarch at `ORMARCH_COMMIT`, runs its `image/build.sh uboot`
-      and copies out what Buildroot does not build itself: `u-boot-pf1007l-L.bin` (+ `.config`),
-      `u-boot-qemu-opipc.bin` (QEMU test only), ormarch's `boot.cmd`, the board DTS and its
-      min/pmic/full variants, and the v7.2.10 panel patch. Kernel, panel driver, DTBs and the
-      aic8800 modules are built by Buildroot in TASK 2 from these sources (the Alpine-era plan
-      of reusing the Arch kernel package and its `.ko` files no longer applies). Hashes written to
-      `image/out/inputs.sha256`.
-- Gate: `ls image/work/inputs` shows every file in the list above; hashes match a second run.
+- [x] `image/inputs/` carries the board sources Buildroot does not have (vendored from ormarch at
+      one commit, MIT; `image/inputs/README.md`): the board DTS and its min/pmic/full variants, the
+      v7.2.10 panel patch, the two U-Boot patches and `boot.cmd` with the A/B block.
+      `image/build.sh uboot` (`image/uboot-build.sh`) builds `u-boot-pf1007l-L.bin` (+ `.config`)
+      and `u-boot-qemu-opipc.bin` (QEMU test only) from pinned mainline U-Boot in Docker, with a
+      fixed build time, and checks the SPL and config before use. Kernel, panel driver, DTBs and
+      the aic8800 modules are built by Buildroot in TASK 2 from these sources. Hashes in
+      `image/out/uboot.sha256`. No build step clones another project.
+- Gate: `ls image/work/uboot` shows both binaries; `uboot.sha256` matches a second run.
 
 ## 2. Buildroot image (Docker, cross-compile; no armv7 emulation needed)
 - [x] `image/buildroot/` is a BR2_EXTERNAL tree: `external.desc`, `Config.in`, `external.mk`,

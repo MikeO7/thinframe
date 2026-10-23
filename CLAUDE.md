@@ -13,7 +13,7 @@ Mac prerequisites: Xcode CLT, Homebrew `git curl python3 shellcheck qemu cargo-z
 Rust via rustup (cargo is at `~/.rustup/toolchains/stable-*/bin`, not on PATH), Go 1.27.
 
 ## When stuck
-Prefer reading the upstream ormarch repo (`image/cache/ormarch` after `image/build.sh inputs`)
+Prefer reading the upstream project `pangoleen/ormarch-picture-frame` (clone it outside this repo)
 over inventing. Its `docs/experiments.md` has 2000 lines of what was tried on this exact board.
 If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the gate.
 
@@ -28,13 +28,14 @@ If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the ga
   `image/vendor/`, `image/cache/`, `image/work/`, `image/out/`, `image/secrets/`.
 - Secrets (SSH host key, Wi-Fi PSK) go in `image/secrets/` (mode 700), never in Git.
 
-## Reuse, do not re-derive
+## Boot inputs are vendored, not fetched
 
-The upstream project `pangoleen/ormarch-picture-frame` has pinned, hardware-tested builds of
-U-Boot, kernel 7.2.10, the panel module, three DTBs and the AIC8800 modules. `image/build.sh`
-clones it into `image/cache/ormarch` and runs its `kernel/build.sh` and `wifi/build.sh`. Do
-not port those recipes into this repo unless a task says so. If one of them breaks, fix it
-there or pin an older commit here.
+`image/inputs/` holds the hardware-tested board sources we did not write: the board DTS and its
+three variants, the v7.2.10 panel patch, the two U-Boot patches and `boot.cmd`, all from
+`pangoleen/ormarch-picture-frame` at one commit (MIT, `image/inputs/README.md` has the table).
+U-Boot is built from pinned mainline by `image/uboot-build.sh`; the kernel, DTBs and the AIC8800
+modules by Buildroot. No build step clones another project. Change a vendored file only with a
+reason in `docs/decisions.md`, and keep `image/inputs/README.md` true.
 
 ## Tags
 

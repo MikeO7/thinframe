@@ -95,7 +95,7 @@ impl UEnv {
         Ok(UEnv::parse(&fs::read_to_string(path)?))
     }
 
-    /// What U-Boot acts on (boot.cmd.patch): `uEnv.txt` when it names a slot, else `uEnv.bak`
+    /// What U-Boot acts on (image/inputs/uboot/boot.cmd): `uEnv.txt` when it names a slot, else `uEnv.bak`
     /// (the copy `save` keeps), else `uEnv.txt` as it is (U-Boot then defaults to slot a,
     /// tries 0). Err only when neither file can be read.
     pub fn load_effective(path: &Path) -> io::Result<UEnv> {
@@ -143,7 +143,7 @@ impl UEnv {
     /// Write a temp file and fsync it, copy the current file to `uEnv.bak` (fsynced too), then
     /// rename the temp file over it; the caller syncs the file system afterwards. FAT has no
     /// journal, so a power cut mid-rename (or mid-`fatwrite` in U-Boot) can lose `uEnv.txt`;
-    /// boot.cmd.patch then reads `uEnv.bak`, the last state that was in force. A current file
+    /// boot.cmd then reads `uEnv.bak`, the last state that was in force. A current file
     /// that names no slot (torn, garbage) never replaces a `.bak` that does.
     pub fn save(&self, path: &Path, slot: Slot, tries: u32) -> io::Result<()> {
         let tmp = path.with_extension("tmp");
@@ -273,7 +273,7 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Mirrors boot.cmd.patch: a uEnv.txt without a usable slot falls back to uEnv.bak, and
+    /// Mirrors boot.cmd: a uEnv.txt without a usable slot falls back to uEnv.bak, and
     /// such a file never overwrites a good .bak.
     #[test]
     fn uenv_backup_is_what_uboot_falls_back_to() {

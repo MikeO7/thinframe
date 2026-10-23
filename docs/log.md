@@ -627,3 +627,19 @@ Goal: the frame can be run, debugged and updated from the server with no one at 
 - Not done, refused by the automated safety check and left to the owner: a debug-gated root
   `exec` action, and WebKit's remote inspector bound on the LAN in debug mode.
 - Release run 39871524871 from main 7082bfb dispatched for the first card.
+
+## 2026-10-22 Boot inputs vendored, U-Boot built in-repo
+- Release run 39871524871 (main 7082bfb) green: tag, image, server-image, publish. v2026.10.22
+  `tfctl-armv7` carries the watchdog ("armed, petting every"), report and debug strings;
+  `qemu-test.txt` 18 PASS, 0 FAIL. First card image.
+- `image/inputs/` [V]: DTS x4, panel patch, U-Boot patches 0001/0002 and `boot.cmd` copied from
+  ormarch 4207b5c2 (`shasum` of 0001 = 3aa2cbba..., upstream's `WES_PATCH_SHA256`); `boot.cmd` =
+  upstream + our old `boot.cmd.patch` applied, the patch file deleted. `image/build.sh inputs`
+  (ormarch clone) replaced by `image/build.sh uboot` -> `image/uboot-build.sh`.
+- Reproducible U-Boot [V]: `image/uboot-build.sh` (U-Boot e50b1e87, SOURCE_DATE_EPOCH 1791763200,
+  ubuntu:24.04 cross toolchain) gives exactly the hashes the ormarch build gave on 2026-10-19:
+  `d12cb37382c41ce6fd7af7ac53a69a26ecc3ff9ed8265b09b876562bf984971d  u-boot-pf1007l-L.bin`,
+  `23138bd48c5cf7f3a6f435dcc6eff2509cc756bbb99d237619408da6a8c78414  u-boot-qemu-opipc.bin`.
+  Checks in the container: "SPL code ends at 0x450a (limit 0x5e00)", config checks OK.
+- `shellcheck -x -e SC1091,SC2034,SC2317` clean; `image/build.sh check` ok (now also checks the
+  nine input files and the A/B line in boot.cmd).
