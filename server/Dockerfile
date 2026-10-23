@@ -8,7 +8,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o /frameserver ./cmd/frameserver
 
 # TASK S6: release.yml runs scripts/make-artifacts.sh into server/artifacts/ (tfctl-armv7,
-# overlay.tar.gz, system-<ver>.tar, versions.json) before the build; the dir is empty in dev.
+# system-<ver>.tar, versions.json) before the build; the dir is empty in dev.
 
 FROM scratch
 COPY --from=build /frameserver /frameserver

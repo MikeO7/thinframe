@@ -12,7 +12,7 @@
 //	DATA_DIR      default /data
 //	FRAME_TOKEN   bearer token for /api and /mcp, Basic password for /admin; empty disables auth (LAN dev only)
 //	PHOTOS_DIR    folder photo source; unset = photo widget shows nothing
-//	ARTIFACTS_DIR default /artifacts; tfctl-armv7, overlay.tar.gz, system-*.tar, versions.json
+//	ARTIFACTS_DIR default /artifacts; tfctl-armv7, system-*.tar, versions.json
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter
 //	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
 //	TZ            frames receive this time zone

@@ -6,6 +6,7 @@
 //! The server binds loopback only, checks the Host header, and answers only while setup is on
 //! screen, so a dashboard page can never change the network.
 use crate::agent::Agent;
+use crate::http::Url;
 use crate::kiosk::KioskCmd;
 use crate::pair::esc;
 use crate::wifi::{self, Net, Radio};
@@ -21,6 +22,9 @@ pub const PORT: u16 = 8091;
 pub const GRACE: Duration = Duration::from_secs(45);
 const RESCAN: Duration = Duration::from_secs(20);
 const STEP: Duration = Duration::from_secs(2);
+/// While waiting for an address: one `ip` call each time, and the server is tried the moment
+/// DHCP answers instead of up to 2 s later.
+const WAIT_STEP: Duration = Duration::from_millis(400);
 const FONT: &str = "/usr/share/fonts/thinframe/Shrikhand-Regular.ttf";
 const POPPINS: &str = "/usr/share/fonts/thinframe/Poppins-Regular.ttf";
 const POPPINS_LIGHT: &str = "/usr/share/fonts/thinframe/Poppins-ExtraLight.ttf";
@@ -646,6 +650,9 @@ pub fn kick_due(down_for: Duration, since_kick: Option<Duration>, joining: bool)
 }
 
 const DIRECT_EVERY: Duration = Duration::from_secs(20);
+/// Wi-Fi down this long: look for the server over the USB-C link too, at most every CABLE_EVERY.
+const CABLE_AFTER: Duration = Duration::from_secs(20);
+const CABLE_EVERY: Duration = Duration::from_secs(30);
 /// A probe that failed is tried again sooner: at boot the computer takes a few seconds to bring
 /// its end of the cable up, and the frame waited a whole DIRECT_EVERY for it [V 2026-10-22].
 const DIRECT_RETRY: Duration = Duration::from_secs(2);
@@ -669,6 +676,9 @@ impl Agent {
             return false;
         }
         let connected = self.kick_wifi();
+        if !connected {
+            self.find_server_on_cable();
+        }
         if !connected && self.server_direct() {
             if self.wifi_page_up {
                 self.leave_wifi_setup();
@@ -741,13 +751,47 @@ impl Agent {
         false
     }
 
+    /// Wi-Fi down for a while and the server on a network address: ask over the USB-C link too,
+    /// and move there when the server answers (`leave_usb_link` moves back once Wi-Fi is up).
+    /// Without it a frame whose Wi-Fi broke waited for Wi-Fi with the cable in [V 2026-10-22].
+    fn find_server_on_cable(&mut self) {
+        let on_usb = self.base.host.parse().is_ok_and(crate::discover::is_usb);
+        let down = self.wifi_down_since.map_or(Duration::ZERO, |t| t.elapsed());
+        if on_usb
+            || down < CABLE_AFTER
+            || self.cable_asked.is_some_and(|t| t.elapsed() < CABLE_EVERY)
+        {
+            return;
+        }
+        self.cable_asked = Some(Instant::now());
+        let Ok(nonce) = crate::pair::nonce() else {
+            return;
+        };
+        let token = Some(self.cfg.token.as_str()).filter(|t| !t.is_empty());
+        let who = crate::discover::Asker {
+            id: &self.cfg.frame_id,
+            token,
+        };
+        let usb = [crate::discover::targets()[1]];
+        if let Ok(Some(url)) = crate::discover::find(&usb, crate::discover::WAIT, &who, &nonce) {
+            if Url::parse(&url)
+                .and_then(|u| u.host.parse().ok())
+                .is_some_and(crate::discover::is_usb)
+            {
+                self.move_server(&url);
+            }
+        }
+    }
+
     /// One round of waiting for Wi-Fi; returns how long to sleep.
     pub(crate) fn wifi_step(&mut self) -> Duration {
         if !self.wifi_setup {
-            if self.on_fallback {
+            let due = self.status_written.is_none_or(|t| t.elapsed() >= STEP);
+            if self.on_fallback && due {
+                self.status_written = Some(Instant::now());
                 self.write_status_page();
             }
-            return STEP;
+            return WAIT_STEP;
         }
         let ui = match &self.wifi_ui {
             Some(ui) => ui.clone(),

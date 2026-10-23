@@ -68,5 +68,5 @@ Then: "list my frames", "rotate kitchen to landscape", "update all frames to the
 "what does the sim frame look like right now". Tool table in `docs/decisions.md`.
 
 ## Artifacts the container carries
-`/api/artifacts/` serves `tfctl-armv7`, `overlay.tar.gz`, `system-<ver>.tar` with sha256 sidecars.
+`/api/artifacts/` serves `tfctl-armv7` and `system-<ver>.tar` with sha256 sidecars.
 Versions are announced in every frame's config response; agents converge on their next poll.

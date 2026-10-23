@@ -110,8 +110,15 @@ pub fn write_profile(dir: &Path, ssid: &str, psk: &str) -> io::Result<()> {
         ));
     }
     fs::create_dir_all(dir)?;
-    // Mode 0600 from the first byte: the profile holds the passphrase.
-    crate::config::write_private(&dir.join(profile_name(ssid)), profile(psk).as_bytes())
+    // Mode 0600 from the first byte: the profile holds the passphrase. Written beside it under a
+    // name iwd does not read, synced and renamed, so a power cut leaves the old profile or the
+    // new one: a profile cut in half is a frame that never joins again.
+    let path = dir.join(profile_name(ssid));
+    let tmp = dir.join(format!(".{}.tmp", profile_name(ssid)));
+    crate::config::write_private(&tmp, profile(psk).as_bytes())?;
+    fs::rename(&tmp, &path)?;
+    crate::update::sync_dir(dir);
+    Ok(())
 }
 
 fn sh(cmd: &str, args: &[&str]) -> io::Result<String> {
@@ -333,8 +340,12 @@ pub fn iwctl(args: &[&str], limit: Duration) -> io::Result<(bool, String)> {
 }
 
 impl Radio for Iwctl {
+    /// wlan0, or the Wi-Fi chip on SDIO before its driver made wlan0: under a boot that no longer
+    /// waits for udev the agent started at 2.5 s and wlan0 came at 2.7 s, so it took "no radio",
+    /// met "network unreachable" and backed off until 8 s [V 2026-10-22].
     fn present(&self) -> bool {
         Path::new("/sys/class/net").join(STATION).exists()
+            || fs::read_dir("/sys/bus/sdio/devices").is_ok_and(|mut d| d.next().is_some())
     }
 
     /// Online means an address on wlan0, not iwd's "connected": that comes before DHCP, and

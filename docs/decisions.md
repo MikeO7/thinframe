@@ -509,3 +509,38 @@ Measured on the frame, kernel start to dashboard: from about 25 s (status page a
 Radio power save is off too: the frame is on mains power. The reasons came from `wifitrace.rs`,
 which runs iwmon (kernel `CONFIG_NLMON`) and logs only link events and their codes, so the next
 Wi-Fi problem on a frame no one is near is readable in its log.
+
+## Power can be pulled at any time (2026-10-23)
+A frame on a wall gets unplugged mid-write. Every file tfctl writes to the card now ends up as the
+old content or the new, never torn or empty, and no state change happens before what it depends
+on is on the card [V in tests; the cut itself U, see docs/log.md]:
+
+| Write | Before | Now |
+|---|---|---|
+| Software update | `tar` of an overlay into the running root, then the binary swap | No overlay: root changes ship only as A/B system updates. The new binary is staged and synced, the marker synced, then one rename. A marker whose version is not installed (cut before the rename) is dropped without an event. |
+| Crash-loop rollback | Three starts within 60 s of wall time; the A33 has no clock battery, so two power cuts right after an update looked like a crash loop and rolled a good update back | Starts carry the boot id and uptime; only starts in the same boot count. |
+| A/B switch | uEnv.txt could name the new slot before its zImage was on the card; the "attempted" marker was written after | zImage synced, then the attempt marker (synced), then uEnv.txt. |
+| Wi-Fi profile, authorized_keys, events, splash.png, starts | written in place | `update::write_synced`: temp file, fsync, rename, directory fsync |
+| provision.txt | removed even when /data was not mounted (settings lost) and before the writes were synced | kept for the next boot when storage was read-only; synced before it goes |
+| Log copy on /data | trimmed by truncating in place | the tail written to a temp file and renamed over it |
+| thinframe.conf | one invalid byte stopped `tfctl boot` and the kiosk | read lossily; the lines that parse count |
+
+## Boot: supervised services, nothing waits (2026-10-23)
+Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init scripts done at
+1.9 s (was 5.4 s with the udev settle) [V 2026-10-23, audit4 build].
+- iwd, dhcpcd, dropbear and udhcpd are inittab `respawn` lines instead of init.d scripts started
+  once: a daemon that dies comes back within a second (iwd died at boot once and the frame stayed
+  offline until its slot fell back). iwd logs to `/var/log/iwd.log` (RAM).
+- `udevadm settle` does not wait (`/etc/default/udevd` SETTLE_TIMEOUT=0): it held rcS for 3.9 s,
+  and nothing after it needs a settled device tree (tfctl waits for what it uses).
+- `tfctl` reads cog, WebKit and the libraries into the page cache in a thread at kiosk start
+  (`prewarm.rs`), and the splash stays until the agent names the page (`FIRST_PAGE_HOLD`, 12 s at
+  most), so cog starts once, on the dashboard, instead of on the status page and again.
+- The agent starts the moment wlan0 or its SDIO device exists, not after a fixed wait.
+- When Wi-Fi has been down 20 s, the frame also looks for the server on the USB cable, so a frame
+  with broken Wi-Fi can still be reached and fixed.
+- Every kiosk log line, cog's too, carries the uptime (`logstamp.rs`), so a boot timeline comes
+  from the log alone.
+- Tried and dropped: iwd `[DriverQuirks] DefaultInterface=*` (keeps the driver's wlan0 instead of
+  re-creating it). On the AIC8800 the frame then found no saved network and iwd exited [V
+  2026-10-23, two boots].

@@ -16,7 +16,7 @@ pub struct Status {
     pub cog_pid: Option<u32>,
     pub temp_c: Option<f64>,
     pub wifi_rssi: Option<i64>,
-    /// /etc/thinframe.version: the software (tfctl + overlay) release installed (TASK 11).
+    /// /etc/thinframe.version: the software (tfctl) release installed (TASK 11).
     pub software_version: Option<String>,
     /// /etc/thinframe.system-version: the OS image on this slot, written at image build time.
     pub system_version: Option<String>,

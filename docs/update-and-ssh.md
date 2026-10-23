@@ -46,7 +46,7 @@ Without touching the frame:
   only while hunting something.
 
 Pushing a change to a connected frame: `scripts/dev-push.sh` builds tfctl for armv7, stages it
-with the overlay as `dev-<stamp>-<sha>` in the server's artifacts directory (the server reads
+as `dev-<stamp>-<sha>` in the server's artifacts directory (the server reads
 `versions.json` on every config request, no restart) and, with `SERVER_URL`, `FRAME_ID` and
 `FRAME_TOKEN` set, sends `update-software`. The frame swaps the binary within seconds; a build
 that crash-loops is rolled back by tfctl itself. A native server for that loop:

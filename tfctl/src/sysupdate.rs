@@ -192,9 +192,15 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
             standby.name()
         );
         write_rootfs(&rootfs, &dev, p.is_real())?;
+        // Before the switch, so a power cut right after it still knows what was tried: if that
+        // boot fails and U-Boot falls back, the automatic path does not flash it again.
+        mark_attempt(p, version)?;
         boot_rw(p)?;
         let res = (|| {
-            fs::copy(&zimage, p.boot.join(format!("zImage.{}", standby.name())))?;
+            // The kernel must be on the card before uEnv.txt names its slot.
+            let zdst = p.boot.join(format!("zImage.{}", standby.name()));
+            fs::copy(&zimage, &zdst)?;
+            fs::File::open(&zdst)?.sync_all()?;
             let u = uenv(p).unwrap_or_else(|_| UEnv::parse(""));
             u.save(&uenv_path(p), standby, TRIES)
         })();
@@ -249,7 +255,10 @@ pub fn attempted(p: &Paths) -> Option<String> {
 
 pub fn mark_attempt(p: &Paths, version: &str) -> io::Result<()> {
     fs::create_dir_all(&p.data)?;
-    fs::write(p.data.join("system-attempt"), format!("{version}\n"))
+    update::write_synced(
+        &p.data.join("system-attempt"),
+        format!("{version}\n").as_bytes(),
+    )
 }
 
 /// On every agent connect: if U-Boot is still counting tries for the slot we booted from,
