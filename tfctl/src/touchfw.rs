@@ -15,6 +15,9 @@ type R<T> = Result<T, Error>;
 pub const FW_NAME: &str = "silead/gsl_m86_hd.fw";
 /// Built into the image when the owner built it with `PF1007L_TOUCH_FIRMWARE`.
 pub const IMAGE_FW: &str = "/lib/firmware/silead/gsl_m86_hd.fw";
+/// Put on the card's boot partition by scripts/flash.sh (from the owner's Mac). The frame's own
+/// eMMC is not visible (the DTS leaves it off), so this is how a new frame gets touch.
+pub const CARD_FW: &str = "/boot/gsl_m86_hd.fw";
 /// Kept across OS updates; handed to the kernel via firmware_class.path.
 pub const DATA_DIR: &str = "/data/thinframe/firmware";
 const FW_PATH_PARAM: &str = "/sys/module/firmware_class/parameters/path";
@@ -293,6 +296,19 @@ pub fn extract(
     Ok(fw)
 }
 
+/// The firmware the flasher left on the card, if it is the tested one.
+fn from_card(path: &Path) -> R<Vec<u8>> {
+    let fw = fs::read(path).map_err(|e| bad(&format!("{}: {e}", path.display())))?;
+    if !layout_ok(&fw) || sha256::sha256_hex(&fw) != SHA256 {
+        return Err(bad(&format!(
+            "{} is not the tested firmware",
+            path.display()
+        )));
+    }
+    eprintln!("tfctl: boot: touch firmware read from {}", path.display());
+    Ok(fw)
+}
+
 /// The firmware from the first non-thinframe disk that has it. Opened read-only.
 fn from_emmc() -> R<Vec<u8>> {
     let mut why = String::from("no eMMC");
@@ -342,7 +358,8 @@ pub fn ensure() -> io::Result<()> {
     let cached = Path::new(DATA_DIR).join(FW_NAME);
     let fresh = fs::read(&cached).is_ok_and(|b| sha256::sha256_hex(&b) == SHA256);
     if !fresh {
-        let fw = from_emmc()?;
+        let fw = from_card(Path::new(CARD_FW))
+            .or_else(|card| from_emmc().map_err(|emmc| bad(&format!("{card}; {emmc}"))))?;
         fs::create_dir_all(cached.parent().unwrap())?;
         let tmp = cached.with_extension("tmp");
         fs::write(&tmp, &fw)?;
@@ -364,6 +381,17 @@ pub fn ensure() -> io::Result<()> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn card_firmware_must_be_the_tested_one() {
+        let d = std::env::temp_dir().join(format!("tf-touch-{}", std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        let p = d.join("gsl_m86_hd.fw");
+        assert!(from_card(&p).is_err(), "missing file");
+        fs::write(&p, vec![0u8; 36960]).unwrap();
+        assert!(from_card(&p).is_err(), "wrong bytes");
+        let _ = fs::remove_dir_all(&d);
+    }
 
     /// One page: {0xf0, 0} + registers 0x00..0x7c.
     pub(crate) fn page_fw() -> Vec<u8> {

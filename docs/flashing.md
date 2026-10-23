@@ -15,17 +15,19 @@ Three steps. No SSH, no editing files, no building. About ten minutes, mostly wa
 curl -fsSL https://raw.githubusercontent.com/MikeO7/thinframe/main/scripts/flash.sh | bash
 ```
 
-The script asks four questions and nothing else:
+It shows what it will use and asks only for what it cannot know:
 
-| Question | Example |
+| Setting | Where it comes from |
 |---|---|
-| Wi-Fi network | `HomeWifi` |
-| Wi-Fi password | (hidden) |
-| Server | empty: the frame finds it on the network **[U]**. Or `http://nas.local:8080` |
-| Frame name | `kitchen` (lowercased; spaces become dashes) |
+| Wi-Fi network and password | This Mac's current network and its Keychain (typed if not found). `e` edits. |
+| Server | Found by the frame on the network **[V]** (2026-10-22). `e` sets a fixed URL. |
+| Frame name | Asked every time (`kitchen`; lowercased, spaces become dashes). |
 
-Then it downloads the latest image, shows you the card it found, waits for you to type the
-card's name to confirm, writes it, verifies it, writes your answers onto the card, and ejects it.
+Then it downloads the latest image (or uses `IMAGE=<file>`), waits for the card, asks once
+before erasing it, writes and verifies it with progress bars, puts your settings and the touch
+firmware (`~/.thinframe/gsl_m86_hd.fw`, if present) on it, and ejects it.
+
+Running the server on the same Mac, and the touch firmware: [docs/new-frame.md](new-frame.md).
 
 It refuses anything that is not a removable card between 4 and 64 GB, and it never asks for your
 password except for the one `sudo` the write itself needs.

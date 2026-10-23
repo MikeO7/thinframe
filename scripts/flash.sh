@@ -7,7 +7,8 @@ set -euo pipefail
 
 REPO="MikeO7/thinframe"
 STATE="${THINFRAME_STATE:-$HOME/.thinframe}"; IMG="$STATE/thinframe-sd.img"
-MIN_B=$((4 * 1000 ** 3)); MAX_B=$((64 * 1000 ** 3))
+MIN_B=$((4 * 1000 ** 3)); MAX_B=$((64 * 1000 ** 3)); TOUCH=""
+TOUCH_SHA=e11ffa8a33a56b78f8d2f57925fef1b67ea9a58c264bb5f3a8553ea52b14a9e6	# tfctl touchfw.rs SHA256
 B=$'\033[1m'; D=$'\033[2m'; G=$'\033[32m'; N=$'\033[0m'
 step() { printf '\n%s[%s/4] %s%s\n' "$B" "$1" "$2" "$N"; }
 ok()   { printf '  %s✓%s %s\n' "$G" "$N" "$*"; }
@@ -44,8 +45,9 @@ list_cards() {
 		done < <(lsblk -dnb -o NAME,SIZE,RM,MODEL | grep -v '^loop\|^zram')
 	fi
 }
-# fetch_image: latest release asset + .sha256, cached in $IMG when the hash matches.
+# fetch_image: IMAGE=<file> as is, else the latest release asset + .sha256 (cached in $IMG).
 fetch_image() {
+	if [ -n "${IMAGE:-}" ]; then [ -f "$IMAGE" ] || stop "no such image: $IMAGE"; IMG=$IMAGE; ok "local image $IMAGE"; return; fi
 	command -v zstd >/dev/null || stop "zstd is required (brew install zstd / apt install zstd)"
 	local api asset want
 	api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
@@ -85,8 +87,7 @@ write_card() {
 	# shellcheck disable=SC2024  # the prompt reads the terminal, not a file
 	sudo -v -p "  Your Mac password, to write the card: " </dev/tty || stop "sudo was refused"
 	got=$(sudo bash -c "$ROOT_WRITE" _ "$IMG" "$raw" "$bytes")
-	[ "$got" = "$want" ] || stop "the card reads back different from the image; do not use this card"
-	ok "written and verified"
+	[ "$got" = "$want" ] || stop "the card reads back different from the image; do not use this card"; ok "written and verified"
 }
 # put_provision DEV: mount PFBOOT, write provision.txt, eject.
 put_provision() {
@@ -95,33 +96,35 @@ put_provision() {
 		diskutil mountDisk "/dev/$dev" >/dev/null; mp=/Volumes/PFBOOT
 		for _ in $(seq 30); do [ -d "$mp" ] && break; sleep 1; done
 		[ -d "$mp" ] || stop "PFBOOT did not mount"
-		provision_txt > "$mp/provision.txt"; touch "$mp/.metadata_never_index"; diskutil eject "/dev/$dev" >/dev/null
+		provision_txt > "$mp/provision.txt"; touch "$mp/.metadata_never_index"
+		[ -z "$TOUCH" ] || cp "$TOUCH" "$mp/gsl_m86_hd.fw"; diskutil eject "/dev/$dev" >/dev/null
 	else
 		mp=$(mktemp -d); sudo partprobe "/dev/$dev" 2>/dev/null || true; sleep 2
 		sudo mount "/dev/${dev}1" "$mp" 2>/dev/null || sudo mount "/dev/${dev}p1" "$mp"
-		provision_txt | sudo tee "$mp/provision.txt" >/dev/null; sudo umount "$mp"; rmdir "$mp"
+		provision_txt | sudo tee "$mp/provision.txt" >/dev/null; [ -z "$TOUCH" ] || sudo cp "$TOUCH" "$mp/"
+		sudo umount "$mp"; rmdir "$mp"
 		sudo eject "/dev/$dev" 2>/dev/null || true
 	fi
-	ok "settings on the card, card ejected"
+	ok "settings${TOUCH:+ and touch firmware} on the card, card ejected"
 }
 ask() { local in; read -r -p "  $2${!1:+ [${!1}]}: " in </dev/tty; printf -v "$1" '%s' "${in:-${!1:-}}"
 	case "${!1}" in *'"'*|*$'\n'*) stop "no quotes or newlines in answers";; esac; }
 # settings: remembered answers, else this Mac's Wi-Fi and address; the password from the Keychain.
 settings() {
 	[ -n "${WIFI_SSID:-}" ] || WIFI_SSID=$(ipconfig getsummary en0 2>/dev/null | awk -F' SSID : ' '/ SSID : /{print $2; exit}' || true)
-	SERVER_URL=${SERVER_URL:-}; FRAME_ID=${FRAME_ID:-frame}; FRAME_TOKEN=${FRAME_TOKEN:-}
-	printf '  Wi-Fi   %s\n  Server  %s\n  Name    %s\n' "${WIFI_SSID:-none, pick it on the frame}" "${SERVER_URL:-found on the network}" "$FRAME_ID"
+	SERVER_URL=${SERVER_URL:-}; FRAME_ID=${FRAME_ID:-}; FRAME_TOKEN=${FRAME_TOKEN:-}
+	printf '  Wi-Fi   %s\n  Server  %s\n' "${WIFI_SSID:-none, pick it on the frame}" "${SERVER_URL:-found on the network}"
 	local a; read -r -p "  Enter to use these, e to edit: " a </dev/tty
-	if [ "$a" = e ]; then ask WIFI_SSID "Wi-Fi network (empty = pick it on the frame)"; ask SERVER_URL "Server (empty = find it)"; ask FRAME_ID "Frame name"; fi
+	if [ "$a" = e ]; then ask WIFI_SSID "Wi-Fi network (empty = pick it on the frame)"; ask SERVER_URL "Server (empty = find it)"; fi
+	while [ -z "$FRAME_ID" ]; do ask FRAME_ID "Name for this frame (e.g. kitchen)"; done	# one per frame, never remembered
 	FRAME_ID=$(printf %s "$FRAME_ID" | tr '[:upper:] ' '[:lower:]-')
 	if [ -n "$WIFI_SSID" ] && [ -z "${WIFI_PSK:-}" ]; then
 		WIFI_PSK=$(security find-generic-password -D "AirPort network password" -a "$WIFI_SSID" -w 2>/dev/null || true)
-		if [ -n "$WIFI_PSK" ]; then ok "Wi-Fi password from this Mac's Keychain"
-		else read -r -s -p "  Password for $WIFI_SSID: " WIFI_PSK </dev/tty; echo; fi
-	fi
-	(umask 077; printf 'WIFI_SSID=%q\nSERVER_URL=%q\nFRAME_ID=%q\n' "$WIFI_SSID" "$SERVER_URL" "$FRAME_ID" > "$STATE/answers")
-	[ -f "$STATE/frame_id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -C "thinframe@$(hostname -s)" -f "$STATE/frame_id_ed25519"
-	SSH_PUBKEY=$(cat "$STATE/frame_id_ed25519.pub")
+		if [ -n "$WIFI_PSK" ]; then ok "Wi-Fi password from this Mac's Keychain"; else read -r -s -p "  Password for $WIFI_SSID: " WIFI_PSK </dev/tty; echo; fi; fi
+	TOUCH=${PF1007L_TOUCH_FIRMWARE:-$STATE/gsl_m86_hd.fw}; [ -f "$TOUCH" ] && [ "$(sha "$TOUCH")" = "$TOUCH_SHA" ] || TOUCH=""
+	[ -n "$TOUCH" ] || printf '  %snote: no touch firmware in %s; the screen will not take taps (docs/new-frame.md)%s\n' "$D" "$STATE" "$N"
+	(umask 077; printf 'WIFI_SSID=%q\nSERVER_URL=%q\n' "$WIFI_SSID" "$SERVER_URL" > "$STATE/answers")
+	[ -f "$STATE/frame_id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -C "thinframe@$(hostname -s)" -f "$STATE/frame_id_ed25519"; SSH_PUBKEY=$(cat "$STATE/frame_id_ed25519.pub")
 }
 # wait_card: the one card, waiting (with a spinner) until it is inserted.
 wait_card() {
@@ -129,21 +132,18 @@ wait_card() {
 	while :; do cards=$(list_cards); n=$(grep -c . <<<"$cards" || true)
 		[ "$n" -le 1 ] || { echo "$cards"; stop "more than one card; remove the others"; }
 		[ "$n" = 0 ] || break; printf '\r  %s insert the SD card into this computer…' "${s:i++%4:1}"; sleep 1; done
-	[ "$i" = 0 ] || printf '\r%60s\r' ''
-	IFS=$'\t' read -r DEV SIZE LABEL <<<"$cards"
+	[ "$i" = 0 ] || printf '\r%60s\r' ''; IFS=$'\t' read -r DEV SIZE LABEL <<<"$cards"
 }
 main() {
 	mkdir -p "$STATE"; chmod 700 "$STATE"
 	# shellcheck disable=SC1091
-	[ -f "$STATE/answers" ] && . "$STATE/answers"
+	local name=${FRAME_ID:-}; [ -f "$STATE/answers" ] && . "$STATE/answers"; FRAME_ID=$name	# never an old frame's name
 	printf '\n%sthinframe%s %sSD card setup%s\n' "$B" "$N" "$D" "$N"
 	step 1 "Settings"; settings
 	step 2 "Image"; if [ "${1:-}" = "--settings-only" ]; then ok "settings only, the card keeps its image"; else fetch_image; fi
 	step 3 "Card"; wait_card
-	local a; read -r -p "  Erase $DEV ($((SIZE / 1000000000)) GB, $LABEL)? [y/N] " a </dev/tty
-	[ "$a" = y ] || [ "$a" = Y ] || stop "nothing written"
+	local a; read -r -p "  Erase $DEV ($((SIZE / 1000000000)) GB, $LABEL)? [y/N] " a </dev/tty; [ "$a" = y ] || [ "$a" = Y ] || stop "nothing written"
 	step 4 "Write"; [ "${1:-}" = "--settings-only" ] || write_card "$DEV" "$SIZE"; put_provision "$DEV"
-	printf '\n%sDone.%s Put the card in the frame and power it on. It joins %s,\n' "$B" "$N" "${WIFI_SSID:-the Wi-Fi you pick on screen}"
-	printf 'finds the server, then shows a PAIR button: press it once.\n\n'
+	printf '\n%sDone.%s Put the card in the frame and power it on. It joins %s,\nfinds the server, then shows a PAIR button: tap it once.\n\n' "$B" "$N" "${WIFI_SSID:-the Wi-Fi you pick on screen}"
 }
 [ "${FLASH_SOURCE_ONLY:-}" = 1 ] || main "$@"
