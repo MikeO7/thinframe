@@ -138,6 +138,8 @@ pub struct Agent {
     pub(crate) wifi_down_since: Option<Instant>,
     pub(crate) wifi_setup: bool,
     pub(crate) wifi_page_up: bool,
+    /// Last probe of the server without Wi-Fi (USB-C link to a computer): when, and the answer.
+    pub(crate) direct: Option<(Instant, bool)>,
     /// Process start and the last answer from the server, for `maybe_reboot_unconfirmed`.
     pub(crate) started: Instant,
     pub(crate) last_contact: Option<Instant>,
@@ -175,6 +177,7 @@ impl Agent {
             wifi_down_since: None,
             wifi_setup: false,
             wifi_page_up: false,
+            direct: None,
             started: Instant::now(),
             last_contact: None,
             reboot_requested: false,
