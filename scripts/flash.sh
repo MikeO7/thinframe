@@ -104,7 +104,9 @@ main() {
 		printf -v "$1" '%s' "${in:-${!1:-}}"; case "${!1}" in *'"'*|*$'\n'*) stop "no quotes or newlines in answers";; esac; }
 	ask WIFI_SSID "Wi-Fi network (Enter to pick it on the frame's screen)"
 	if [ -n "$WIFI_SSID" ]; then ask WIFI_PSK "Wi-Fi password" secret; else WIFI_PSK=; fi
-	ask SERVER_URL "Server (e.g. http://nas.local:8080)"; ask FRAME_ID "Frame name (e.g. kitchen)"
+	# Default: a frameserver on this Mac, port 8080 (docs/update-and-ssh.md). Enter accepts it.
+	[ -n "${SERVER_URL:-}" ] || SERVER_URL="http://$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo nas.local):8080"
+	ask SERVER_URL "Server"; ask FRAME_ID "Frame name (e.g. kitchen)"
 	ask FRAME_TOKEN "Server token (Enter to pair with the button on the frame)" secret
 	(umask 077; printf 'WIFI_SSID=%q\nSERVER_URL=%q\nFRAME_ID=%q\n' "$WIFI_SSID" "$SERVER_URL" "$FRAME_ID" > "$STATE/answers")
 	[ -f "$STATE/frame_id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -C "thinframe@$(hostname -s)" -f "$STATE/frame_id_ed25519"
