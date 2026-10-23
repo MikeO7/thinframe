@@ -258,6 +258,22 @@ pub trait Radio: Send + Sync {
     fn join(&self, ssid: &str, psk: Option<&str>) -> Result<(), String>;
 }
 
+static IWCTL_ODD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `dev` holds an IPv4 address (the kernel's local table in /proc/net/fib_trie is per-address,
+/// not per-device, so ask `ip`).
+fn has_ipv4(dev: &str) -> bool {
+    Command::new("ip")
+        .args(["-4", "-o", "addr", "show", "dev", dev])
+        .output()
+        .map(|o| parse_has_inet(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or(false)
+}
+
+pub fn parse_has_inet(text: &str) -> bool {
+    text.split_whitespace().any(|w| w == "inet")
+}
+
 /// The real radio: wlan0 through iwctl.
 pub struct Iwctl;
 
@@ -312,9 +328,23 @@ impl Radio for Iwctl {
     }
 
     fn connected(&self) -> bool {
-        iwctl(&["station", STATION, "show"], Duration::from_secs(5))
-            .map(|(_, out)| parse_state(&out).as_deref() == Some("connected"))
-            .unwrap_or(false)
+        let iw = iwctl(&["station", STATION, "show"], Duration::from_secs(5));
+        if let Ok((_, out)) = &iw {
+            if parse_state(out).as_deref() == Some("connected") {
+                return true;
+            }
+        }
+        // On the frame iwctl said "not connected" while wlan0 had a DHCP address and carried
+        // traffic (2026-10-22): an address on wlan0 counts too. Log iwctl's answer once.
+        let addr = has_ipv4(STATION);
+        if addr && !IWCTL_ODD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let what = match &iw {
+                Ok((ok, out)) => format!("exit ok={ok}: {}", strip_ansi(out).trim()),
+                Err(e) => format!("{e}"),
+            };
+            eprintln!("tfctl: wifi: {STATION} has an address but iwctl says: {what}");
+        }
+        addr
     }
 
     fn scan(&self) -> Vec<Net> {
@@ -382,6 +412,14 @@ fn wait_known(ssid: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inet_lines() {
+        assert!(parse_has_inet(
+            "3: wlan0    inet 192.168.1.108/24 brd 192.168.1.255 scope global wlan0\n"
+        ));
+        assert!(!parse_has_inet(""));
+    }
     use std::os::unix::fs::PermissionsExt;
 
     #[test]

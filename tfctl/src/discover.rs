@@ -57,16 +57,26 @@ pub fn find(
     }
     let deadline = Instant::now() + wait;
     let mut buf = [0u8; 512];
+    // The first answer over the USB-C link waits up to PREFER_LAN for one over the network:
+    // a frame that moved to the cable address would lose its server when the cable comes out.
+    let mut usb: Option<(String, Instant)> = None;
     loop {
-        let left = deadline.saturating_duration_since(Instant::now());
+        let mut end = deadline;
+        if let Some((_, t)) = &usb {
+            end = end.min(*t + PREFER_LAN);
+        }
+        let left = end.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Ok(None);
+            return Ok(usb.map(|(u, _)| u));
         }
         sock.set_read_timeout(Some(left))?;
         match sock.recv_from(&mut buf) {
             Ok((n, from)) => {
                 if let Some(url) = parse_reply(&buf[..n], from.ip(), who, nonce) {
-                    return Ok(Some(url));
+                    if !is_usb(from.ip()) {
+                        return Ok(Some(url));
+                    }
+                    usb.get_or_insert((url, Instant::now()));
                 }
             }
             Err(e)
@@ -75,11 +85,19 @@ pub fn find(
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                return Ok(None)
+                return Ok(usb.map(|(u, _)| u))
             }
             Err(e) => return Err(e),
         }
     }
+}
+
+/// How long a USB-link answer waits for a network one.
+const PREFER_LAN: Duration = Duration::from_millis(500);
+
+/// The USB-C gadget network (statuspage::USB_IP is the frame's end).
+pub fn is_usb(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V4(v) if v.octets()[..3] == [192, 168, 7])
 }
 
 /// The proof a server that knows `token` sends (discover.Proof on the Go side).
@@ -217,6 +235,13 @@ mod tests {
             parse_reply(b"thinframe-server 1 80", v6, &no, NONCE).as_deref(),
             Some("http://[fe80::1]:80")
         );
+    }
+
+    #[test]
+    fn usb_link_addresses() {
+        assert!(is_usb("192.168.7.1".parse().unwrap()));
+        assert!(!is_usb("192.168.1.172".parse().unwrap()));
+        assert!(!is_usb("127.0.0.1".parse().unwrap()));
     }
 
     #[test]

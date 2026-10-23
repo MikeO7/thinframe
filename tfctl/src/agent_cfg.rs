@@ -205,12 +205,20 @@ impl Agent {
                 if self.busy.load(Ordering::SeqCst) {
                     return Err(io::Error::other("a system update is already running"));
                 }
+                // The artifact list from connect time may be stale (a newer build was staged
+                // since); the checksum would not match the file now served.
+                if let Err(e) = self.refresh_config() {
+                    eprintln!("tfctl: agent: refresh config before update: {e}");
+                }
                 let ver = self.want(v, &self.software_version)?;
                 update::software(&self.cfg, &self.artifacts, &ver, &self.paths)?;
                 self.exit = true;
                 Ok(())
             }
             "update-system" => {
+                if let Err(e) = self.refresh_config() {
+                    eprintln!("tfctl: agent: refresh config before update: {e}");
+                }
                 let ver = self.want(v, &self.system_version)?;
                 self.artifacts.get("system")?;
                 self.start_system_update(ver)
