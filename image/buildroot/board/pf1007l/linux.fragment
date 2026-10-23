@@ -78,3 +78,5 @@ CONFIG_IKCONFIG_PROC=y
 CONFIG_PRINTK_TIME=y
 CONFIG_MODULES=y
 CONFIG_MODULE_UNLOAD=y
+# Netlink monitor device for iwmon (tfctl wifitrace.rs): the frame logs why Wi-Fi dropped.
+CONFIG_NLMON=y

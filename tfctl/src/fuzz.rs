@@ -730,7 +730,6 @@ fn fuzz_wifi() {
                     .iter()
                     .any(|m| m.ssid == n.ssid && m.security == n.security));
             }
-            let _ = wifi::parse_state(t);
             assert!(!wifi::strip_ansi(t).contains("\x1b["));
         });
         let ssid = r.word(12);

@@ -634,7 +634,21 @@ fn render_joined(s: &Setup, ssid: &str) -> String {
 
 // ---- the agent's side ----
 
+/// iwd gives a network a few tries, then backs off for a minute or more: at boot the frame's
+/// first four joins failed within 1.3 s and the fifth came 73 s later [V 2026-10-22]. While a
+/// saved network is down, the agent asks for it again itself, KICK_AFTER into the outage and
+/// then every KICK_EVERY, unless the setup page is joining one the person picked.
+const KICK_AFTER: Duration = Duration::from_secs(8);
+const KICK_EVERY: Duration = Duration::from_secs(20);
+
+pub fn kick_due(down_for: Duration, since_kick: Option<Duration>, joining: bool) -> bool {
+    !joining && down_for >= KICK_AFTER && since_kick.is_none_or(|t| t >= KICK_EVERY)
+}
+
 const DIRECT_EVERY: Duration = Duration::from_secs(20);
+/// A probe that failed is tried again sooner: at boot the computer takes a few seconds to bring
+/// its end of the cable up, and the frame waited a whole DIRECT_EVERY for it [V 2026-10-22].
+const DIRECT_RETRY: Duration = Duration::from_secs(2);
 
 fn direct_probe(host: &str, port: u16) -> bool {
     use std::net::{IpAddr, SocketAddr};
@@ -654,21 +668,14 @@ impl Agent {
         if !radio.present() {
             return false;
         }
-        let connected = radio.connected();
+        let connected = self.kick_wifi();
         if !connected && self.server_direct() {
             if self.wifi_page_up {
                 self.leave_wifi_setup();
             }
             return false;
         }
-        let down_for = if connected {
-            self.wifi_down_since = None;
-            Duration::ZERO
-        } else {
-            self.wifi_down_since
-                .get_or_insert_with(Instant::now)
-                .elapsed()
-        };
+        let down_for = self.wifi_down_since.map_or(Duration::ZERO, |t| t.elapsed());
         let configured = wifi::configured_ssid(Path::new(wifi::IWD_DIR));
         match phase(
             true,
@@ -695,6 +702,43 @@ impl Agent {
                 true
             }
         }
+    }
+
+    /// Whether the station is up, tracking since when it is down, and asking iwd to rejoin the
+    /// saved network when `kick_due`. Also called while the server is reached over the cable,
+    /// where nothing else waits for Wi-Fi.
+    pub(crate) fn kick_wifi(&mut self) -> bool {
+        let radio = self.radio.clone();
+        if !radio.present() {
+            return false;
+        }
+        if radio.connected() {
+            self.wifi_down_since = None;
+            return true;
+        }
+        let down_for = self
+            .wifi_down_since
+            .get_or_insert_with(Instant::now)
+            .elapsed();
+        if wifi::configured_ssid(Path::new(wifi::IWD_DIR)).is_none() {
+            return false;
+        }
+        let joining = self
+            .wifi_ui
+            .as_ref()
+            .is_some_and(|ui| lock(ui).joining.is_some());
+        if !kick_due(down_for, self.wifi_kicked.map(|t| t.elapsed()), joining) {
+            return false;
+        }
+        self.wifi_kicked = Some(Instant::now());
+        eprintln!(
+            "tfctl: wifi: down for {}s, asking iwd to rejoin",
+            down_for.as_secs()
+        );
+        if let Err(e) = radio.reconnect() {
+            eprintln!("tfctl: wifi: rejoin: {e}");
+        }
+        false
     }
 
     /// One round of waiting for Wi-Fi; returns how long to sleep.
@@ -758,7 +802,7 @@ impl Agent {
     /// at most every DIRECT_EVERY. A loopback server (tests, the sim) never counts.
     fn server_direct(&mut self) -> bool {
         if let Some((t, ok)) = self.direct {
-            if t.elapsed() < DIRECT_EVERY {
+            if t.elapsed() < if ok { DIRECT_EVERY } else { DIRECT_RETRY } {
                 return ok;
             }
         }
@@ -1110,6 +1154,22 @@ mod tests {
         );
         wait_join(&st);
         assert!(fake.connected());
+    }
+
+    #[test]
+    fn rejoin_kicks() {
+        let s = Duration::from_secs;
+        assert!(!kick_due(s(3), None, false), "iwd gets its own first tries");
+        assert!(kick_due(s(8), None, false));
+        assert!(
+            !kick_due(s(30), Some(s(5)), false),
+            "not more than every KICK_EVERY"
+        );
+        assert!(kick_due(s(30), Some(s(20)), false));
+        assert!(
+            !kick_due(s(30), None, true),
+            "the person's own join goes first"
+        );
     }
 
     /// Records what each join was asked for.

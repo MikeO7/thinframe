@@ -34,6 +34,42 @@ pub fn targets() -> Vec<SocketAddr> {
     ]
 }
 
+/// Where a probe for a server on the network goes: the limited broadcast (sent on the default
+/// route, which may be the USB-C link) and each network interface's own broadcast address, so
+/// Wi-Fi is asked even when the default route is the cable.
+pub fn lan_targets() -> Vec<SocketAddr> {
+    let mut t = vec![SocketAddr::from((Ipv4Addr::BROADCAST, PORT))];
+    if let Ok(o) = std::process::Command::new("ip")
+        .args(["-4", "-o", "addr"])
+        .output()
+    {
+        t.extend(
+            parse_brd(&String::from_utf8_lossy(&o.stdout))
+                .into_iter()
+                .map(|b| SocketAddr::from((b, PORT))),
+        );
+    }
+    t
+}
+
+/// The `brd` addresses in `ip -4 -o addr` output, the USB-C link's left out.
+pub fn parse_brd(text: &str) -> Vec<Ipv4Addr> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut w = line.split_whitespace();
+        while let Some(x) = w.next() {
+            if x == "brd" {
+                if let Some(b) = w.next().and_then(|b| b.parse::<Ipv4Addr>().ok()) {
+                    if !is_usb(IpAddr::V4(b)) && !out.contains(&b) {
+                        out.push(b);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// One round: send the probe to `targets`, take the first valid answer within `wait`.
 /// Ok(None) when nobody answered; Err only when no socket could be made at all.
 pub fn find(
@@ -242,6 +278,15 @@ mod tests {
         assert!(is_usb("192.168.7.1".parse().unwrap()));
         assert!(!is_usb("192.168.1.172".parse().unwrap()));
         assert!(!is_usb("127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn interface_broadcasts() {
+        let text = "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever\n\
+            2: usb0    inet 192.168.7.2/24 brd 192.168.7.255 scope global usb0\n\
+            4: wlan0    inet 192.168.1.240/24 brd 192.168.1.255 scope global dynamic wlan0\n";
+        assert_eq!(parse_brd(text), [Ipv4Addr::new(192, 168, 1, 255)]);
+        assert!(parse_brd("").is_empty());
     }
 
     #[test]

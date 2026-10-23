@@ -79,12 +79,27 @@ pub fn ssid_of(file_name: &str) -> Option<String> {
 
 /// The first configured network in `dir`, for the status page ("joining <ssid>").
 pub fn configured_ssid(dir: &Path) -> Option<String> {
+    configured_ssids(dir).into_iter().next()
+}
+
+/// Every saved network's SSID.
+pub fn configured_ssids(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .collect();
+        .map(|rd| {
+            rd.filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
     names.sort();
-    names.iter().find_map(|n| ssid_of(n))
+    names.iter().filter_map(|n| ssid_of(n)).collect()
+}
+
+/// The strongest network in range that has a saved profile.
+pub fn pick_known(nets: &[Net], known: &[String]) -> Option<String> {
+    nets.iter()
+        .filter(|n| known.contains(&n.ssid))
+        .max_by_key(|n| n.dbm.unwrap_or(i32::MIN))
+        .map(|n| n.ssid.clone())
 }
 
 pub fn write_profile(dir: &Path, ssid: &str, psk: &str) -> io::Result<()> {
@@ -238,15 +253,6 @@ pub fn parse_networks(text: &str) -> Vec<Net> {
     nets
 }
 
-/// `iwctl station wlan0 show`: the word after "State" ("connected", "disconnected", ...).
-pub fn parse_state(text: &str) -> Option<String> {
-    strip_ansi(text)
-        .lines()
-        .map(str::split_whitespace)
-        .find_map(|mut w| (w.next() == Some("State")).then(|| w.next()).flatten())
-        .map(str::to_string)
-}
-
 /// The station, as the on-screen setup needs it. A trait so the setup is testable off the frame.
 pub trait Radio: Send + Sync {
     /// There is a Wi-Fi interface at all (not on the Mac, not in a QEMU without hwsim).
@@ -256,9 +262,12 @@ pub trait Radio: Send + Sync {
     fn scan(&self) -> Vec<Net>;
     /// Join `ssid` (passphrase for psk, None for open); the error is what to show.
     fn join(&self, ssid: &str, psk: Option<&str>) -> Result<(), String>;
+    /// Ask the station to connect now to the strongest saved network in range (no profile
+    /// change); returns once asked, not once joined.
+    fn reconnect(&self) -> Result<(), String> {
+        Err("not supported".into())
+    }
 }
-
-static IWCTL_ODD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// `dev` holds an IPv4 address (the kernel's local table in /proc/net/fib_trie is per-address,
 /// not per-device, so ask `ip`).
@@ -278,6 +287,7 @@ pub fn parse_has_inet(text: &str) -> bool {
 pub struct Iwctl;
 
 const JOIN_TIMEOUT: Duration = Duration::from_secs(40);
+const KICK_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Run `iwctl args`, killing it after `limit`; (success, stdout + stderr).
 pub fn iwctl(args: &[&str], limit: Duration) -> io::Result<(bool, String)> {
@@ -327,24 +337,11 @@ impl Radio for Iwctl {
         Path::new("/sys/class/net").join(STATION).exists()
     }
 
+    /// Online means an address on wlan0, not iwd's "connected": that comes before DHCP, and
+    /// the agent then met "network unreachable", rediscovered and moved its server back and
+    /// forth [V 2026-10-22]. iwctl also once said "not connected" over a working link.
     fn connected(&self) -> bool {
-        let iw = iwctl(&["station", STATION, "show"], Duration::from_secs(5));
-        if let Ok((_, out)) = &iw {
-            if parse_state(out).as_deref() == Some("connected") {
-                return true;
-            }
-        }
-        // On the frame iwctl said "not connected" while wlan0 had a DHCP address and carried
-        // traffic (2026-10-22): an address on wlan0 counts too. Log iwctl's answer once.
-        let addr = has_ipv4(STATION);
-        if addr && !IWCTL_ODD.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            let what = match &iw {
-                Ok((ok, out)) => format!("exit ok={ok}: {}", strip_ansi(out).trim()),
-                Err(e) => format!("{e}"),
-            };
-            eprintln!("tfctl: wifi: {STATION} has an address but iwctl says: {what}");
-        }
-        addr
+        has_ipv4(STATION)
     }
 
     fn scan(&self) -> Vec<Net> {
@@ -356,6 +353,43 @@ impl Radio for Iwctl {
         )
         .map(|(_, out)| parse_networks(&out))
         .unwrap_or_default()
+    }
+
+    /// In the background: the agent calls this from its server loop, which must not stall.
+    fn reconnect(&self) -> Result<(), String> {
+        std::thread::Builder::new()
+            .name("wifi-rejoin".into())
+            .spawn(move || {
+                let known = configured_ssids(Path::new(IWD_DIR));
+                let listed = || {
+                    iwctl(
+                        &["station", STATION, "get-networks", "rssi-dbms"],
+                        Duration::from_secs(5),
+                    )
+                    .map(|(_, out)| parse_networks(&out))
+                    .unwrap_or_default()
+                };
+                let mut pick = pick_known(&listed(), &known);
+                if pick.is_none() {
+                    let _ = iwctl(&["station", STATION, "scan"], Duration::from_secs(5));
+                    std::thread::sleep(Duration::from_secs(4));
+                    pick = pick_known(&listed(), &known);
+                }
+                let Some(ssid) = pick else {
+                    eprintln!("tfctl: wifi: rejoin: no saved network in range");
+                    return;
+                };
+                // An explicit connect also tries access points iwd's autoconnect has set aside.
+                let r = iwctl(&["station", STATION, "connect", &ssid], KICK_TIMEOUT);
+                let why = match r {
+                    Ok((true, _)) => "joined".to_string(),
+                    Ok((false, out)) => out.trim().lines().last().unwrap_or("failed").to_string(),
+                    Err(e) => e.to_string(),
+                };
+                eprintln!("tfctl: wifi: rejoin {ssid:?}: {why}");
+            })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     fn join(&self, ssid: &str, psk: Option<&str>) -> Result<(), String> {
@@ -412,6 +446,29 @@ fn wait_known(ssid: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picks_the_strongest_saved_network() {
+        let n = |ssid: &str, dbm: Option<i32>| Net {
+            ssid: ssid.into(),
+            security: "psk".into(),
+            dbm,
+            current: false,
+        };
+        let nets = [
+            n("Cafe", Some(-30)),
+            n("Home", Some(-70)),
+            n("Phone", Some(-50)),
+        ];
+        let known = vec!["Home".to_string(), "Phone".to_string()];
+        assert_eq!(pick_known(&nets, &known).as_deref(), Some("Phone"));
+        assert_eq!(pick_known(&nets[..2], &known).as_deref(), Some("Home"));
+        assert_eq!(pick_known(&nets[..1], &known), None);
+        assert_eq!(
+            pick_known(&[n("Home", None)], &known).as_deref(),
+            Some("Home")
+        );
+    }
 
     #[test]
     fn inet_lines() {
@@ -579,17 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_station_state() {
-        let show = "\x1b[1m  Station: wlan0\x1b[0m\n----\n  Settable  Property  Value\n----\n            Scanning  no\n            State     \x1b[32mconnected\x1b[0m\n";
-        assert_eq!(parse_state(show).as_deref(), Some("connected"));
-        assert_eq!(
-            parse_state("  State  connected\n").as_deref(),
-            Some("connected")
-        );
-        assert_eq!(
-            parse_state("            State     disconnected\n").as_deref(),
-            Some("disconnected")
-        );
+    fn strips_ansi() {
         assert_eq!(strip_ansi("a\x1b[1;90mb\x1b[0mc"), "abc");
     }
 
