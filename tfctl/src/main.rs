@@ -9,7 +9,7 @@
 //!   tfctl agent      control socket to the server alone (debugging; kiosk commands are logged)
 //!   tfctl update [--force]  software update from the server's config (the agent does this itself)
 //!   tfctl provision [--boot-dir D]  first boot: apply /boot/provision.txt, delete it (TASK 14)
-//!   tfctl splash [--png FILE] [STATUS]  draw the boot splash on /dev/dri/card0, hold it until SIGTERM (TASK 15)
+//!   tfctl splash [--png FILE] [STATUS]  draw the boot splash on the DRM card that has a panel, hold it until SIGTERM (TASK 15)
 //!   tfctl wifi SSID PSK   write iwd profile, reconnect
 //!   tfctl status     one screen: uptime, ip, wifi, mem, cog pid, url, temp
 //!   tfctl set KEY VALUE   rewrite one key in /etc/thinframe.conf (first pairing)
