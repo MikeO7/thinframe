@@ -21,8 +21,7 @@ provision_txt() {
 	printf 'WIFI_SSID="%s"\nWIFI_PSK="%s"\nSERVER_URL=%s\nFRAME_ID=%s\nFRAME_TOKEN=%s\nSSH_PUBKEY=%s\n' \
 		"$WIFI_SSID" "$WIFI_PSK" "$SERVER_URL" "$FRAME_ID" "$FRAME_TOKEN" "$SSH_PUBKEY"
 }
-# list_cards: "dev<TAB>bytes<TAB>label" for every removable disk that passes card_ok and has
-# no mounted system volume.
+# list_cards: "dev<TAB>bytes<TAB>label" for every removable disk that passes card_ok, no system volume.
 list_cards() {
 	local name size rm model mnt sys='^(/|/System(/.*)?|/private/var/vm|/boot.*|/home|/usr|/var)$'
 	if [ "$(uname)" = Darwin ]; then
@@ -61,11 +60,11 @@ fetch_image() {
 	printf '  unpacking…\r'; zstd -d -q -f "$IMG.zst" -o "$IMG" && rm -f "$IMG.zst" && printf '%s' "$want" > "$IMG.zsum"
 	ok "thinframe $tag downloaded and checked"
 }
-# Runs as root: dd with a live bar (dd reports bytes on SIGINFO/SIGUSR1), then reads the card
-# back the same way and prints its sha256. Args: image raw-device total-bytes.
+# Runs as root. MiB 0 (partition table) is zeroed first and written last: macOS mounts PFBOOT on every
+# close of a disk with a table and writes into it. Live dd bar (SIGINFO/USR1). Prints head + rest sha256.
 # shellcheck disable=SC2016
 ROOT_WRITE='img=$1 raw=$2 total=$3 mib=$((total / 1048576)) sig=USR1 log=$(mktemp)
-[ "$(uname)" = Darwin ] && sig=INFO
+[ "$(uname)" = Darwin ] && sig=INFO; s256() { sha256sum 2>/dev/null || shasum -a 256; }
 bar() { local p=$(($2 * 100 / total)) t=$(($(date +%s) - $3)) w=28 f; f=$((p * w / 100)); [ $t -gt 0 ] || t=1
 	local r=$(($2 / t / 1000000)) e=0; [ $r -gt 0 ] && e=$(((total - $2) / 1000000 / r))
 	printf "\r  %-9s %s%s %3d%%  %3d MB/s  %d:%02d left " "$1" "$(printf "%${f}s" | tr " " "#")" \
@@ -74,14 +73,15 @@ follow() { local s; s=$(date +%s); sleep 0.3; local pid; pid=$(pgrep -n -x dd)
 	while kill -0 "$pid" 2>/dev/null; do kill -"$sig" "$pid" 2>/dev/null; sleep 1
 		n=$(grep -ao "^[0-9]* bytes" "$log" | tail -1 | cut -d" " -f1); [ -z "$n" ] || bar "$1" "$n" "$s"; done
 	bar "$1" "$total" "$s"; echo >/dev/tty; }
-dd if="$img" of="$raw" bs=1048576 2>"$log" & w=$!; follow Writing; wait $w || exit 1; sync; : >"$log"
-dd if="$raw" bs=1048576 count=$mib 2>"$log" | { sha256sum 2>/dev/null || shasum -a 256; } > "$log.sum" & follow Verifying
-wait; cut -d" " -f1 "$log.sum"; rm -f "$log" "$log.sum"'
+dd if=/dev/zero of="$raw" bs=1048576 count=1 conv=notrunc 2>/dev/null; sync; dd if="$img" of="$raw" bs=1048576 skip=1 seek=1 conv=notrunc 2>"$log" & w=$!; follow Writing; wait $w || exit 1; sync; : >"$log"
+dd if="$raw" bs=1048576 skip=1 count=$((mib - 1)) 2>"$log" | s256 > "$log.sum" & follow Verifying
+wait; dd if="$img" of="$raw" bs=1048576 count=1 conv=notrunc 2>/dev/null && sync || exit 1
+echo "$(dd if="$raw" bs=1048576 count=1 2>/dev/null | s256 | cut -c1-64) $(cut -c1-64 "$log.sum")"; rm -f "$log" "$log.sum"'
 # write_card DEV SIZE: re-check the card, unmount, write + read back as root, compare hashes.
 write_card() {
 	local dev="$1" bytes want got raw="/dev/$1"
 	[ "$(list_cards | grep -c "^$dev	$2	")" = 1 ] || stop "$dev is no longer the card that was listed; re-run"
-	bytes=$(wc -c < "$IMG" | tr -d ' '); want=$(sha "$IMG")
+	bytes=$(wc -c < "$IMG" | tr -d ' '); want="$(head -c 1048576 "$IMG" | sha -) $(tail -c +1048577 "$IMG" | sha -)"
 	[ $((bytes % 1048576)) = 0 ] || stop "image size is not whole MiB"
 	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"; fi
 	# shellcheck disable=SC2024  # the prompt reads the terminal, not a file
