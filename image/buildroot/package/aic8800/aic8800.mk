@@ -23,6 +23,15 @@ define AIC8800_APPLY_SDIO_PATCHES
 endef
 AIC8800_POST_PATCH_HOOKS += AIC8800_APPLY_SDIO_PATCHES
 
+# Do not offer WPA3 (SAE). The driver only does SAE with "external auth" from userspace, which
+# iwd does not implement, so on a WPA2/WPA3 router every join timed out after 4 s (rwnx
+# auth_type:3, measured on the frame 2026-10-22). Without the flag iwd picks WPA2-PSK.
+define AIC8800_NO_SAE
+	sed -i '/wiphy->features |= NL80211_FEATURE_SAE;/d' $(@D)/$(AIC8800_DRV)/aic8800/aic8800_fdrv/rwnx_main.c
+	! grep -q 'NL80211_FEATURE_SAE;' $(@D)/$(AIC8800_DRV)/aic8800/aic8800_fdrv/rwnx_main.c
+endef
+AIC8800_POST_PATCH_HOOKS += AIC8800_NO_SAE
+
 define AIC8800_INSTALL_FIRMWARE
 	$(INSTALL) -d $(TARGET_DIR)/lib/firmware/aic8800_fw/SDIO/aic8800DC
 	$(INSTALL) -m 0644 $(@D)/src/SDIO/driver_fw/fw/aic8800DC/* \
