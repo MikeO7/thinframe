@@ -627,3 +627,38 @@ Goal: the frame can be run, debugged and updated from the server with no one at 
 - Not done, refused by the automated safety check and left to the owner: a debug-gated root
   `exec` action, and WebKit's remote inspector bound on the LAN in debug mode.
 - Release run 39871524871 from main 7082bfb dispatched for the first card.
+
+## 2026-10-22 (the first frame, remote from here on)
+- Display [V]: on the A33 `/dev/dri/card0` is lima (render only, GETRESOURCES fails with EOPNOTSUPP)
+  and `card1` is sun4i-drm with DSI-1. The splash hard-coded card0, so the panel stayed dark and
+  nothing bound DSI-1 to a CRTC; cog then failed with "no crtc for encoder found!". With the splash
+  on card1 (`tfctl: splash: using /dev/dri/card1`, 800x1280) cog loaded `/frame/office` (PR #91).
+- Wi-Fi [V]: every join to the WPA2/WPA3 router timed out (`rwnx_send_sm_connect_req … auth_type:3`,
+  deinit after 4 s). The aic8800 driver does SAE only with userspace external auth, which iwd lacks.
+  With `NL80211_FEATURE_SAE` removed iwd uses WPA2-PSK (`auth_type:0`) and the frame joined the home
+  network (192.168.1.x) on its own (PR #93).
+- iwctl was not in the image (Buildroot builds iwd's client only with readline): tfctl's Wi-Fi
+  status, scan and join failed with ENOENT, logged as `wlan0 has an address but iwctl says: No such
+  file or directory`. Readline enabled; `/usr/bin/iwctl` present in system 2026.10.23-iwctl (PR #94).
+- Software updates [V]: BusyBox tar on the frame has no `-z`; every update with the overlay failed
+  (`tar: unrecognized option: z`). Now `gunzip -c | tar -x` (PR #93). Tool-only updates installed
+  and restarted (`software dev-…-usblink installed, restarting`).
+- A/B system updates on the frame [V], three times: written to the standby partition, rebooted,
+  `slot-confirmed: slot b booted and reached the server; tries reset` (2026.10.23-eab6e350,
+  2026.10.23-touch on slot a, 2026.10.23-iwctl on slot b).
+- USB-C link [V]: with Wi-Fi failing, the agent reached `http://192.168.7.1:8080` over the cable
+  (`server reachable without Wi-Fi (USB link)`), so the frame could be fixed with no card swap.
+- Discovery [V]: the Mac's address changed (192.168.1.225 to .172). The frame, on the cable
+  address, found the server over Wi-Fi and moved: `server moved: http://192.168.7.1:8080 ->
+  http://192.168.1.172:8080 (found on the LAN)`, reply checked by its HMAC proof (PR #94).
+- Touch [V] partly: the firmware read from the owner's eMMC backup matches the tested SHA-256
+  `e11ffa8a…`; with it in the image `silead_ts 0-0040: Silead chip ID: 0x50910000`, `input: silead_ts
+  … input2`, `touch firmware: ok`. Taps on the panel not yet seen [U].
+- Server IDs are case-insensitive now: the first card was flashed as "Office" and every route
+  refused it (PR #92).
+- With the card inserted after power-on the frame boots its Android; a reboot with the card in
+  starts ours [V].
+- The frame's Wi-Fi address changes on every boot (the AIC8800 has no stored MAC) [V]: .22, .108,
+  .209. Discovery makes that harmless for the server; a fixed address is still open.
+- Server on the Mac as a launchd service (`scripts/server-mac.sh install`); `status` lists
+  `frame office online ip 192.168.1.209 system 2026.10.23-iwctl` (PR #95).
