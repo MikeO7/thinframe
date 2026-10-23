@@ -634,6 +634,19 @@ fn render_joined(s: &Setup, ssid: &str) -> String {
 
 // ---- the agent's side ----
 
+const DIRECT_EVERY: Duration = Duration::from_secs(20);
+
+fn direct_probe(host: &str, port: u16) -> bool {
+    use std::net::{IpAddr, SocketAddr};
+    let Ok(ip) = host.parse::<IpAddr>() else {
+        return false; // a name needs DNS, which needs a network: not the cable case
+    };
+    if ip.is_loopback() {
+        return false;
+    }
+    TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_secs(1)).is_ok()
+}
+
 impl Agent {
     /// Wi-Fi comes first: true while the agent must not try the server yet.
     pub(crate) fn needs_wifi(&mut self) -> bool {
@@ -642,6 +655,12 @@ impl Agent {
             return false;
         }
         let connected = radio.connected();
+        if !connected && self.server_direct() {
+            if self.wifi_page_up {
+                self.leave_wifi_setup();
+            }
+            return false;
+        }
         let down_for = if connected {
             self.wifi_down_since = None;
             Duration::ZERO
@@ -733,6 +752,26 @@ impl Agent {
         STEP
     }
 
+    /// The server answers without Wi-Fi: the frame is on the USB-C cable to the computer that
+    /// runs it (SERVER_URL=http://192.168.7.1:...). Then Wi-Fi must not stand between the frame
+    /// and its server, or a frame whose Wi-Fi fails cannot be fixed remotely. One TCP connect,
+    /// at most every DIRECT_EVERY. A loopback server (tests, the sim) never counts.
+    fn server_direct(&mut self) -> bool {
+        if let Some((t, ok)) = self.direct {
+            if t.elapsed() < DIRECT_EVERY {
+                return ok;
+            }
+        }
+        let ok = direct_probe(&self.base.host, self.base.port);
+        if ok && self.direct.is_none_or(|(_, was)| !was) {
+            eprintln!(
+                "tfctl: agent: server reachable without Wi-Fi (USB link), not waiting for Wi-Fi"
+            );
+        }
+        self.direct = Some((Instant::now(), ok));
+        ok
+    }
+
     fn leave_wifi_setup(&mut self) {
         eprintln!("tfctl: wifi setup: connected, moving on");
         self.event("wifi", "Wi-Fi connected from the setup page");
@@ -755,6 +794,17 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_probe_ignores_loopback_and_names() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        assert!(
+            !direct_probe("127.0.0.1", port),
+            "a loopback server is the sim, not a cable"
+        );
+        assert!(!direct_probe("nas.local", port));
+    }
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct Fake {

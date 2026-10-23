@@ -15,7 +15,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
 pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
@@ -268,18 +268,44 @@ fn keep_copy(src: &Path, dst: &Path) -> io::Result<()> {
 }
 
 fn extract_overlay(p: &Paths, tgz: &Path) -> io::Result<()> {
-    let mut args = vec![
-        "-xzf",
-        tgz.to_str().unwrap(),
-        "-C",
-        p.root.to_str().unwrap(),
-    ];
+    // `gunzip -c | tar -x`: the frame's BusyBox tar has no -z (measured 2026-10-22), and a
+    // failed overlay blocked every software update.
     let ex: Vec<String> = OVERLAY_EXCLUDES
         .iter()
         .flat_map(|e| [format!("--exclude={e}"), format!("--exclude=./{e}")])
         .collect();
-    args.extend(ex.iter().map(String::as_str));
-    sh("tar", &args)
+    let mut gz = Command::new("gunzip")
+        .arg("-c")
+        .arg(tgz)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let tar = Command::new("tar")
+        .args(["-xf", "-", "-C"])
+        .arg(&p.root)
+        .args(&ex)
+        .stdin(
+            gz.stdout
+                .take()
+                .ok_or_else(|| io::Error::other("gunzip: no stdout"))?,
+        )
+        .output()?;
+    let gz = gz.wait_with_output()?;
+    if !gz.status.success() {
+        return Err(io::Error::other(format!(
+            "gunzip {}: {}",
+            tgz.display(),
+            String::from_utf8_lossy(&gz.stderr).trim()
+        )));
+    }
+    if !tar.status.success() {
+        return Err(io::Error::other(format!(
+            "tar -x into {}: {}",
+            p.root.display(),
+            String::from_utf8_lossy(&tar.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 /// `etc/thinframe.version.prev`: the version `tfctl.prev` carries, restored with it.
