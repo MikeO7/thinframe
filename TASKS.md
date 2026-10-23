@@ -321,4 +321,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] GitHub Actions builds tfctl and the image on a tag and attaches both to a release.
       (release.yml run 39533807044 -> v2026.10.21: tfctl-armv7 + sha256, thinframe-sd.img.zst, system tar;
       docs/log.md 2026-10-21. That run was dispatched; a pushed v* tag runs the same jobs.)
-- [ ] Speaker, accelerometer rotation, light sensor: see upstream `docs/hardware.md`. Not now.
+- [ ] Speaker, accelerometer rotation: see upstream `docs/hardware.md`. Not now.
+- [ ] Light sensor turns the screen off in a dark room (tfctl light.rs, decisions.md "Night mode").
+      Code and unit tests done; gate: on the frame `tfctl light` reads >= 10 lit and <= 3 with the
+      hole covered, the log shows `light: room dark` and `screen off` 2 min after the room light
+      goes off, and `screen on` within 5 s of switching it back on.

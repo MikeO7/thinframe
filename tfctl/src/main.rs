@@ -37,6 +37,7 @@ mod font;
 mod http;
 mod json;
 mod kiosk;
+mod light;
 mod logmirror;
 mod logstamp;
 mod pair;
@@ -71,7 +72,7 @@ mod fuzz;
 fn usage() -> ExitCode {
     eprintln!(
         "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
-         wifi SSID PSK|status|bench [TAPS]|set KEY VALUE>"
+         wifi SSID PSK|status|light|bench [TAPS]|set KEY VALUE>"
     );
     ExitCode::from(2)
 }
@@ -122,6 +123,7 @@ fn main() -> ExitCode {
         Some("splash") => splash::run(&cfg, args.get(1..).unwrap_or_default()),
         Some("wifi") if args.len() == 3 => wifi::run(&args[1], &args[2]),
         Some("status") => status::run(&cfg),
+        Some("light") => light::run(),
         Some("bench") => bench::run(&cfg, &args[1..]),
         Some("set") if args.len() == 3 => config::save_overrides(&conf, &[(&args[1], &args[2])]),
         _ => return usage(),

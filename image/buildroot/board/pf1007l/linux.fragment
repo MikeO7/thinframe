@@ -17,6 +17,11 @@ CONFIG_TOUCHSCREEN_SILEAD=m
 # uinput: `tfctl bench` taps through a virtual touchscreen (TASK 13).
 CONFIG_INPUT_MISC=y
 CONFIG_INPUT_UINPUT=y
+# Light sensor (tfctl light.rs): LRADC0 is the analog sensor behind the bezel hole, not keys.
+# The reference-tablet DTS this board inherits puts volume keys on it; their driver would hold
+# the converter in its own mode. tfctl reads the registers through /dev/mem (ormarch E064).
+# CONFIG_KEYBOARD_SUN4I_LRADC is not set
+CONFIG_DEVMEM=y
 # SoC temperature (A33 THS is served by the GPADC driver).
 CONFIG_MFD_SUN4I_GPADC=y
 CONFIG_SUN4I_GPADC=y

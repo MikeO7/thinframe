@@ -330,6 +330,16 @@ via `/sys/class/backlight/*/brightness` and cog paused (SIGSTOP) so the CPU idle
 both and reloads the page. The server can override with the `screen` action (`on|off`) and
 a frame reports `screen_state` in heartbeats. Touch during off turns the screen on for 60 s.
 
+The light sensor (docs/hardware.md) also turns the screen off: median of 5 one-second readings
+at or below 3 for 2 min = dark, at or above 10 for 3 s = lit (tfctl `light.rs`). Off when the
+schedule or the dark says off; each acts only when its wish changes, so a server `screen`
+action holds until then. `DARK_OFF=0` keeps the screen on in the dark. No crate: the two LRADC
+registers are read through an mmap of `/dev/mem`, and the kernel's LRADC key driver is left out
+(`linux.fragment`) because the reference-tablet DTS puts volume keys on the sensor's pin. The
+thresholds are upstream's covered-hole numbers [D]; whether the panel's own glow lifts the
+reading in a dark room is not measured [U]. `tfctl light` prints the value; the kiosk logs it
+every 15 min.
+
 ## Boot experience
 Android never runs: the boot ROM takes our U-Boot from the SD card before the eMMC. U-Boot cannot
 light the DSI panel, so the first 5 to 10 s are dark on every possible software; the vendor has
