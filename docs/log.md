@@ -685,3 +685,19 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   successfully`, boot at 22:54:13.35), straight from the server at 192.168.1.172 over Wi-Fi.
 - Touch: the tap listener on `/dev/input/event2` saw no events before it timed out; taps are
   still [U].
+
+## 2026-10-23: boot audit and power-cut safety (PR #100)
+- audit3 (iwd `[DriverQuirks] DefaultInterface=*`) [V]: two boots on slot b, `tfctl: wifi: rejoin:
+  no saved network in range` at 16.2 s, 36.5 s, 59.5 s, then no iwd process (`pidof iwd` empty at
+  482 s uptime); the Wi-Fi setup page came up at 53.2 s. The quirk was dropped.
+- A/B fallback with no one at the frame [V]: slot b never confirmed, uEnv.txt went `tries=1`, and
+  the next unconfirmed reboot started slot a (audit2); the server saw it online at 05:49:32Z.
+- audit4, warm boot (stamped kiosk log and rcS timings in dmesg) [V]: `crng init done` 1.02 s;
+  S10udev 1.07 to 1.44 s (was 1.11 to 4.99 s with settle); rcS done 1.93 s; wlan0 `Event:
+  Connect … Status Code: 0` 4.81 s; `agent: connected to http://192.168.1.172:8080` 7.75 s; cog
+  started on the dashboard at once (one start, no status page first); `prewarm: 464 MB in 7.7 s`;
+  `/frame/office> Loaded successfully` 11.73 s. audit2 was 14.31 s.
+- Supervision [V]: `pidof iwd dhcpcd dropbear` all present from the inittab respawn lines,
+  `/var/log/iwd.log` 1215 bytes.
+- Power cut itself (plug pulled during an update or a Wi-Fi save) is still [U]: needs the owner
+  at the frame.
