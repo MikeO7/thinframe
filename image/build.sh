@@ -67,7 +67,7 @@ step_inputs() {
 		cat "$p" >> "$ub/image/uboot/0002-pf1007l-linux-boot.patch"
 	done
 	bash "$ub/image/build.sh" uboot
-	grep -q "thinframe: take the input from VBUS" "$ub/image/uboot/0002-pf1007l-linux-boot.patch" || stop "U-Boot patch not applied"
+	grep -q "thinframe: the stock firmware.s charger setup" "$ub/image/uboot/0002-pf1007l-linux-boot.patch" || stop "U-Boot patch not applied"
 	rm -rf "$in"; mkdir -p "$in/dts/allwinner" "$in/linux-patches"
 	cp "$ub"/image/work/uboot/{u-boot-pf1007l-L.bin,u-boot-pf1007l-L.config,u-boot-qemu-opipc.bin,boot.cmd} "$in/"
 	cp "$om/kernel/dts/sun8i-a33-pf1007l.dts" "$om"/image/dts/sun8i-a33-pf1007l-{min,pmic,full}.dts "$in/dts/allwinner/"
