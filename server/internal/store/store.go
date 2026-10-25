@@ -114,14 +114,28 @@ type Widget struct {
 	Y     int            `json:"y"`
 	W     int            `json:"w"`
 	H     int            `json:"h"`
+	Tab   string         `json:"tab,omitempty"` // Tab.ID it sits on; "" = the first tab
 	Props map[string]any `json:"props,omitempty"`
 }
 
-// Layout is the dashboard composition for one frame.
+// Tab is one page of a tabbed layout. A tab with Parent set has no button of its own: it is a
+// second page of its parent, picked from a switch next to the parent's button.
+type Tab struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Icon   string `json:"icon,omitempty"`
+	Parent string `json:"parent,omitempty"`
+	// Label names the page in its tab's segmented switch; empty = Title.
+	Label string `json:"label,omitempty"`
+}
+
+// Layout is the dashboard composition for one frame. Every tab uses the same Cols x Rows grid.
 type Layout struct {
 	Cols    int      `json:"cols"`
 	Rows    int      `json:"rows"`
 	Theme   string   `json:"theme,omitempty"`
+	Tabs    []Tab    `json:"tabs,omitempty"`
+	IdleS   int      `json:"idle_s,omitempty"` // back to the first tab after this many idle seconds; 0 = 90
 	Widgets []Widget `json:"widgets"`
 }
 

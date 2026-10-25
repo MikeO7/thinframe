@@ -6,13 +6,19 @@
 <meta name="thinframe-page-version" content="{{.PageVersion}}">
 <title>thinframe {{.FrameID}}</title>
 <style>{{.CSS}}</style>
-{{if gt .SimW 0}}<style>#grid{width:{{.SimW}}px;height:{{.SimH}}px;transform-origin:0 0;transform:scale({{printf "%.5f" .SimScale}})}</style>{{end}}
+{{if gt .SimW 0}}<style>#grid{width:{{.SimW}}px;height:{{.SimH}}px;transform-origin:0 0;transform:scale({{printf "%.5f" .SimScale}})}html{font-size:{{printf "%.3f" (simrem .SimH)}}px}</style>{{end}}
 </head>
 <body>
-<main id="grid" style="grid-template-columns:repeat({{.Layout.Cols}},1fr);grid-template-rows:repeat({{.Layout.Rows}},1fr)">
+{{if .Pages}}<div id="grid" class="tabbed" data-idle="{{.IdleS}}">
+{{range $i, $p := .Pages}}<main class="page{{if eq $i 0}} on{{end}}" data-page="{{$p.ID}}" style="grid-template-columns:repeat({{$.Layout.Cols}},1fr);grid-template-rows:repeat({{$.Layout.Rows}},1fr)">
+{{range $p.Widgets}}{{.}}{{end}}
+</main>
+{{end}}<nav class="tabs">{{range $i, $b := .Buttons}}<div class="tab{{if eq $i 0}} on{{end}}" data-tab="{{$b.ID}}">{{if $b.Icon}}<svg viewBox="0 0 24 24">{{icon $b.Icon}}</svg>{{end}}<span>{{$b.Title}}</span></div>{{if gt (len $b.Pages) 1}}<div class="seg" data-for="{{$b.ID}}">{{range $j, $c := $b.Pages}}<span{{if eq $j 0}} class="on"{{end}} data-tab="{{$c.ID}}">{{or $c.Label $c.Title}}</span>{{end}}</div>{{end}}{{end}}</nav>
+</div>
+{{else}}<main id="grid" style="grid-template-columns:repeat({{.Layout.Cols}},1fr);grid-template-rows:repeat({{.Layout.Rows}},1fr)">
 {{range .Widgets}}{{.}}{{end}}
 </main>
-<div id="toast"></div>
+{{end}}<div id="toast"></div>
 <script>window.TF = {frame: {{.FrameID}}, pageVersion: {{.PageVersion}}};</script>
 <script>{{.JS}}</script>
 </body>

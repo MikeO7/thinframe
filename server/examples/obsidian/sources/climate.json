@@ -1,0 +1,1 @@
+{"badge": {"text": "Heating", "state": "warn"}, "zones": [{"name": "Downstairs", "temp": "70°", "target": "71°", "action": "heating"}, {"name": "Upstairs", "temp": "68°", "target": "68°", "action": "idle"}, {"name": "Office", "temp": "70°", "target": "70°", "action": "idle"}]}

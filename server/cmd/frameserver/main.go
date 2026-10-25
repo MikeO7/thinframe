@@ -17,6 +17,8 @@
 //	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
 //	TZ            frames receive this time zone
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
+//	SERVICES_SSH  ssh destination whose `docker ps` feeds the source "services" (key auth only)
+//	SERVICES_EVERY  how often to poll it (default 1m, Go duration)
 //	DISCOVERY     udp address frames probe to find this server (default :41007, "off" disables;
 //	              needs host networking in a container)
 package main
@@ -118,6 +120,14 @@ func main() {
 				log.Printf("discovery: %v (frames need SERVER_URL)", err)
 			}
 		}()
+	}
+	if host := os.Getenv("SERVICES_SSH"); host != "" {
+		every, err := time.ParseDuration(env("SERVICES_EVERY", "1m"))
+		if err != nil || every < 10*time.Second {
+			every = time.Minute
+		}
+		go srv.PollServices(ctx, host, every)
+		log.Printf("services: docker ps on %s every %s", host, every)
 	}
 	<-ctx.Done()
 	shutdown, cancel := context.WithTimeout(context.Background(), shutdownTimeout)

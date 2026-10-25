@@ -1,0 +1,43 @@
+{
+  "cols": 6, "rows": 2, "theme": "obsidian", "idle_s": 90,
+  "tabs": [
+    {"id": "home", "title": "Home", "icon": "home"},
+    {"id": "cars", "title": "Cars", "icon": "car"},
+    {"id": "house", "title": "House", "icon": "house", "label": "Rooms & climate"},
+    {"id": "security", "title": "Security", "icon": "shield", "parent": "house", "label": "Security & energy"},
+    {"id": "shows", "title": "Shows", "icon": "shows"},
+    {"id": "work", "title": "Work", "icon": "work"},
+    {"id": "system", "title": "System", "icon": "system"}
+  ],
+  "widgets": [
+    {"id": "hero", "type": "hero", "tab": "home", "x": 0, "y": 0, "w": 4, "h": 1, "props": {"source": "home"}},
+    {"id": "next", "type": "agenda", "tab": "home", "x": 4, "y": 0, "w": 2, "h": 2, "props": {"title": "Up next", "view": "list", "max": 6, "source": "work"}},
+    {"id": "garage", "type": "cars", "tab": "home", "x": 0, "y": 1, "w": 2, "h": 1,
+      "props": {"title": "Garage", "view": "compact", "source": "cars", "cars": [{"id": "car1", "name": "Sedan", "model": "Model S"}, {"id": "car2", "name": "SUV", "model": "Model X"}]}},
+    {"id": "glance", "type": "list", "tab": "home", "x": 2, "y": 1, "w": 2, "h": 1, "props": {"title": "House", "source": "glance"}},
+
+    {"id": "cars", "type": "cars", "tab": "cars", "x": 0, "y": 0, "w": 6, "h": 2,
+      "props": {"source": "cars", "cars": [{"id": "car1", "name": "Sedan", "model": "Model S", "image": "asset:car1.png"}, {"id": "car2", "name": "SUV", "model": "Model X", "image": "asset:car2.png"}]}},
+
+    {"id": "rooms", "type": "rooms", "tab": "house", "x": 0, "y": 0, "w": 4, "h": 2,
+      "props": {"title": "Rooms", "source": "rooms", "rooms": [{"name": "Living"}, {"name": "Kitchen"}, {"name": "Office"}, {"name": "Bedroom"}, {"name": "Kids"}, {"name": "Patio"}]}},
+    {"id": "climate", "type": "climate", "tab": "house", "x": 4, "y": 0, "w": 2, "h": 1, "props": {"title": "Climate", "source": "climate"}},
+    {"id": "air", "type": "tiles", "tab": "house", "x": 4, "y": 1, "w": 2, "h": 1, "props": {"title": "Air", "source": "air"}},
+
+    {"id": "secure", "type": "list", "tab": "security", "x": 0, "y": 0, "w": 2, "h": 2, "props": {"title": "Security", "source": "security"}},
+    {"id": "energy", "type": "energy", "tab": "security", "x": 2, "y": 0, "w": 4, "h": 1, "props": {"source": "energy"}},
+    {"id": "utility", "type": "tiles", "tab": "security", "x": 2, "y": 1, "w": 4, "h": 1, "props": {"title": "Utilities", "source": "utility"}},
+
+    {"id": "upcoming", "type": "shows", "tab": "shows", "x": 0, "y": 0, "w": 6, "h": 1, "props": {"part": "upcoming", "source": "shows"}},
+    {"id": "added", "type": "shows", "tab": "shows", "x": 0, "y": 1, "w": 6, "h": 1, "props": {"part": "added", "source": "shows"}},
+
+    {"id": "day", "type": "agenda", "tab": "work", "x": 0, "y": 0, "w": 2, "h": 2, "props": {"title": "Today", "view": "day", "from": 8, "to": 18, "source": "work"}},
+    {"id": "focus", "type": "agenda", "tab": "work", "x": 2, "y": 0, "w": 2, "h": 1, "props": {"title": "Next meeting", "view": "next", "source": "work"}},
+    {"id": "zones", "type": "worldclock", "tab": "work", "x": 4, "y": 0, "w": 2, "h": 1,
+      "props": {"title": "Team", "zones": [{"label": "London", "tz": "Europe/London"}, {"label": "New York", "tz": "America/New_York"}, {"label": "Tokyo", "tz": "Asia/Tokyo"}]}},
+    {"id": "inbox", "type": "tiles", "tab": "work", "x": 2, "y": 1, "w": 4, "h": 1, "props": {"title": "Work", "source": "inbox"}},
+
+    {"id": "server", "type": "services", "tab": "system", "x": 0, "y": 0, "w": 6, "h": 2,
+      "props": {"title": "Home server", "source": "services", "groups": [{"name": "Media", "members": ["plex", "sonarr", "radarr"]}, {"name": "Smart home", "members": ["homeassistant", "mosquitto"]}, {"name": "Network", "members": ["proxy", "dns"]}]}}
+  ]
+}

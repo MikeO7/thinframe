@@ -1,0 +1,7 @@
+{"events": [
+  {"start": "@D0T08:30:00", "end": "@D0T09:00:00", "title": "Inbox and plan", "where": "Desk"},
+  {"start": "@D0T09:30:00", "end": "@D0T10:00:00", "title": "Team standup", "where": "Video call"},
+  {"start": "@D0T11:00:00", "end": "@D0T12:00:00", "title": "Design review", "where": "Room 2"},
+  {"start": "@D0T13:30:00", "end": "@D0T14:00:00", "title": "1:1", "where": "Video call"},
+  {"start": "@D0T15:00:00", "end": "@D0T16:30:00", "title": "Focus block"},
+  {"start": "@D1T10:00:00", "end": "@D1T11:00:00", "title": "Planning"}]}

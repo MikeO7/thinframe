@@ -341,10 +341,10 @@ func (s *Server) pushData(id string) {
 	if err != nil {
 		return
 	}
-	var wx, cal map[string]any
+	var wx, cal, ag map[string]any
 	for _, wdg := range f.Layout.Widgets {
 		switch {
-		case wdg.Type == "weather" && s.opts.Weather != nil:
+		case (wdg.Type == "weather" || wdg.Type == "hero") && s.opts.Weather != nil:
 			if wx == nil {
 				wx = s.weatherData()
 			}
@@ -354,8 +354,33 @@ func (s *Server) pushData(id string) {
 				cal = s.calendarData(time.Now())
 			}
 			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": cal})
+		case wdg.Type == "agenda" && sourceOf(wdg) == "" && s.opts.Calendar != nil:
+			if ag == nil {
+				ag = s.agendaData(time.Now())
+			}
+			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": ag})
 		}
 	}
+	s.pushSources(f)
+}
+
+// agendaData is the agenda widget's events from the calendar feed: the next 20, as
+// {start, end, title} with RFC 3339 times. A failed fetch with nothing cached sends nothing.
+func (s *Server) agendaData(now time.Time) map[string]any {
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()) // keep today's past events
+	evs, err := s.opts.Calendar.Upcoming(day, 20)
+	if err != nil && len(evs) == 0 {
+		return map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(evs))
+	for _, e := range evs {
+		end := e.End
+		if end.IsZero() {
+			end = e.Start.Add(time.Hour)
+		}
+		out = append(out, map[string]any{"start": e.Start.Format(time.RFC3339), "end": end.Format(time.RFC3339), "title": e.Summary, "all_day": e.AllDay})
+	}
+	return map[string]any{"events": out}
 }
 
 // handleDataWeather serves GET /api/data/weather. The page never calls a third party:

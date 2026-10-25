@@ -1,0 +1,5 @@
+{"containers": [
+  {"name": "plex", "state": "healthy"}, {"name": "sonarr", "state": "healthy"}, {"name": "radarr", "state": "running"},
+  {"name": "homeassistant", "state": "healthy"}, {"name": "mosquitto", "state": "running"},
+  {"name": "proxy", "state": "healthy"}, {"name": "dns", "state": "healthy"}, {"name": "backup", "state": "exited", "note": "Exited (0) 6 hours ago"}],
+ "host": {"name": "Home server", "meters": [{"label": "CPU", "pct": 18, "text": "18%"}, {"label": "Memory", "pct": 54, "text": "17 of 32 GB"}, {"label": "Disk", "pct": 71, "text": "5.7 of 8 TB"}], "note": "Up 22 days"}}

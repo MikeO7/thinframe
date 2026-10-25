@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -211,11 +212,11 @@ func register(m *sdk.Server, s *api.Server) {
 	sdk.AddTool(m, tool("list_widgets", "List widgets", "Widget types available for layouts, with their props.", readOnly),
 		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, map[string]any, error) {
 			out := map[string]any{
-				"types": widgets.Types,
-				"props": map[string]string{
-					"photo": "interval_s (seconds between photos, default 600)", "text": "text", "iframe": "src (URL)",
-					"weather": "place (label)", "calendar": "", "clock": "", "status": "",
-				},
+				"types":   widgets.Types,
+				"props":   widgets.Props,
+				"images":  "http(s) URL or asset:<file> from DATA_DIR/assets",
+				"tabs":    "optional tabs [{id,title,icon,parent}] (icons: " + strings.Join(widgets.IconNames(), ", ") + "); widgets set tab; every tab shares cols x rows; idle_s returns to the first tab",
+				"themes":  "light, dark, obsidian",
 				"grid":    "cols x rows (1..12 each); widgets have x,y,w,h in cells and must not overlap",
 				"example": store.DefaultLayout(),
 			}
@@ -284,6 +285,26 @@ func register(m *sdk.Server, s *api.Server) {
 				b = b[len(b)-in.Tail:]
 			}
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(b)}}}, map[string]any{"bytes": len(b)}, nil
+		})
+
+	type srcIn struct {
+		Key  string         `json:"key" jsonschema:"source key (lowercase letters, digits, - and _); widgets read it with props.source"`
+		Data map[string]any `json:"data" jsonschema:"the whole object the widgets receive as data (see list_widgets props)"`
+	}
+	sdk.AddTool(m, tool("set_source", "Set source", "Replace a data source and push it to every widget that reads it. Kept in DATA_DIR/sources across restarts.", replaces),
+		func(_ context.Context, _ *sdk.CallToolRequest, in srcIn) (*sdk.CallToolResult, map[string]any, error) {
+			b, err := json.Marshal(in.Data)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := s.SetSource(in.Key, b); err != nil {
+				return nil, nil, err
+			}
+			return nil, map[string]any{"key": in.Key, "bytes": len(b)}, nil
+		})
+	sdk.AddTool(m, tool("list_sources", "List sources", "Data sources the server holds: key, size, last update.", readOnly),
+		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, map[string]any, error) {
+			return nil, map[string]any{"sources": s.Sources()}, nil
 		})
 
 	sdk.AddTool(m, tool("release_status", "Release status", "Which tfctl/system versions this server carries and which frames are behind.", readOnly),

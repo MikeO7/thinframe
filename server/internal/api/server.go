@@ -59,6 +59,9 @@ type Server struct {
 	pair pairings
 	// patterns: what Routes registered.
 	patterns []string
+	// src: pushed data sources (sources.go); assets: DATA_DIR/assets.
+	src    *sourceSet
+	assets string
 	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
 	// does not wait for hijacked connections, so a process that exits right after Shutdown
 	// could cut the "disconnected" event short; Drain waits for them.
@@ -72,9 +75,11 @@ func New(st *store.Store, opts Options) *Server {
 	if opts.PageStale > 0 {
 		s.pageStale = opts.PageStale
 	}
+	data := filepath.Dir(st.Dir())
 	if s.opts.Reports == "" {
-		s.opts.Reports = filepath.Join(filepath.Dir(st.Dir()), "reports")
+		s.opts.Reports = filepath.Join(data, "reports")
 	}
+	s.src, s.assets = loadSources(filepath.Join(data, "sources")), filepath.Join(data, "assets")
 	s.Hub.OnClose = func(id string) {
 		_, _ = st.Update(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
 	}
@@ -113,6 +118,7 @@ func (s *Server) Routes() http.Handler {
 	fn("GET /api/data/photo/next", s.handlePhotoNext)
 	fn("GET /api/data/weather", s.handleDataWeather)
 	fn("GET /api/data/calendar", s.handleDataCalendar)
+	fn("GET /api/data/asset/{name}", s.handleAsset)
 	fn("POST /api/frames/{id}/beacon", s.handleBeacon)
 	fn("POST /api/frames/{id}/alive", s.handleAlive)
 	// Pairing: a frame without a token asks for one (pair.go).
@@ -133,6 +139,10 @@ func (s *Server) Routes() http.Handler {
 	handle("GET /api/frames/{id}/reports", s.auth(http.HandlerFunc(s.handleListReports)))
 	handle("GET /api/frames/{id}/reports/{name}", s.auth(http.HandlerFunc(s.handleGetReport)))
 	handle("GET /api/frames/{id}/ws", s.authFrame(http.HandlerFunc(s.handleWS)))
+	handle("GET /api/sources", s.auth(http.HandlerFunc(s.handleListSources)))
+	handle("GET /api/sources/{key}", s.auth(http.HandlerFunc(s.handleGetSource)))
+	handle("PUT /api/sources/{key}", s.auth(http.HandlerFunc(s.handlePutSource)))
+	handle("DELETE /api/sources/{key}", s.auth(http.HandlerFunc(s.handleDeleteSource)))
 	handle("GET /api/release", s.authAnyFrame(http.HandlerFunc(s.handleRelease)))
 	if s.opts.Artifacts != nil {
 		handle("GET /api/artifacts/{name}", s.authAnyFrame(s.opts.Artifacts.Handler()))
