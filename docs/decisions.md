@@ -573,3 +573,18 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
 - **No new crates or modules.** Rendering is the existing html/template plus page.js; tabs are CSS
   pages toggled by class, no animation beyond opacity, for the Mali-400.
 
+## Production on the home server, the Mac for testing (2026-10-25)
+- The server runs as a container on the owner's Docker host, built on the Mac and shipped with
+  `docker save | ssh docker load` (scripts/server-deploy.sh), tagged `local/…` so the host's
+  update manager does not try to pull it from a registry.
+- Host networking: frames find the server by UDP broadcast on 41007, which a bridged port map
+  does not receive.
+- Container status comes from the host's Docker socket, mounted read-only. The server only sends
+  `GET /containers/json`, but anyone who took over the process could use the socket fully (`:ro`
+  protects the file, not the API) [V: Docker docs]. The same host already gives the socket to
+  two management containers; a filtering socket proxy is the step up if that changes.
+- The Mac server keeps `DISCOVERY=off`, so a frame that loses production cannot land on it.
+- Page speed on the A33: widgets on hidden tabs are drawn when shown, repeated data is skipped
+  in the page and on the server, icons are parsed once, no blurred shadows. In WPE 2.48 (sim,
+  arm64 container): load 70 ms, tab switch 1 to 38 ms, all draws 25 ms [V 2026-10-25, sim].
+

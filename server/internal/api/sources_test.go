@@ -1,10 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,6 +59,15 @@ func TestSourcePublishPersistReplay(t *testing.T) {
 	case b := <-ch:
 		t.Fatalf("widget b does not read house: %s", b)
 	default:
+	}
+	// The same object again is not re-sent.
+	if err := s.SetSource("house", []byte(`{"items":[{"label":"Door"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case b := <-ch:
+		t.Fatalf("unchanged source re-sent: %s", b)
+	case <-time.After(100 * time.Millisecond):
 	}
 	// A new server on the same data dir has it, and replays it on connect.
 	s2 := New(s.Store, Options{})
@@ -115,5 +129,80 @@ func TestParseDockerPS(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("%d: got %v want %v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestParseDockerAPI(t *testing.T) {
+	body := `[{"Names":["/web"],"State":"running","Status":"Up 2 days (healthy)"},{"Names":["/job"],"State":"exited","Status":"Exited (1) 3 hours ago"},
+		{"Names":[],"State":"running"},{"Names":["/a-db"],"State":"running","Status":"Up 1 hour (unhealthy)"}]`
+	got, err := ParseDockerAPI(strings.NewReader(body))
+	want := []Container{{"a-db", "unhealthy", ""}, {"job", "exited", "Exited (1) 3 hours ago"}, {"web", "healthy", ""}}
+	if err != nil || len(got) != len(want) {
+		t.Fatalf("got %v %v", got, err)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("%d: got %v want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// PollDocker talks to a unix socket and only asks for the container list.
+func TestPollDockerSocket(t *testing.T) {
+	s, _ := newTest(t, "")
+	sock := filepath.Join(t.TempDir(), "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skip("no unix sockets:", err)
+	}
+	var mu sync.Mutex
+	var paths []string
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.Method+" "+r.URL.String())
+		mu.Unlock()
+		_, _ = w.Write([]byte(`[{"Names":["/plex"],"State":"running","Status":"Up (healthy)"}]`))
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	go s.PollDocker(ctx, sock, time.Hour)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if d, ok := s.Source("services"); ok {
+			cancel()
+			mu.Lock()
+			defer mu.Unlock()
+			if !strings.Contains(string(d), `"name":"plex","state":"healthy"`) || len(paths) != 1 || paths[0] != "GET /containers/json?all=1" {
+				t.Fatalf("source %s, requests %v", d, paths)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	t.Fatal("no services source")
+}
+
+// A layout reading many sources gets all of them on connect, none dropped.
+func TestReplayDoesNotDrop(t *testing.T) {
+	s, _ := newTest(t, "")
+	l := store.Layout{Cols: 12, Rows: 12}
+	for i := 0; i < MaxSources; i++ {
+		k := fmt.Sprintf("s%d", i)
+		l.Widgets = append(l.Widgets, store.Widget{ID: k, Type: "tiles", X: i % 12, Y: i / 12, W: 1, H: 1, Props: map[string]any{"source": k}})
+		if err := s.SetSource(k, []byte(`{"items":[]}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.SetLayout("busy", l); err != nil {
+		t.Fatal(err)
+	}
+	ch, unsub := s.sse.subscribe("busy")
+	defer unsub()
+	f, _ := s.Store.Get("busy")
+	s.pushSources(f)
+	if len(ch) != MaxSources {
+		t.Fatalf("queued %d of %d", len(ch), MaxSources)
 	}
 }

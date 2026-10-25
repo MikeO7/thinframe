@@ -30,14 +30,15 @@ import (
 
 // Options configures a Server.
 type Options struct {
-	Token     string // empty = no auth (LAN dev only)
-	Photos    *photos.Service
-	Artifacts *artifacts.Dir
-	Weather   WeatherSource  // may be nil
-	Calendar  CalendarSource // may be nil
-	Version   string
-	PageStale time.Duration // hung-page timeout; 0 = 3 minutes
-	Reports   string        // where frame reports are kept; "" = <data>/reports next to the store
+	Token      string // empty = no auth (LAN dev only)
+	Photos     *photos.Service
+	Artifacts  *artifacts.Dir
+	Weather    WeatherSource  // may be nil
+	Fahrenheit bool           // weather temperatures in °F (WEATHER_UNITS=f)
+	Calendar   CalendarSource // may be nil
+	Version    string
+	PageStale  time.Duration // hung-page timeout; 0 = 3 minutes
+	Reports    string        // where frame reports are kept; "" = <data>/reports next to the store
 }
 
 // Server holds the dependencies and implements every operation once.

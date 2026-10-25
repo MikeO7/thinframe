@@ -316,7 +316,21 @@ func (s *Server) weatherData() map[string]any {
 	if err != nil && wx.Desc == "" {
 		return map[string]any{"temp": "", "desc": "weather unavailable"}
 	}
-	return map[string]any{"temp": strconv.Itoa(int(math.Round(wx.TempC))), "desc": strings.ToLower(wx.Desc)}
+	deg := func(c float64) int {
+		if s.opts.Fahrenheit {
+			c = c*9/5 + 32
+		}
+		return int(math.Round(c))
+	}
+	out := map[string]any{"temp": strconv.Itoa(deg(wx.TempC)), "desc": strings.ToLower(wx.Desc), "code": wx.Code}
+	days := make([]map[string]any, 0, len(wx.Days))
+	for _, d := range wx.Days {
+		days = append(days, map[string]any{"date": d.Date, "code": d.Code, "hi": deg(d.MaxC), "lo": deg(d.MinC)})
+	}
+	if len(days) > 0 {
+		out["hi"], out["lo"], out["days"] = days[0]["hi"], days[0]["lo"], days
+	}
+	return out
 }
 
 // calendarData is the calendar widget's fields, shared by SSE and /api/data/calendar.
@@ -344,7 +358,7 @@ func (s *Server) pushData(id string) {
 	var wx, cal, ag map[string]any
 	for _, wdg := range f.Layout.Widgets {
 		switch {
-		case (wdg.Type == "weather" || wdg.Type == "hero") && s.opts.Weather != nil:
+		case (wdg.Type == "weather" || wdg.Type == "hero" || wdg.Type == "forecast") && s.opts.Weather != nil:
 			if wx == nil {
 				wx = s.weatherData()
 			}

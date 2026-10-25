@@ -1,6 +1,10 @@
 (function () {
   'use strict';
   const pad = n => String(n).padStart(2, '0');
+  // Errors are kept for tests and debug reports (TF.errors), not only the console.
+  TF.errors = [];
+  function fail(m) { if (TF.errors.length < 20) TF.errors.push(String(m)); console.error(m); }
+  addEventListener('error', e => fail((e.message || 'error') + ' @' + (e.lineno || 0)));
   const widgets = document.querySelectorAll('.w');
 
   function hm(d, h12) {
@@ -62,8 +66,29 @@
     person: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/>',
     cam: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>',
     leaf: '<path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15zM5 19l7-7"/>',
-    dot: '<circle cx="12" cy="12" r="3"/>'
+    dot: '<circle cx="12" cy="12" r="3"/>',
+    frunk: '<path d="M3 17.5V14M9 14l3-4h4.5l3 3.5 1.5.5v3.5"/><path d="M9 14 3.8 10.2"/><path d="M3 17.5h2M9 17.5h6M19 17.5h2"/><circle cx="7" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/>',
+    trunk: '<path d="M21 17.5V14M15 14l-3-4H7.5l-3 3.5L3 14v3.5"/><path d="M15 14l5.2-3.8"/><path d="M3 17.5h2M9 17.5h6M19 17.5h2"/><circle cx="7" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/>',
+    plug: '<path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v4"/>',
+    sun: '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>',
+    partsun: '<path d="M9 3v1.6M3.6 9H2M4.8 4.8l1.1 1.1M13.2 4.8l-1.1 1.1"/><path d="M5.6 11.5A3.6 3.6 0 0 1 12.3 7.6"/><path d="M8 20h10a3.5 3.5 0 0 0 .4-7 5 5 0 0 0-9.6-.8A3.9 3.9 0 0 0 8 20z"/>',
+    cloud: '<path d="M7 19h10.5a4 4 0 0 0 .5-8 6 6 0 0 0-11.4-1A4.5 4.5 0 0 0 7 19z"/>',
+    fog: '<path d="M7 13h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 5.6 3.8 3.8 0 0 0 7 13z"/><path d="M4 17h16M7 21h10"/>',
+    rain: '<path d="M7 14h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 6.6 3.8 3.8 0 0 0 7 14z"/><path d="M8 17l-1 3M12.5 17l-1 3M17 17l-1 3"/>',
+    snow: '<path d="M7 14h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 6.6 3.8 3.8 0 0 0 7 14z"/><path d="M8 18h.01M12 20h.01M16 18h.01M10 22h.01M14 22h.01"/>',
+    storm: '<path d="M7 14h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 6.6 3.8 3.8 0 0 0 7 14z"/><path d="M12.5 15l-2 3.5h3l-2 3.5"/>'
   };
+  // WMO weather code -> icon (open-meteo).
+  function wxIcon(c) {
+    c = Number(c);
+    if (c <= 1) return 'sun';
+    if (c === 2) return 'partsun';
+    if (c === 3) return 'cloud';
+    if (c === 45 || c === 48) return 'fog';
+    if ((c >= 71 && c <= 77) || c === 85 || c === 86) return 'snow';
+    if (c >= 95) return 'storm';
+    return 'rain';
+  }
   const SVGNS = 'http://www.w3.org/2000/svg';
 
   function h(tag, cls, text) {
@@ -72,12 +97,19 @@
     if (text !== undefined && text !== null) e.textContent = String(text);
     return e;
   }
-  function icon(name) {
-    const s = document.createElementNS(SVGNS, 'svg');
-    s.setAttribute('viewBox', '0 0 24 24');
-    s.setAttribute('class', 'ic');
-    s.innerHTML = ICONS[name] || ICONS.dot; // constant table, never data
-    return s;
+  // Each icon is parsed once and cloned after: redraws do not re-run the SVG parser.
+  const iconCache = {};
+  function icon(name, cls) {
+    const k = ICONS[name] ? name : 'dot';
+    if (!iconCache[k]) {
+      const s = document.createElementNS(SVGNS, 'svg');
+      s.setAttribute('viewBox', '0 0 24 24');
+      s.innerHTML = ICONS[k]; // constant table, never data
+      iconCache[k] = s;
+    }
+    const c = iconCache[k].cloneNode(true);
+    c.setAttribute('class', 'ic ' + (cls || '') + ' i-' + k);
+    return c;
   }
   function src(v) {
     if (typeof v !== 'string') return '';
@@ -98,7 +130,7 @@
     if (!b || !b.text) { e.hidden = true; return; }
     e.hidden = false; e.textContent = b.text; e.className = 'badge ' + st(b.state);
   }
-  function body(sec) { const b = sec.querySelector('.body'); b.textContent = ''; return b; }
+  function body(sec) { const b = sec.querySelector('.body'); b.textContent = ''; sec.classList.remove('nodata'); return b; }
   function bar(pct, color) {
     const b = h('div', 'bar'), i = h('i');
     i.style.width = Math.max(0, Math.min(100, Number(pct) || 0)) + '%';
@@ -127,7 +159,13 @@
     if (value !== undefined && value !== null && value !== '') t.append(h('span', 'v' + (state ? ' s-' + st(state) : ''), value));
     return t;
   }
-  function empty(b, text) { b.append(h('div', 'empty', text || 'Waiting for data')); }
+  function empty(b, text) { b.closest('.w').classList.add('nodata'); b.append(h('div', 'empty', text || 'No data yet')); }
+  // Hero badge from a services feed when nothing else sets one: "22 / 22 containers healthy".
+  function health(d, p) {
+    if (!p.health || !Array.isArray(d.containers)) return null;
+    const ok = d.containers.filter(c => c.state === 'healthy' || c.state === 'running').length, n = d.containers.length;
+    return { text: ok + ' / ' + n + ' containers ' + (ok === n ? 'healthy' : 'up'), state: ok === n ? 'ok' : 'warn' };
+  }
 
   // Events: [{start, end, title, where}], ISO times.
   function events(d) {
@@ -138,12 +176,35 @@
   function inText(m) { return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60 ? (m % 60) + ' min' : ''); }
 
   const R = {
-    hero(sec, d) {
-      badge(sec, d.badge);
-      const t = sec.querySelector('[data-field="temp"]');
-      sec.querySelector('.hero-wx').hidden = !t.textContent;
+    hero(sec, d, p) {
+      badge(sec, d.badge || health(d, p));
+      const wx = sec.querySelector('.hero-wx'), has = d.temp !== undefined && d.temp !== '';
+      wx.hidden = !has;
+      if (has) {
+        const ic = sec.querySelector('.wx-ic'); ic.textContent = ''; ic.append(icon(wxIcon(d.code), 'wx'));
+        const sub = [d.desc ? d.desc[0].toUpperCase() + d.desc.slice(1) : '', num(d.hi) !== null ? 'H ' + d.hi + '°  L ' + d.lo + '°' : ''];
+        sec.querySelector('.hero-sub').textContent = sub.filter(Boolean).join(' · ');
+      }
       const c = sec.querySelector('.chips'); c.textContent = '';
       for (const x of arr(d.chips)) { const e = h('span', 'chip'); e.append(icon(x.icon), h('span', '', x.text)); c.append(e); }
+    },
+    forecast(sec, d, p) {
+      const b = body(sec), days = arr(d.days).slice(0, num(p.days) || 7);
+      if (!days.length) { empty(b, 'No forecast yet'); return; }
+      const lo = Math.min(...days.map(x => x.lo)), hi = Math.max(...days.map(x => x.hi)), span = Math.max(hi - lo, 1);
+      const wide = sec.clientWidth > sec.clientHeight * 1.9;
+      const l = h('div', 'fc' + (wide ? ' wide' : ''));
+      days.forEach((x, i) => {
+        const r = h('div', 'fd' + (i === 0 ? ' today' : ''));
+        const dt = new Date(String(x.date) + 'T12:00:00');
+        r.append(h('span', 'dn', i === 0 ? 'Today' : dt.toLocaleDateString(undefined, { weekday: 'short' })), icon(wxIcon(x.code), 'wx'));
+        const rg = h('span', 'rg'), f = h('i');
+        f.style.left = ((x.lo - lo) / span * 100) + '%'; f.style.right = ((hi - x.hi) / span * 100) + '%';
+        rg.append(f);
+        r.append(h('span', 'lo', x.lo + '°'), rg, h('span', 'hi', x.hi + '°'));
+        l.append(r);
+      });
+      b.append(l);
     },
     agenda(sec, d, p) {
       const b = body(sec), now = new Date(), evs = events(d);
@@ -190,45 +251,58 @@
       const b = body(sec), cars = merge(p.cars, d.cars), compact = p.view === 'compact';
       sec.classList.toggle('full', !compact);
       if (!cars.length) { empty(b); return; }
+      const pct = c => { const v = num(c.battery); return v === null ? null : Math.round(Math.max(0, Math.min(100, v))); };
       if (compact) {
-        sec.querySelector('.body').before(sec.querySelector('.label') || h('div', 'label', p.title || 'Garage'));
         const l = h('div', 'cars-compact');
         for (const c of cars) {
           const r = h('div', 'carrow'); r.append(img(c.image) || icon('car'));
-          const t = h('div'); t.style.flex = 1; t.style.minWidth = 0;
-          const top = h('div', 'between'); top.style.fontSize = '1.7rem';
-          top.append(h('span', 'ellip', c.name), h('span', c.charging ? 's-ok' : 'dim', num(c.battery) !== null ? c.battery + '%' : '—'));
-          t.append(top, bar(c.battery));
-          t.lastChild.style.marginTop = '.8rem';
-          t.append(h('div', 'faint ellip', c.status || ''));
-          t.lastChild.style.cssText = 'font-size:1.3rem;margin-top:.6rem';
+          const t = h('div', 'cr');
+          const top = h('div', 'between'); top.append(h('span', 'ellip cn', c.name));
+          if (pct(c) !== null) top.append(h('span', 'cp' + (c.charging ? ' s-ok' : ''), pct(c) + '%'));
+          t.append(top);
+          if (pct(c) !== null) t.append(bar(pct(c), c.charging ? 'var(--ok)' : ''));
+          t.append(h('div', 'faint ellip cs', c.status || (pct(c) === null ? c.model || '' : '')));
           r.append(t); l.append(r);
         }
         b.append(l); return;
       }
       const g = h('div', 'cars-full');
       for (const c of cars) {
-        const k = h('div', 'car'), top = h('div', 'between');
+        const k = h('div', 'car'), top = h('div', 'between'), live = pct(c) !== null;
         const nm = h('div'); nm.append(h('div', 'model', c.model || ''), h('div', 'name ellip', c.name));
-        const bt = h('div'); bt.style.textAlign = 'right';
-        const pr = h('div', 'row'); pr.style.justifyContent = 'flex-end';
-        const ba = h('span', 'batt' + (c.charging ? ' chg' : '')), bi = h('i'); bi.style.width = (num(c.battery) || 0) + '%'; ba.append(bi);
-        pr.append(ba); if (c.charging) { const z = icon('bolt'); z.style.color = 'var(--ok)'; pr.append(z); }
-        pr.append(h('span', 'pct' + (c.charging ? ' chg' : ''), num(c.battery) !== null ? c.battery + '%' : '—'));
-        bt.append(pr, h('div', 'dim', [c.range ? c.range : '', c.status || ''].filter(Boolean).join(' · ')));
-        bt.lastChild.style.cssText = 'font-size:1.5rem;margin-top:.4rem';
-        top.append(nm, bt);
-        const sg = h('div', 'stage'); const ci = img(c.image); if (ci) sg.append(ci);
-        const ss = h('div', 'stats');
-        for (const s of arr(c.stats)) { const x = h('div', 'stat', s.label); x.append(h('b', 'ellip', s.value)); ss.append(x); }
-        k.append(top, sg, ss);
-        if (c.climate) {
-          const cl = h('div', 'clim' + (c.climate.on ? ' on' : '')); cl.append(icon('fan'));
-          const t = h('div', '', 'Climate ' + (c.climate.on ? 'on' : 'off')); t.style.flex = 1;
-          t.append(h('small', '', c.climate.note || '')); cl.append(t);
-          if (c.climate.set) cl.append(h('span', 'dim', c.climate.set));
-          k.append(cl);
+        top.append(nm);
+        if (live) {
+          const bt = h('div', 'cbat'), pr = h('div', 'row');
+          const ba = h('span', 'batt' + (c.charging ? ' chg' : '')), bi = h('i'); bi.style.width = pct(c) + '%'; ba.append(bi);
+          pr.append(ba); if (c.charging) pr.append(icon('bolt', 'chgi'));
+          pr.append(h('span', 'pct' + (c.charging ? ' chg' : ''), pct(c) + '%'));
+          bt.append(pr, h('div', 'dim sub', [c.range, c.status].filter(Boolean).join(' · ')));
+          top.append(bt);
         }
+        const sg = h('div', 'stage'); const ci = img(c.image); if (ci) sg.append(ci);
+        k.append(top, sg);
+        if (arr(c.stats).length) {
+          const ss = h('div', 'stats');
+          for (const x of c.stats) { const e = h('div', 'stat', x.label); e.append(h('b', 'ellip', x.value)); ss.append(e); }
+          k.append(ss);
+        }
+        // Climate: one big button. Display-only until car control is wired (docs/decisions.md).
+        const cl = c.climate || null, on = !!(cl && cl.on);
+        const cb = h('div', 'climb' + (on ? ' on' : '') + (cl ? '' : ' nodata')); cb.dataset.act = 'climate';
+        const ring = h('span', 'fanr'); ring.append(icon('fan')); cb.append(ring);
+        const tx = h('div', 'ct', on ? 'Climate on' : 'Climate');
+        tx.append(h('small', 'ellip', cl ? (cl.note || (on ? 'Running' : 'Off')) : 'No live data'));
+        cb.append(tx);
+        if (cl && cl.set) cb.append(h('span', 'cset', cl.set));
+        k.append(cb);
+        const acts = h('div', 'acts');
+        const act = (name, ic, label, hot) => { const a = h('div', 'act' + (hot ? ' hot' : '')); a.dataset.act = name; a.append(icon(ic), h('span', '', label)); acts.append(a); };
+        const locked = c.locked;
+        act('lock', locked === false ? 'unlock' : 'lock', locked === undefined ? 'Lock' : locked ? 'Locked' : 'Unlocked', locked === false);
+        act('frunk', 'frunk', c.frunk === 'open' ? 'Frunk open' : 'Frunk', c.frunk === 'open');
+        act('trunk', 'trunk', c.trunk === 'open' ? 'Trunk open' : 'Trunk', c.trunk === 'open');
+        act('port', 'plug', c.charging ? 'Charging' : c.port === 'open' ? 'Port open' : 'Charge port', !!c.charging || c.port === 'open');
+        k.append(acts);
         g.append(k);
       }
       b.append(g);
@@ -364,7 +438,9 @@
       const gs = h('div', 'groups'), used = new Set();
       const groups = arr(p.groups).map(gr => ({ name: gr.name, items: cs.filter(c => arr(gr.members).includes(c.name)) }));
       groups.forEach(gr => gr.items.forEach(c => used.add(c.name)));
+      for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].items.length) groups.splice(i, 1);
       const rest = cs.filter(c => !used.has(c.name)); if (rest.length) groups.push({ name: groups.length ? 'Other' : 'Containers', items: rest });
+      if (groups.length === 1) gs.style.gridTemplateColumns = '1fr';
       for (const gr of groups) {
         const pn = h('div', 'panel'), top = h('div', 'between');
         const ok = gr.items.filter(c => c.state === 'healthy' || c.state === 'running').length;
@@ -387,16 +463,25 @@
     if (!sec._props) { try { sec._props = JSON.parse((sec.querySelector('script.wp') || {}).textContent || '{}'); } catch (e) { sec._props = {}; } }
     return sec._props;
   }
+  // A widget on a hidden tab is only marked dirty; it is drawn when its tab is shown. The A33
+  // then spends no time building DOM nobody sees (a services update every minute, the clock tick).
+  const dirty = new Set();
+  TF.perf = { draws: 0, ms: 0, skipped: 0 };
+  function visible(sec) { const pg = sec.closest('.page'); return !pg || pg.classList.contains('on'); }
   function draw(sec) {
     const r = R[sec.dataset.type];
     if (!r) return;
-    try { r(sec, state[sec.id] || {}, props(sec)); } catch (e) { console.error(sec.id, e); }
+    if (!visible(sec)) { dirty.add(sec); return; }
+    dirty.delete(sec);
+    const t = performance.now();
+    try { r(sec, state[sec.id] || {}, props(sec)); } catch (e) { fail(sec.id + ': ' + e); }
+    TF.perf.draws++; TF.perf.ms += performance.now() - t;
   }
   function rerenderTimed() {
     document.querySelectorAll('.w-agenda,.w-worldclock,.w-shows').forEach(draw);
   }
-  widgets.forEach(draw);
-  tickClock();
+  // Drawn after the tab bar has picked the first page, so hidden tabs start dirty.
+  function drawAll() { widgets.forEach(draw); }
 
   // ---- tabs -------------------------------------------------------------------------------
   const grid = document.getElementById('grid');
@@ -411,6 +496,7 @@
       if (mine) parent = s.dataset.for;
     });
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === (parent || id)));
+    dirty.forEach(sec => { if (visible(sec)) draw(sec); });
   }
   if (grid && grid.classList.contains('tabbed')) {
     const first = document.querySelector('.page') && document.querySelector('.page').dataset.page;
@@ -423,15 +509,25 @@
     const arm = () => { clearTimeout(idleT); idleT = setTimeout(() => show(first), idle); };
     addEventListener('pointerdown', arm, { passive: true });
   }
+  drawAll();
+  tickClock();
+  // Car and home controls are display-only for now: say so instead of doing nothing.
+  addEventListener('click', e => { if (e.target.closest('[data-act]')) window.toast('Controls are not connected yet'); });
 
   function connect() {
     const es = new EventSource('/api/stream/' + encodeURIComponent(TF.frame));
     es.onmessage = ev => {
+      TF.perf.msgs = (TF.perf.msgs || 0) + 1;
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.reload || (m.page_version && m.page_version !== TF.pageVersion)) { location.reload(); return; }
       if (!m.widget) return;
       const sec = document.getElementById('w-' + m.widget);
       if (!sec) return;
+      // The same message again (a reconnect replays every source) changes nothing: skip it.
+      const raw = JSON.stringify(m.data || {}), key = Object.keys(m.data || {}).sort().join();
+      sec._last = sec._last || {};
+      if (sec._last[key] === raw) { TF.perf.skipped++; return; }
+      sec._last[key] = raw;
       for (const [k, v] of Object.entries(m.data || {})) {
         if (typeof v === 'object' && v !== null) continue;
         const el = sec.querySelector('[data-field="' + k + '"]');
@@ -439,7 +535,7 @@
       }
       if (R[sec.dataset.type]) { state[sec.id] = Object.assign(state[sec.id] || {}, m.data || {}); draw(sec); }
     };
-    es.onerror = () => { es.close(); setTimeout(connect, 5000); };
+    es.onerror = () => { TF.perf.reconnects = (TF.perf.reconnects || 0) + 1; es.close(); setTimeout(connect, 5000); };
   }
   connect();
 
