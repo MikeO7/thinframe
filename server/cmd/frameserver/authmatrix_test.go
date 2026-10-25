@@ -93,6 +93,9 @@ func newEnv(t *testing.T) *tenv {
 	must(t, fh.Close())
 	ph, err := photos.New(photos.Folder{Root: pics}, filepath.Join(data, "cache"))
 	must(t, err)
+	must(t, os.MkdirAll(filepath.Join(data, "assets"), 0o755))
+	must(t, os.WriteFile(filepath.Join(data, "assets", "car.png"), []byte("\x89PNG\r\n\x1a\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(data, "assets", "x.svg"), []byte("<svg/>"), 0o644))
 	srv := api.New(st, api.Options{Token: token, Version: "test", Artifacts: artifacts.New(art), Photos: ph,
 		Weather: fakeWeather{}, Calendar: fakeCal{}})
 	for id, tok := range map[string]string{"kitchen": frameTok, "hall": hallTok, "adminf": "", "victim": ""} {
@@ -103,6 +106,7 @@ func newEnv(t *testing.T) *tenv {
 		})
 		must(t, err)
 	}
+	must(t, srv.SetSource("demo", []byte(`{"items":[]}`)))
 	ts := httptest.NewServer(handler(srv))
 	t.Cleanup(ts.Close)
 	e := &tenv{srv: srv, url: ts.URL}
@@ -261,6 +265,9 @@ func rows() []row {
 		{pattern: "GET /api/data/photo/next", method: "GET", path: "/api/data/photo/next?frame=kitchen", class: public, ok: 200},
 		{pattern: "GET /api/data/weather", method: "GET", path: "/api/data/weather", class: public, ok: 200},
 		{pattern: "GET /api/data/calendar", method: "GET", path: "/api/data/calendar", class: public, ok: 200},
+		{pattern: "GET /api/data/asset/{name}", method: "GET", path: "/api/data/asset/car.png", class: public, ok: 200},
+		{method: "GET", path: "/api/data/asset/x.svg", class: public, ok: 400},
+		{method: "GET", path: "/api/data/asset/..%2Fframes%2Fkitchen.json", class: public, ok: 400},
 		{pattern: "POST /api/frames/{id}/beacon", method: "POST", path: "/api/frames/kitchen/beacon", class: public, ok: 204, body: `{"latency_ms":12}`, ctype: "text/plain"},
 		{pattern: "POST /api/frames/{id}/alive", method: "POST", path: "/api/frames/kitchen/alive", class: public, ok: 204},
 		// pairing
@@ -281,6 +288,11 @@ func rows() []row {
 		{pattern: "GET /api/frames/{id}/reports/{name}", method: "GET", path: "/api/frames/kitchen/reports/latest", ghost: "/api/frames/ghost/reports/latest", class: bearer, ok: 200, prep: report("kitchen")},
 		// A plain GET is not an upgrade: 426 once authorized (TestWebSocketAuth dials for real).
 		{pattern: "GET /api/frames/{id}/ws", method: "GET", path: "/api/frames/kitchen/ws", ghost: "/api/frames/ghost/ws", class: frame, ok: http.StatusUpgradeRequired},
+		{pattern: "GET /api/sources", method: "GET", path: "/api/sources", class: bearer, ok: 200},
+		{pattern: "GET /api/sources/{key}", method: "GET", path: "/api/sources/demo", ghost: "/api/sources/ghost", class: bearer, ok: 200},
+		{pattern: "PUT /api/sources/{key}", method: "PUT", path: "/api/sources/demo", class: bearer, ok: 204, body: `{"items":[{"label":"a"}]}`, ctype: jsonT},
+		{pattern: "DELETE /api/sources/{key}", method: "DELETE", path: "/api/sources/gone", ghost: "/api/sources/ghost", class: bearer, ok: 204,
+			prep: func(e *tenv) { _ = e.srv.SetSource("gone", []byte(`{}`)) }},
 		{pattern: "GET /api/release", method: "GET", path: "/api/release", class: anyFrame, ok: 200},
 		{pattern: "GET /api/artifacts/{name}", method: "GET", path: "/api/artifacts/tfctl-armv7", ghost: "/api/artifacts/nope", class: anyFrame, ok: 200},
 		// admin

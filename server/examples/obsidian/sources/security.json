@@ -1,0 +1,3 @@
+{"badge": {"text": "Armed home", "state": "ok"},
+ "items": [{"label": "Front door", "value": "Locked", "icon": "lock", "state": "ok"}, {"label": "Back door", "value": "Locked", "icon": "lock", "state": "ok"}, {"label": "Garage", "value": "Closed", "icon": "garage", "state": "ok"}, {"label": "Windows", "value": "All shut", "icon": "window", "state": "ok"}, {"label": "Side gate", "value": "Open 4 min", "icon": "door", "state": "warn"}, {"label": "Leak sensors", "value": "Dry", "icon": "drop", "state": "ok"}],
+ "people": {"home": ["AB", "CD"], "text": "2 people home"}}

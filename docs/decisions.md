@@ -554,3 +554,22 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
 - Tried and dropped: iwd `[DriverQuirks] DefaultInterface=*` (keeps the driver's wlan0 instead of
   re-creating it). On the AIC8800 the frame then found no saved network and iwd exited [V
   2026-10-23, two boots].
+
+## Tabs, pushed sources, display-only controls (2026-10-25)
+- **Data is pushed, not fetched, for the new widgets.** Cars, rooms, shows and the like come from
+  services that need private credentials. The server stores named JSON sources (`PUT /api/sources/{key}`,
+  bearer) and replays them to the page; whatever talks to Home Assistant or a car API pushes there.
+  The server gains no connector code and no new dependency. Only `docker ps` over `ssh` is built in,
+  because it needs nothing but an ssh key [V on the owner's server, 2026-10-25].
+- **Personal data stays out of Git.** The repo ships the widgets, the theme and a demo with made-up
+  names; a real frame's layout and sources live in `DATA_DIR`. Images are `asset:` files there,
+  served publicly like the page (the frame's browser has no token), limited to raster images and
+  woff2 so a file opened directly cannot run script.
+- **Controls are display-only.** The page is public by design (cog has no token), so a button on it
+  that unlocks a car could be pressed by anyone on the LAN. Acting needs a per-frame credential on
+  the page plane first; until then the cards show state only.
+- **No font in the repo.** Inter is OFL but 300 KB+; the Obsidian theme uses it when the owner drops
+  `inter.woff2` into `DATA_DIR/assets` and falls back to DejaVu Sans, the frame's only font.
+- **No new crates or modules.** Rendering is the existing html/template plus page.js; tabs are CSS
+  pages toggled by class, no animation beyond opacity, for the Mali-400.
+

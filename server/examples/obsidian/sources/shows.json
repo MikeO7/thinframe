@@ -1,0 +1,10 @@
+{"upcoming": [
+  {"date": "@D0", "title": "Night Signal", "sub": "S2 · E5"},
+  {"date": "@D1", "title": "The Long Harbor", "sub": "S1 · E3"},
+  {"date": "@D3", "title": "Copper Hills", "sub": "S4 · E1, premiere"},
+  {"date": "@D3", "title": "Field Notes", "sub": "S3 · E8"},
+  {"date": "@D5", "title": "Static Bloom", "sub": "Movie"}],
+ "added": [
+  {"title": "Night Signal", "when": "S2 · E4 · yesterday"}, {"title": "Paper Moons", "when": "Movie · 2 days ago"},
+  {"title": "Field Notes", "when": "S3 · E7 · 3 days ago"}, {"title": "Low Tide", "when": "Movie · 4 days ago"},
+  {"title": "Copper Hills", "when": "S3 · 5 days ago"}, {"title": "Quiet Rooms", "when": "S1 · E2 · last week"}]}

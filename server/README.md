@@ -38,6 +38,35 @@ An unconfigured adapter answers 404. A failed fetch keeps showing the last good 
 The control socket's `hello` reply carries `time_unix`, `tz` (`$TZ`, else `/etc/localtime`, else UTC)
 and `server_version`.
 
+## Tabs, the Obsidian theme, and private data
+A layout may have `tabs` (`[{id,title,icon,parent,label}]`); each widget names its `tab`, and every
+tab is its own `cols x rows` grid. A tab with `parent` is a second page of that tab, picked with a
+segmented switch (`label` names it there). After `idle_s` seconds without a touch (default 90) the
+page returns to the first tab. `theme: "obsidian"` is the dark Apple-style look; it uses Inter if
+`DATA_DIR/assets/inter.woff2` exists (OFL, not shipped here), else DejaVu Sans.
+
+Widgets `hero agenda cars rooms climate list tiles energy shows worldclock services` draw from
+props plus pushed data (props per type: MCP `list_widgets`). Data comes from **sources**: named JSON
+objects you push, kept in `DATA_DIR/sources` and replayed when a page connects.
+
+| Endpoint | Auth | |
+|---|---|---|
+| `PUT /api/sources/{key}` | bearer | replace a source (JSON object, at most 256 KiB); pushed to every widget with `props.source == key` |
+| `GET /api/sources`, `GET /api/sources/{key}` | bearer | list, read |
+| `DELETE /api/sources/{key}` | bearer | forget |
+| `GET /api/data/asset/{name}` | public, like the page | PNG, JPEG, WebP, GIF or woff2 from `DATA_DIR/assets`; widgets say `asset:<name>` |
+
+`SERVICES_SSH=<host>` (native runs only: the container has no ssh) polls `docker ps` there every
+`SERVICES_EVERY` (1m) into the source `services`.
+
+What is yours stays out of this repo: names, rooms, containers and pictures go in the layout you PUT
+and in `DATA_DIR`, never in Git. `examples/obsidian/` is a demo with made-up names:
+`FRAME_TOKEN=... examples/obsidian/load.sh http://localhost:8080 demo`. Sources are server-wide,
+so load the demo on a server whose source keys you are not using.
+
+Controls (climate on, lock, scenes) are display-only: the page plane has no credentials, so a tap
+on it cannot be trusted to act on a car or a house (docs/decisions.md).
+
 ## MCP
 `/mcp`: streamable HTTP, stateless, `Authorization: Bearer $FRAME_TOKEN`. Speaks MCP
 **2026-07-28** (`server/discover`, no handshake) and falls back per client to 2025-11-25, 2025-06-18,

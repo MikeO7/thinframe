@@ -1,0 +1,8 @@
+{"rooms": [
+  {"name": "Living", "on": true, "lights": "3 of 4 on", "brightness": 70, "temp": "71°", "humidity": "42%", "occupied": true},
+  {"name": "Kitchen", "on": true, "lights": "2 on", "brightness": 100, "temp": "72°", "humidity": "45%"},
+  {"name": "Office", "on": true, "lights": "Desk", "brightness": 55, "temp": "70°", "humidity": "40%", "occupied": true},
+  {"name": "Bedroom", "on": false, "temp": "68°", "humidity": "44%"},
+  {"name": "Kids", "on": false, "temp": "69°", "humidity": "43%"},
+  {"name": "Patio", "on": false, "temp": "58°"}],
+ "scenes": [{"name": "Morning"}, {"name": "Focus", "active": true}, {"name": "Movie"}, {"name": "Away"}, {"name": "Night"}]}
