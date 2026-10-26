@@ -12,6 +12,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::FileExt;
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -78,6 +79,8 @@ const BG_COLOR: &str = "#0b0d10";
 /// is 300 MB with the page up; this keeps the page well inside it. No kill threshold: a hung
 /// page is the server watchdog's job (restart-kiosk).
 const WEB_MEM_LIMIT_MIB: u32 = 256;
+/// Mesa's compiled shaders, kept across cog restarts and boots (see command()).
+const SHADER_CACHE: &str = "/data/thinframe/shaders";
 
 /// At boot cog first waits this long for the server, under the splash (which shows the same
 /// "warming up"), and then opens the dashboard directly. Opening the status page first and
@@ -405,6 +408,13 @@ impl Kiosk {
             .env("LIBSEAT_BACKEND", "seatd")
             .env("DBUS_SESSION_BUS_ADDRESS", BUS)
             .stdin(Stdio::null());
+        // Mesa keeps compiled shaders under $HOME/.cache, which is on the read-only root, so it
+        // compiled them all again at every cog start (a wake restarts cog). Only the shader
+        // cache goes to /data: WebKit's web cache stays in memory, to spare the card.
+        if Path::new(SHADER_CACHE).parent().is_some_and(Path::is_dir) {
+            c.env("MESA_SHADER_CACHE_DIR", SHADER_CACHE)
+                .env("MESA_SHADER_CACHE_MAX_SIZE", "32M");
+        }
         if crate::dbg::on() {
             c.env("G_MESSAGES_DEBUG", "all");
             let args: Vec<String> = c
@@ -1009,7 +1019,7 @@ mod tests {
         // The only test that touches SCREEN_ON.
         let mut k = Kiosk::new(&Config::default());
         let t0 = Instant::now();
-        let mut feed = |k: &mut Kiosk, v: u8, from: u64, secs: u64| {
+        let feed = |k: &mut Kiosk, v: u8, from: u64, secs: u64| {
             for s in from..from + secs {
                 if k.dark.step(v, t0 + Duration::from_secs(s)).is_some() {
                     k.apply_auto("light");
