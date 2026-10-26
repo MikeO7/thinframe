@@ -40,6 +40,18 @@ docker run --rm -i \
 			done
 		fi
 		make -s -C "$BR" O=$O tfctl-dirclean	# local package: always take the freshly staged binary
+		# Buildroot never rebuilds a package whose recipe or patches changed. Do it here, per tree:
+		# the debug tree kept the WPA3-offering Wi-Fi driver for days and could not join (2026-10-26).
+		for d in /src/image/buildroot/package/*/ /src/image/buildroot/patches/*/; do
+			p=$(basename "$d"); [ "$p" != tfctl ] || continue
+			k=$O/.thinframe-$(basename "$(dirname "$d")")-$p.sha
+			h=$(find "$d" -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
+			[ "$(cat "$k" 2>/dev/null)" != "$h" ] || continue
+			if ls -d $O/build/$p-* >/dev/null 2>&1; then
+				echo "buildroot: $p changed, rebuilding it"; make -s -C "$BR" O=$O $p-dirclean
+			fi
+			echo "$h" > "$k"
+		done
 		# WebKit: ~4.5 GB per compile job. GeneratedSerializers.cpp alone OOM-killed cc1plus at 5 jobs
 		# in 16 GB (8 jobs failed earlier too); GitHub runners have 16 GB as well.
 		if [ -z "$JOBS" ]; then
