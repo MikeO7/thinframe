@@ -509,18 +509,48 @@
     const idle = Math.max(10, Number(grid.dataset.idle || 90)) * 1000;
     const arm = () => { clearTimeout(idleT); idleT = setTimeout(() => show(first), idle); };
     addEventListener('pointerdown', arm, { passive: true });
+    addEventListener('tf-activity', arm);
   }
   drawAll();
   tickClock();
   // Car and home controls are display-only for now: say so instead of doing nothing.
   addEventListener('click', e => { if (e.target.closest('[data-act]')) window.toast('Controls are not connected yet'); });
 
+  // App widgets: sandboxed iframes running the app SDK (server/internal/api/appsdk.js). They
+  // reach the server through this page, so the page keeps the only event stream.
+  const appFrames = Array.from(document.querySelectorAll('iframe.app'));
+  const toApps = m => appFrames.forEach(f => f.contentWindow && f.contentWindow.postMessage({ tf: 1, op: 'server', msg: m }, '*'));
+  if (appFrames.length) {
+    addEventListener('message', e => {
+      const f = appFrames.find(x => x.contentWindow === e.source), m = e.data;
+      if (!f || !m || m.tf !== 1) return;
+      const sec = f.closest('.w'), name = f.dataset.app;
+      if (m.op === 'hello') {
+        let p = {};
+        try { p = JSON.parse(sec.querySelector('script.wp').textContent); } catch { /* no props */ }
+        e.source.postMessage({ tf: 1, op: 'init', frame: TF.frame, widget: sec.id.slice(2), props: p.props || {} }, '*');
+      } else if (m.op === 'activity') {
+        dispatchEvent(new Event('tf-activity'));
+      } else if (m.op === 'fetch') {
+        const reply = (status, body) => e.source.postMessage({ tf: 1, op: 'reply', id: m.id, status, body }, '*');
+        const path = String(m.path || ''), fr = encodeURIComponent(TF.frame);
+        const ok = /^\/api\/data\/source\/[a-z0-9_-]+$/.test(path) || path === '/api/frames/' + fr + '/emit' ||
+          path === '/api/apps/' + name + '/state' || path.startsWith('/api/apps/' + name + '/state/');
+        if (!ok || (m.method !== 'GET' && m.method !== 'POST')) { reply(403, 'not allowed: ' + m.method + ' ' + path); return; }
+        fetch(path, m.method === 'POST' ? { method: 'POST', body: String(m.body ?? '') } : {})
+          .then(r => r.text().then(t => reply(r.status, t)), err => reply(0, String(err)));
+      }
+    });
+  }
+
   function connect() {
-    const es = new EventSource('/api/stream/' + encodeURIComponent(TF.frame));
+    const es = new EventSource('/api/stream/' + encodeURIComponent(TF.frame) + (appFrames.length ? '?apps=1' : ''));
     es.onmessage = ev => {
       TF.perf.msgs = (TF.perf.msgs || 0) + 1;
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.reload || (m.page_version && m.page_version !== TF.pageVersion)) { location.reload(); return; }
+      if (m.source || m.app_state || m.app_event) { toApps(m); return; }
+      if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) f.src = f.src; }); return; }
       if (!m.widget) return;
       const sec = document.getElementById('w-' + m.widget);
       if (!sec) return;

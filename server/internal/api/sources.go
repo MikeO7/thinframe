@@ -177,6 +177,7 @@ func (s *Server) SetSource(key string, raw []byte) error {
 			}
 		}
 	}
+	s.sse.publishApps("", map[string]any{"source": key, "data": data})
 	return nil
 }
 

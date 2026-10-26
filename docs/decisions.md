@@ -226,10 +226,11 @@ Initial tool list (TASK S7):
 | `list_frames` | ids, ip, last heartbeat, versions, slot, temp, mem |
 | `get_frame` / `set_frame_config` | read / change url, rotation, brightness, page_version, tags |
 | `frame_action` | reboot, restart-kiosk, update-software, update-system, rollback |
-| `get_screenshot` | PNG from the sim (and from real frames once TASK 12 adds a capture path) |
+| `screenshot` | PNG of what a real frame's panel shows (2026-10-26, below; the sim had `get_screenshot`) |
 | `list_widgets` / `set_layout` | dashboard composition stored per frame as JSON the page reads |
 | `get_logs` | last N heartbeats and agent events for a frame |
 | `release_status` | what system/software versions the container carries and which frames lag |
+| apps (2026-10-26) | `app_guide`, `put_app`, `get_app`, `list_apps`, `rollback_app`, `delete_app`, `show_app`, `get_app_events`, `get_app_state`, `set_app_state`, `send_to_app`, `set_hook`/`list_hooks`/`delete_hook`, `set_poll`/`list_polls`/`delete_poll` (section "Apps", below) |
 
 Writes that touch many frames (`update_system` with no id) require `confirm: true`.
 
@@ -629,3 +630,53 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   (`/run/thinframe/cog-bus`) and the kiosk sends `cogctl open URL`, falling back to a restart.
   Settings came up in 0.9 s this way; by restart it took 8 s (2.2 s to end cog, 3.9 s of
   splash, 2 s to load) [V 2026-10-26].
+
+## Apps: MCP writes any page, sandboxed (2026-10-26)
+- Widgets cover what someone thought of in advance. For everything else MCP writes an **app**: a
+  folder of HTML, CSS, JS, images and fonts (index.html required; up to 64 files and 4 MB). The
+  frame shows it full screen (`show_app` sets the frame's page URL to
+  `/apps/<name>/index.html?frame=<id>`) or in any grid cell as the widget `app`. `app_guide` is
+  the reference an MCP client reads first. [V 2026-10-26: Go tests, and Chromium (Playwright)
+  driving both modes against a local server.]
+- **Versions.** Every `put_app` is a new version in `DATA_DIR/apps/<name>/v<N>/`; the last 10 are
+  kept and `rollback_app` switches back. Pages showing the app reload on their own after a put or
+  rollback. `delete_app` is refused while a frame shows the app, so no frame loses its page.
+  `put_app merge:true` sends only the changed files.
+- **Sandbox.** Every app document is served with `Content-Security-Policy: sandbox allow-scripts
+  allow-forms ...` (no `allow-same-origin`), full screen as well as in the widget's iframe. It
+  runs in an opaque origin: it cannot read this server's pages or the admin page's cached Basic
+  credentials, post admin forms (they refuse cross-origin) or reach `/api` with a token it does
+  not have. Content written by a model that read the web stays harmless to the server. Cost:
+  no localStorage or cookies (they throw), hence server-side app state.
+- **SDK.** The server injects `/apps-sdk.js` first into every HTML file: `window.thinframe` with
+  `data`/`on` (sources, live), `emit` (buttons), `state` (JSON per app on the server, 64 keys,
+  64 KB, pushed to every frame), `listen` (events from MCP `send_to_app`). Full screen it opens
+  its own event stream (`/api/stream/<id>?apps=1`) and sends the page watchdog's alive beacon.
+  In a widget it asks the dashboard over `postMessage`, which keeps the page's one stream: WebKit
+  allows six connections per host, so one stream per app widget would starve the page. The
+  dashboard forwards only an allowlist (sources, its own frame's emit, its app's state). [U] the
+  frame's WPE WebKit behaves like Chromium here (CSP sandbox on a top-level document, opaque-
+  origin fetch with `Access-Control-Allow-Origin: *`): checked on the frame at deploy.
+- **Public endpoints**, like the dashboard plane (the page has no token): `/apps/*`,
+  `/apps-sdk.js`, `GET /api/data/source/<key>`, `GET|POST /api/apps/<name>/state[/<key>]`,
+  `POST /api/frames/<id>/emit`. They answer any origin. Emit is limited to 20 per 10 s per frame,
+  state writes to 80 per 10 s per app; emit needs an existing frame and never creates one.
+  Sources become readable by anyone on the LAN, as they already were through any page's stream.
+- **Buttons and outside APIs without secrets in pages.** A *hook* (`set_hook`) is a named HTTP
+  request the server makes when an app emits that name: URL, method, headers (tokens) and a body
+  template with `{{data}}`. A *poll* (`set_poll`) fetches a URL every 15 s or more into a source.
+  Both live in `DATA_DIR/hooks.json` / `polls.json` (mode 600), are set only over MCP, and are
+  listed with header values redacted. The server makes requests to URLs the owner chose; a page
+  can only pick a hook by name.
+- **Errors.** The SDK reports uncaught errors and rejections as `app-error` emits (5 per load),
+  so `get_app_events` shows what broke after a put.
+
+## Screenshots of the real frame (2026-10-26)
+- The `screenshot` action makes tfctl read the scanned-out framebuffer through DRM (no GPU
+  readback), turn it upright in the page orientation and POST raw RGB to
+  `/api/frames/<id>/screenshot?w=&h=` with its paired token. The server stores the last 10 per
+  frame as PNG; MCP `screenshot` waits up to 25 s and returns the image (scaled to 800 px wide by
+  default). [V 2026-10-26: capture on the frame 342 ms, 1280x800, upright, colours right;
+  upload path tested in Go.]
+- An MCP client can now see what it built: `put_app`, `show_app`, `screenshot`, fix, repeat.
+

@@ -270,7 +270,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
-	ch, unsub := s.sse.subscribe(id)
+	// An app shown full screen runs in a sandbox (an opaque origin), so its stream is a
+	// cross-origin request. The stream is public and read-only like the page.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	ch, unsub := s.sse.subscribeAs(id, r.URL.Query().Get("apps") == "1")
 	defer unsub()
 	// Send the headers now: the client sees the stream open without waiting for the first event.
 	w.WriteHeader(http.StatusOK)
@@ -407,6 +410,7 @@ func (s *Server) agendaData(now time.Time) map[string]any {
 // handleDataWeather serves GET /api/data/weather. The page never calls a third party:
 // the server fetches and caches, the page reads this or the SSE stream.
 func (s *Server) handleDataWeather(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*") // apps read it from their sandbox
 	if s.opts.Weather == nil {
 		http.Error(w, "no weather source configured (WEATHER_LAT, WEATHER_LON)", http.StatusNotFound)
 		return
@@ -417,6 +421,7 @@ func (s *Server) handleDataWeather(w http.ResponseWriter, _ *http.Request) {
 
 // handleDataCalendar serves GET /api/data/calendar.
 func (s *Server) handleDataCalendar(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*") // apps read it from their sandbox
 	if s.opts.Calendar == nil {
 		http.Error(w, "no calendar source configured (CALENDAR_ICS_URL)", http.StatusNotFound)
 		return

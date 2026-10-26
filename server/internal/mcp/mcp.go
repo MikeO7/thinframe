@@ -20,7 +20,9 @@ import (
 const Instructions = "thinframe manages wall-mounted picture frames. Each frame shows a dashboard " +
 	"rendered by this server. Start with list_frames. Change a frame with set_frame_config " +
 	"(rotation, brightness, schedule, splash) or set_layout (see list_widgets). frame_action reboots, " +
-	"updates, rolls back or runs bench (touch to paint, result in get_logs, samples in list_frames); omitting id targets every frame and needs confirm=true."
+	"updates, rolls back or runs bench (touch to paint, result in get_logs, samples in list_frames); omitting id targets every frame and needs confirm=true. " +
+	"For anything the widgets cannot do, write an app: any web page (HTML/CSS/JS) with live data, buttons and server-side API calls, " +
+	"shown full screen (show_app) or as a widget. Read app_guide, then put_app, show_app and screenshot to see the result."
 
 // Handler returns the /mcp http.Handler with bearer auth matching the REST API.
 // Streamable HTTP, stateless: speaks MCP 2026-07-28 (server/discover, per-request _meta) and the
@@ -34,7 +36,7 @@ func Handler(s *api.Server, version string) http.Handler {
 		// The spec requires Origin validation: a browser page from another site is refused.
 		// CLI clients send no Origin and pass.
 		CrossOriginProtection: http.NewCrossOriginProtection(),
-		MaxRequestBodyBytes:   1 << 20,
+		MaxRequestBodyBytes:   8 << 20, // put_app carries up to 4 MB of files, base64 for binaries
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.TokenOK(r) {
@@ -88,6 +90,7 @@ func toOut(s *api.Server, f store.Frame) frameOut {
 }
 
 func register(m *sdk.Server, s *api.Server) {
+	registerApps(m, s)
 	sdk.AddTool(m, tool("list_frames", "List frames", "List every known frame with online state, last heartbeat (ip, memory, temperature, latency, versions) and config.", readOnly),
 		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, framesOut, error) {
 			fs := s.Store.List()
@@ -217,6 +220,7 @@ func register(m *sdk.Server, s *api.Server) {
 				"images":  "http(s) URL or asset:<file> from DATA_DIR/assets",
 				"tabs":    "optional tabs [{id,title,icon,parent}] (icons: " + strings.Join(widgets.IconNames(), ", ") + "); widgets set tab; every tab shares cols x rows; idle_s returns to the first tab",
 				"themes":  "light, dark, obsidian",
+				"apps":    "type app shows an app (put_app; see app_guide) in the cell: any HTML/CSS/JS, live data and buttons",
 				"grid":    "cols x rows (1..12 each); widgets have x,y,w,h in cells and must not overlap",
 				"example": store.DefaultLayout(),
 			}

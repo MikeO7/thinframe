@@ -21,7 +21,7 @@ var files embed.FS
 // Known widget types. Adding one = a template file named <type>.html (and, for widgets fed
 // by a data source, a renderer in page.js).
 var Types = []string{"clock", "photo", "weather", "calendar", "status", "text", "iframe",
-	"hero", "forecast", "agenda", "cars", "rooms", "climate", "list", "tiles", "energy", "shows", "worldclock", "services"}
+	"hero", "forecast", "agenda", "cars", "rooms", "climate", "list", "tiles", "energy", "shows", "worldclock", "services", "app"}
 
 // Props documents each type's props (MCP list_widgets, server/README.md). Types marked
 // "source" take their data from props.source: a key pushed with PUT /api/sources/{key}.
@@ -39,6 +39,7 @@ var Props = map[string]string{
 	"energy":     "source; data: now_kw, parts [{label,kw}], hourly [24 kW], hour, today",
 	"shows":      "title, part upcoming|added, max, source; data: upcoming [{date YYYY-MM-DD,title,sub,image}], added [{title,when,image}]",
 	"worldclock": "title, zones [{label,tz}]",
+	"app":        "app (an app stored with put_app), props (object the app reads as thinframe.props); the app fills the cell, sandboxed (MCP app_guide)",
 	"services":   "title, groups [{name,members [container names]}], source (default feed: services); data: containers [{name,state,note}], host {name,meters [{label,pct,text}],note}",
 }
 
@@ -72,6 +73,14 @@ var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
 	// relative "#ZgotmplZ", which loads this dashboard inside its own iframe.
 	"simrem": func(h int) float64 { return float64(h) / 80 },
 	"icon":   func(name string) template.HTML { return template.HTML(Icons[name]) }, //nolint:gosec // constant table
+	// An app widget's document; the name is checked by Validate (a lowercase id).
+	"appsrc": func(w store.Widget) any {
+		n, _ := w.Props["app"].(string)
+		if !store.ValidID(n) {
+			return template.URL("about:blank")
+		}
+		return "/apps/" + n + "/index.html"
+	},
 	"iframesrc": func(w store.Widget) any {
 		if s, err := iframeSrc(w); err == nil && s != "" {
 			return s
@@ -243,6 +252,16 @@ func Validate(l store.Layout) error {
 		if w.Type == "iframe" {
 			if _, err := iframeSrc(w); err != nil {
 				return fmt.Errorf("widget %s: %w", w.ID, err)
+			}
+		}
+		if w.Type == "app" {
+			if n, _ := w.Props["app"].(string); !store.ValidID(n) {
+				return fmt.Errorf("widget %s: props.app must name an app (a lowercase id), got %q", w.ID, fmt.Sprint(w.Props["app"]))
+			}
+			if p, ok := w.Props["props"]; ok {
+				if _, obj := p.(map[string]any); !obj {
+					return fmt.Errorf("widget %s: props.props must be an object", w.ID)
+				}
 			}
 		}
 		for _, p := range []string{"source", "health"} {

@@ -7,6 +7,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:
 .w{background:var(--card);border-radius:1.5vmin;padding:2vmin;overflow:hidden;position:relative;transition:opacity .25s ease}
 .w.touched{opacity:.7}
 .w-photo{padding:0}
+.w.w-app{padding:0;background:none}
 .w-photo img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .6s ease;will-change:opacity}
 .clock-time{font-size:min(16vh,20vw);font-weight:200;letter-spacing:-.03em;line-height:1}
 .clock-date{font-size:3.5vh;color:var(--dim);margin-top:1vh}
