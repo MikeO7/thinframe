@@ -270,10 +270,13 @@ impl Agent {
     }
 
     fn flush_events(&self, c: &mut ws::Client) -> io::Result<()> {
-        let queued: Vec<(String, String)> = match self.events.lock() {
+        let mut queued: Vec<(String, String)> = match self.events.lock() {
             Ok(mut q) => q.drain(..).collect(),
             Err(_) => return Ok(()),
         };
+        if let Ok(mut q) = crate::kiosk::EVENTS.lock() {
+            queued.extend(q.drain(..));
+        }
         for (kind, text) in queued {
             let v = Value::obj()
                 .set("type", "event")
@@ -526,6 +529,13 @@ impl Agent {
             .set("type", kind)
             .set("frame_id", self.cfg.frame_id.as_str())
             .extend(status::collect().to_json(self.page_url(), SCREEN_ON.load(Ordering::SeqCst)))
+            .set(
+                "light",
+                match crate::kiosk::LIGHT.load(Ordering::Relaxed) {
+                    255 => None,
+                    v => Some(u64::from(v)),
+                },
+            )
     }
 
     pub fn hello(&self) -> Value {

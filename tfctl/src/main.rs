@@ -51,6 +51,7 @@ mod retro;
 mod screen;
 mod screenshot;
 mod sdf;
+mod sense;
 mod settings;
 mod seventies;
 mod sha1;

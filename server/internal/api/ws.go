@@ -110,6 +110,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if ev.Kind == "screenshot" {
 				s.shotFailed(id, ev.Text)
 			}
+			// The light sensor saw a hand (wave) or a shadow (motion): the page acts on a wave.
+			if ev.Kind == "light" {
+				s.sse.publish(id, map[string]any{"gesture": strings.Fields(ev.Text + " x")[0]})
+			}
 		}
 	}
 }

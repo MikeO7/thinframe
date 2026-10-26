@@ -31,6 +31,10 @@ type Config struct {
 	SplashBG        string   `json:"splash_bg,omitempty"`   // "#rrggbb"
 	SplashPNG       string   `json:"splash_png,omitempty"`  // base64 PNG, at most MaxSplashPNG bytes decoded
 	Debug           bool     `json:"debug"`                 // tfctl logs everything and reports on connect
+	// The light sensor beyond "dark room = off" (tfctl sense.rs).
+	AutoBrightness bool `json:"auto_brightness"` // backlight follows the room light, up to Brightness
+	Wave           bool `json:"wave"`            // a hand over the sensor wakes the screen, or turns the page to the next tab
+	MotionWake     bool `json:"motion_wake"`     // a shadow passing wakes the screen (lamp-lit rooms; experimental)
 }
 
 // Dir is where the store keeps its files (<data>/frames).
@@ -52,6 +56,7 @@ type Heartbeat struct {
 	ScreenState   string    `json:"screen_state"`
 	CogPID        int       `json:"cog_pid"`
 	LoadAvg       float64   `json:"load_avg"`
+	Light         *int      `json:"light,omitempty"` // light sensor 0..63 (dark room 0..3, lit 60..62)
 }
 
 // Touch is the page's own touch-to-paint measurement (its beacon), kept beside the heartbeat so a

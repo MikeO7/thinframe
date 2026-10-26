@@ -730,3 +730,23 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   would hold until the next schedule change, all night. The page the wake reloads gets the ring
   from the replay on connect. [U] time from ring to picture on the frame: cog restarts on wake.
 - Protect's public events carry no face names, so "who is it" is the live picture.
+
+## More from the light sensor: wave, motion, auto-brightness (2026-10-26)
+- The owner asked for "a motion sensor". The PF1007L has one analog light sensor (LRADC0, 6 bits;
+  light.rs), no PIR or proximity part. tfctl now reads it 10 times a second (it was once a
+  second; the kiosk loop passes every 100 ms when the sensor exists) and `sense.rs` derives:
+  - **Wave** (`wave`): a dip to a quarter of a lit baseline (at least 12) for 0.15 to 1.5 s, then
+    back. Off screen: on for 60 s like a touch. On: the page turns to the next tab (frame event
+    `light wave`, the server relays `{"gesture":"wave"}`), or closes a camera view.
+    [D] upstream E064: 60..62 lit, 7..14 partly covered, 0..2 covered; [U] on this frame.
+  - **Motion** (`motion_wake`, experimental): the median of the last 0.3 s moves 3 counts and 8 %
+    from the baseline, once per 10 s, only with a baseline of 8..57. A bright room reads 60..62,
+    the converter's top, where a passing shadow changes nothing, so motion works in lamp-lit
+    rooms only. Each detection is a `frame:light motion <value>` event in get_logs, to tune by.
+    It wakes the screen when the room is not dark (e.g. off by schedule). [U]
+  - **Auto-brightness** (`auto_brightness`): the backlight follows the room light in the vendor's
+    bands (10/17/…/59 → 25 % to 100 % of `brightness`), 4 points a second at most.
+- [V 2026-10-26] In the dark office at night the sensor read 0 in ~2,000 reads over 20 s with
+  the backlight on: the panel's own light does not reach the sensor, so auto-brightness cannot
+  chase itself.
+- Off by default; the server's frame config turns each on (MCP `set_frame_config`).
