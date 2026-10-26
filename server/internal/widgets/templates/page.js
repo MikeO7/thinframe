@@ -76,13 +76,14 @@
     fog: '<path d="M7 13h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 5.6 3.8 3.8 0 0 0 7 13z"/><path d="M4 17h16M7 21h10"/>',
     rain: '<path d="M7 14h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 6.6 3.8 3.8 0 0 0 7 14z"/><path d="M8 17l-1 3M12.5 17l-1 3M17 17l-1 3"/>',
     snow: '<path d="M7 14h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 6.6 3.8 3.8 0 0 0 7 14z"/><path d="M8 18h.01M12 20h.01M16 18h.01M10 22h.01M14 22h.01"/>',
+    moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
     storm: '<path d="M7 14h10.5a3.5 3.5 0 0 0 .4-7A5.5 5.5 0 0 0 7.4 6.6 3.8 3.8 0 0 0 7 14z"/><path d="M12.5 15l-2 3.5h3l-2 3.5"/>'
   };
   // WMO weather code -> icon (open-meteo).
-  function wxIcon(c) {
+  function wxIcon(c, night) {
     c = Number(c);
-    if (c <= 1) return 'sun';
-    if (c === 2) return 'partsun';
+    if (c <= 1) return night ? 'moon' : 'sun';
+    if (c === 2) return night ? 'cloud' : 'partsun';
     if (c === 3) return 'cloud';
     if (c === 45 || c === 48) return 'fog';
     if ((c >= 71 && c <= 77) || c === 85 || c === 86) return 'snow';
@@ -181,7 +182,7 @@
       const wx = sec.querySelector('.hero-wx'), has = d.temp !== undefined && d.temp !== '';
       wx.hidden = !has;
       if (has) {
-        const ic = sec.querySelector('.wx-ic'); ic.textContent = ''; ic.append(icon(wxIcon(d.code), 'wx'));
+        const ic = sec.querySelector('.wx-ic'); ic.textContent = ''; ic.append(icon(wxIcon(d.code, d.night), 'wx'));
         const sub = [d.desc ? d.desc[0].toUpperCase() + d.desc.slice(1) : '', num(d.hi) !== null ? 'H ' + d.hi + '°  L ' + d.lo + '°' : ''];
         sec.querySelector('.hero-sub').textContent = sub.filter(Boolean).join(' · ');
       }

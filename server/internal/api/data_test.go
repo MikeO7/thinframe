@@ -466,11 +466,11 @@ func TestConfigCarriesArtifactVersions(t *testing.T) {
 
 // The daily block becomes the forecast; °F is applied when the server is set to it.
 func TestOpenMeteoForecast(t *testing.T) {
-	ts, _, query := fakeOpenMeteo(t, 200, `{"current":{"temperature_2m":20,"weather_code":2},
+	ts, _, query := fakeOpenMeteo(t, 200, `{"current":{"temperature_2m":20,"weather_code":2,"is_day":0},
 		"daily":{"time":["2026-10-25","2026-10-26"],"weather_code":[2,61],"temperature_2m_max":[22.2,15],"temperature_2m_min":[10,8.4]}}`)
 	o := &OpenMeteo{Lat: 1, Lon: 2, BaseURL: ts.URL}
 	wx, err := o.Current()
-	if err != nil || len(wx.Days) != 2 || wx.Days[1].Code != 61 || wx.Days[0].MaxC != 22.2 || wx.Code != 2 {
+	if err != nil || len(wx.Days) != 2 || wx.Days[1].Code != 61 || wx.Days[0].MaxC != 22.2 || wx.Code != 2 || !wx.Night {
 		t.Fatalf("got %+v, %v", wx, err)
 	}
 	if q, _ := query.Load().(string); !strings.Contains(q, "daily=weather_code,temperature_2m_max,temperature_2m_min") || !strings.Contains(q, "forecast_days=7") {

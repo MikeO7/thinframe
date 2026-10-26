@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -313,6 +314,9 @@ func (s *Server) recordHeartbeatSSE(f store.Frame) {
 // A stale reading (fetch failed, cache still holds one) is shown rather than an error.
 func (s *Server) weatherData() map[string]any {
 	wx, err := s.opts.Weather.Current()
+	if err != nil {
+		log.Printf("weather: %v", err)
+	}
 	if err != nil && wx.Desc == "" {
 		return map[string]any{"temp": "", "desc": "weather unavailable"}
 	}
@@ -322,7 +326,7 @@ func (s *Server) weatherData() map[string]any {
 		}
 		return int(math.Round(c))
 	}
-	out := map[string]any{"temp": strconv.Itoa(deg(wx.TempC)), "desc": strings.ToLower(wx.Desc), "code": wx.Code}
+	out := map[string]any{"temp": strconv.Itoa(deg(wx.TempC)), "desc": strings.ToLower(wx.Desc), "code": wx.Code, "night": wx.Night}
 	days := make([]map[string]any, 0, len(wx.Days))
 	for _, d := range wx.Days {
 		days = append(days, map[string]any{"date": d.Date, "code": d.Code, "hi": deg(d.MaxC), "lo": deg(d.MinC)})
@@ -336,6 +340,9 @@ func (s *Server) weatherData() map[string]any {
 // calendarData is the calendar widget's fields, shared by SSE and /api/data/calendar.
 func (s *Server) calendarData(now time.Time) map[string]any {
 	evs, err := s.opts.Calendar.Upcoming(now, 3)
+	if err != nil {
+		log.Printf("calendar: %v", err)
+	}
 	data := map[string]any{"l1": "", "l2": "", "l3": ""}
 	for i, e := range evs {
 		data["l"+strconv.Itoa(i+1)] = e.Line(now)
