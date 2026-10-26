@@ -12,6 +12,7 @@
 //!   tfctl splash [--png FILE] [STATUS]  draw the boot splash on the DRM card that has a panel, hold it until SIGTERM (TASK 15)
 //!   tfctl wifi SSID PSK   write iwd profile, reconnect
 //!   tfctl status     one screen: uptime, ip, wifi, mem, cog pid, url, temp
+//!   tfctl screenshot FILE  write what the panel shows, page orientation, as a P6 PPM (root)
 //!   tfctl set KEY VALUE   rewrite one key in /etc/thinframe.conf (first pairing)
 //!
 //! Config: /etc/thinframe.conf (KEY=VALUE, see image/rootfs/etc/thinframe.conf), or $TFCTL_CONF.
@@ -48,6 +49,7 @@ mod rendercache;
 mod report;
 mod retro;
 mod screen;
+mod screenshot;
 mod sdf;
 mod settings;
 mod seventies;
@@ -73,7 +75,7 @@ mod fuzz;
 fn usage() -> ExitCode {
     eprintln!(
         "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
-         wifi SSID PSK|status|light|bench [TAPS]|set KEY VALUE>"
+         wifi SSID PSK|status|screenshot FILE|light|bench [TAPS]|set KEY VALUE>"
     );
     ExitCode::from(2)
 }
@@ -124,6 +126,7 @@ fn main() -> ExitCode {
         Some("splash") => splash::run(&cfg, args.get(1..).unwrap_or_default()),
         Some("wifi") if args.len() == 3 => wifi::run(&args[1], &args[2]),
         Some("status") => status::run(&cfg),
+        Some("screenshot") if args.len() == 2 => screenshot::run(&cfg, &args[1]),
         Some("light") => light::run(),
         Some("bench") => bench::run(&cfg, &args[1..]),
         Some("set") if args.len() == 3 => config::save_overrides(&conf, &[(&args[1], &args[2])]),

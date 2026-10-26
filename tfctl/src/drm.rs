@@ -5,6 +5,7 @@
 //! Whoever opens the device while no one is master becomes master. The splash drops master
 //! (`drop_master`) before cog starts but keeps its buffer scanned out, so the picture stays
 //! until cog sets its own (`shown` turns false); then the kiosk drops the `Display`.
+//! `capture` reads back whatever buffer is scanned out (screenshot.rs).
 #[cfg(not(target_os = "linux"))]
 use std::io;
 
@@ -152,11 +153,14 @@ mod linux {
     const DROP_MASTER: c_ulong = (0x64 << 8) | 0x1f;
     const GETENCODER: c_ulong = iowr(0xA6, size_of::<GetEncoder>());
     const GETCONNECTOR: c_ulong = iowr(0xA7, size_of::<GetConnector>());
+    const GETFB: c_ulong = iowr(0xAD, size_of::<FbCmd>());
     const ADDFB: c_ulong = iowr(0xAE, size_of::<FbCmd>());
     const RMFB: c_ulong = iowr(0xAF, size_of::<u32>());
     const CREATE_DUMB: c_ulong = iowr(0xB2, size_of::<CreateDumb>());
     const MAP_DUMB: c_ulong = iowr(0xB3, size_of::<MapDumb>());
     const DESTROY_DUMB: c_ulong = iowr(0xB4, size_of::<u32>());
+    /// `_IOW('d', 0x09, struct drm_gem_close)`: handle + pad.
+    const GEM_CLOSE: c_ulong = (1 << 30) | (8 << 16) | (0x64 << 8) | 0x09;
     const CONNECTED: u32 = 1;
     const TYPE_PREFERRED: u32 = 1 << 3;
 
@@ -339,6 +343,102 @@ mod linux {
         }
     }
 
+    /// The picture on the first CRTC of `path` that scans out a framebuffer, as packed
+    /// XRGB8888 rows (width*height, panel orientation), read through a dumb mapping: on the
+    /// A33 Mesa kmsro allocates cog's scanout buffers as dumb buffers on the display card and
+    /// imports them into lima. Needs root (GETFB hands a GEM handle only to the master or
+    /// CAP_SYS_ADMIN), not master: cog keeps the screen.
+    pub fn capture(path: &str) -> io::Result<(Mode, Vec<u32>)> {
+        let file = OpenOptions::new().read(true).open(path)?;
+        let fd = file.as_raw_fd();
+        // Opening while no one is master (cog between restarts) made us master; give it back
+        // at once so cog's next open still gets it.
+        let mut none = 0u32;
+        let _ = call(fd, DROP_MASTER, &mut none, "DROP_MASTER");
+        let mut res = CardRes::default();
+        call(fd, GETRESOURCES, &mut res, "GETRESOURCES")?;
+        let mut crtcs = vec![0u32; res.count_crtcs as usize];
+        let mut res = CardRes {
+            crtc_id_ptr: crtcs.as_mut_ptr() as u64,
+            count_crtcs: res.count_crtcs,
+            ..CardRes::default()
+        };
+        call(fd, GETRESOURCES, &mut res, "GETRESOURCES")?;
+        let fb_id = crtcs
+            .iter()
+            .find_map(|&id| {
+                let mut c = Crtc {
+                    crtc_id: id,
+                    ..Crtc::default()
+                };
+                call(fd, GETCRTC, &mut c, "GETCRTC").ok()?;
+                (c.fb_id != 0).then_some(c.fb_id)
+            })
+            .ok_or_else(|| io::Error::other("no CRTC is scanning out a framebuffer"))?;
+        let mut fb = FbCmd {
+            fb_id,
+            ..FbCmd::default()
+        };
+        call(fd, GETFB, &mut fb, "GETFB")?;
+        if fb.handle == 0 {
+            return Err(io::Error::other("GETFB gave no handle (not root?)"));
+        }
+        let r = read_fb(fd, &fb);
+        let mut close = [fb.handle, 0u32];
+        let _ = call(fd, GEM_CLOSE, &mut close, "GEM_CLOSE");
+        r
+    }
+
+    fn read_fb(fd: c_int, fb: &FbCmd) -> io::Result<(Mode, Vec<u32>)> {
+        // ARGB8888 (depth 32) has the same bytes; the alpha is ignored.
+        if fb.bpp != 32 || !(fb.depth == 24 || fb.depth == 32) {
+            return Err(io::Error::other(format!(
+                "framebuffer is bpp {} depth {}; only XRGB8888 is supported",
+                fb.bpp, fb.depth
+            )));
+        }
+        let (w, h, pitch) = (fb.width as usize, fb.height as usize, fb.pitch as usize);
+        if pitch < w * 4 {
+            return Err(io::Error::other(format!("pitch {pitch} < width {w} * 4")));
+        }
+        let mut mapreq = MapDumb {
+            handle: fb.handle,
+            ..MapDumb::default()
+        };
+        call(fd, MAP_DUMB, &mut mapreq, "MAP_DUMB")?;
+        let size = pitch * h;
+        // SAFETY: read-only shared mapping of `size` bytes of the framebuffer's GEM object at
+        // the offset MAP_DUMB returned; PROT_READ (1), MAP_SHARED (1).
+        let map = unsafe { mmap(std::ptr::null_mut(), size, 1, 1, fd, mapreq.offset as i64) };
+        if map as isize == -1 {
+            let e = io::Error::last_os_error();
+            return Err(io::Error::new(e.kind(), format!("mmap framebuffer: {e}")));
+        }
+        let mut px = vec![0u32; w * h];
+        for (y, row) in px.chunks_exact_mut(w).enumerate() {
+            // SAFETY: row y's w*4 bytes start at y*pitch and end within the mapping (pitch >=
+            // w*4, y < h); the destination row holds exactly w*4 bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (map as *const u8).add(y * pitch),
+                    row.as_mut_ptr() as *mut u8,
+                    w * 4,
+                );
+            }
+        }
+        // SAFETY: unmapping exactly the mapping made above.
+        unsafe {
+            munmap(map, size);
+        }
+        Ok((
+            Mode {
+                width: fb.width,
+                height: fb.height,
+            },
+            px,
+        ))
+    }
+
     impl Drop for Display {
         fn drop(&mut self) {
             let fd = self.file.as_raw_fd();
@@ -373,12 +473,19 @@ mod linux {
             assert_eq!(SETCRTC, 0xC06864A2);
             assert_eq!(GETCRTC, 0xC06864A1);
             assert_eq!(DROP_MASTER, 0x641F);
+            assert_eq!(GETFB, 0xC01C64AD);
+            assert_eq!(GEM_CLOSE, 0x40086409);
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-pub use linux::Display;
+pub use linux::{capture, Display};
+
+#[cfg(not(target_os = "linux"))]
+pub fn capture(_path: &str) -> io::Result<(Mode, Vec<u32>)> {
+    Err(io::Error::other("no DRM on this platform"))
+}
 
 #[cfg(not(target_os = "linux"))]
 pub struct Display {
