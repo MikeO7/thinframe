@@ -654,9 +654,10 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   its own event stream (`/api/stream/<id>?apps=1`) and sends the page watchdog's alive beacon.
   In a widget it asks the dashboard over `postMessage`, which keeps the page's one stream: WebKit
   allows six connections per host, so one stream per app widget would starve the page. The
-  dashboard forwards only an allowlist (sources, its own frame's emit, its app's state). [U] the
-  frame's WPE WebKit behaves like Chromium here (CSP sandbox on a top-level document, opaque-
-  origin fetch with `Access-Control-Allow-Origin: *`): checked on the frame at deploy.
+  dashboard forwards only an allowlist (sources, its own frame's emit, its app's state). On the frame's
+  WPE WebKit the full-screen mode works as in Chromium (CSP sandbox on a top-level document,
+  opaque-origin fetch with `Access-Control-Allow-Origin: *`) [V 2026-10-26, docs/log.md]; the
+  widget bridge is [V] in Chromium, [U] on the frame.
 - **Public endpoints**, like the dashboard plane (the page has no token): `/apps/*`,
   `/apps-sdk.js`, `GET /api/data/source/<key>`, `GET|POST /api/apps/<name>/state[/<key>]`,
   `POST /api/frames/<id>/emit`. They answer any origin. Emit is limited to 20 per 10 s per frame,
