@@ -694,3 +694,17 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
 - The tab bar moved to a rail on the left by default (`nav: left|bottom`): on a 1280x800
   landscape panel the bottom pill took height from every grid row; width is the spare axis.
 
+
+## Aurora, turned up: Manrope, drifting light, grain (2026-10-26)
+- Type: Manrope (SIL OFL 1.1, `server/internal/widgets/fonts/OFL.txt`), one variable woff2
+  (weights 200 to 800) embedded in the server and served at `GET /fonts/manrope.woff2`
+  (public, like the page). Without it the frame falls back to DejaVu Sans. [V] renders in
+  Chromium from the server; [U] WPE on the frame, check with a screenshot.
+- Motion, the first in any theme: the light layer drifts a few per cent over 5 minutes in
+  `steps(600)` (one transform update every half second, on one composited layer), and cards
+  rise for 0.55 s when a tab opens. No continuous 60 fps animation, no animated shadows, no
+  backdrop-filter or blend modes. [U] cost on the Mali-400: measure `frame_action bench` with
+  the screen on; if touch-to-paint gets worse, drop the drift first.
+- A static SVG noise layer at 7 % opacity breaks up gradient banding. Cards get a corner sheen
+  and a 1 px top edge in the tab's accent; bars, the energy "now" bar and status dots carry a
+  small fixed glow in the accent colour; the Home clock has a soft glow behind it.

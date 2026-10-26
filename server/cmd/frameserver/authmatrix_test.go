@@ -273,6 +273,8 @@ func rows() []row {
 		{pattern: "GET /api/data/calendar", method: "GET", path: "/api/data/calendar", class: public, ok: 200},
 		{pattern: "GET /api/data/asset/{name}", method: "GET", path: "/api/data/asset/car.png", class: public, ok: 200},
 		{method: "GET", path: "/api/data/asset/x.svg", class: public, ok: 400},
+		{pattern: "GET /fonts/{name}", method: "GET", path: "/fonts/manrope.woff2", class: public, ok: 200},
+		{method: "GET", path: "/fonts/..%2Fwidgets.go", class: public, ok: 404},
 		{method: "GET", path: "/api/data/asset/..%2Fframes%2Fkitchen.json", class: public, ok: 400},
 		{pattern: "POST /api/frames/{id}/beacon", method: "POST", path: "/api/frames/kitchen/beacon", class: public, ok: 204, body: `{"latency_ms":12}`, ctype: "text/plain"},
 		{pattern: "POST /api/frames/{id}/alive", method: "POST", path: "/api/frames/kitchen/alive", class: public, ok: 204},

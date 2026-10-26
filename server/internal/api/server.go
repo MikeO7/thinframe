@@ -135,6 +135,7 @@ func (s *Server) Routes() http.Handler {
 	fn("GET /api/data/weather", s.handleDataWeather)
 	fn("GET /api/data/calendar", s.handleDataCalendar)
 	fn("GET /api/data/asset/{name}", s.handleAsset)
+	fn("GET /fonts/{name}", s.handleFont)
 	fn("POST /api/frames/{id}/beacon", s.handleBeacon)
 	fn("POST /api/frames/{id}/alive", s.handleAlive)
 	// Apps (apps.go): sandboxed documents and the public endpoints their SDK calls. Like the
