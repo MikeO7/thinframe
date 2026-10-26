@@ -1,6 +1,8 @@
 # Multi-arch (amd64/arm64). Static Go binary, scratch base, a few MB.
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS TARGETARCH VERSION=dev
+# CA roots for the scratch image: weather and calendar feeds are HTTPS.
+RUN apk add --no-cache ca-certificates
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
@@ -12,6 +14,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 
 FROM scratch
 COPY --from=build /frameserver /frameserver
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY artifacts/ /artifacts/
 VOLUME /data
 EXPOSE 8080
