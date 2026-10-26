@@ -2,8 +2,9 @@
    layout's theme is "aurora". The light follows the active tab's icon (html[data-mood], set by
    page.js) and, on Home, the time of day (html[data-daypart]).
    Mali-400 rules: no backdrop-filter, no blend modes, no animated shadows. The only motion is
-   the light drifting in steps (2 updates a second, a transform on one layer) and cards rising
-   for half a second when a tab opens. */
+   the light drifting in steps (2 updates a second, a transform on one layer). No animation on
+   a tab switch: cards rising (or any fade, per card or of the whole page) made a switch take
+   up to 1.8 s on the frame [V 2026-10-26, tfctl bench on the nav rail]; without, about 30 ms. */
 @font-face{font-family:"Manrope";src:url("/fonts/manrope.woff2") format("woff2");font-weight:200 800;font-display:block}
 :root{--bg:#04050a;--fg:#f7f8fc;--dim:rgba(236,239,250,.66);--faint:rgba(236,239,250,.4);
   --card:rgba(255,255,255,.05);--chip:rgba(255,255,255,.065);--chip2:rgba(255,255,255,.12);--sel:rgba(255,255,255,.14);
@@ -53,12 +54,6 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .label{text-transform:uppercase;letter-spacing:.2em;font-size:1.1rem;font-weight:700;color:var(--faint)}
 .label::before{content:"";display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:1rem;vertical-align:.15rem;
   background:linear-gradient(135deg,var(--accent),var(--accent2))}
-
-/* cards rise in when a tab opens */
-@keyframes rise{from{opacity:0;transform:translateY(1.8rem) scale(.985)}to{opacity:1;transform:none}}
-.page.on>.w{animation:rise .55s cubic-bezier(.2,.8,.2,1) both}
-.page.on>.w:nth-child(2){animation-delay:.05s}.page.on>.w:nth-child(3){animation-delay:.1s}
-.page.on>.w:nth-child(4){animation-delay:.15s}.page.on>.w:nth-child(5){animation-delay:.2s}.page.on>.w:nth-child(n+6){animation-delay:.25s}
 
 /* big numbers: thin, with light falling on them */
 .hero-time,.clock-time,.nx-in,.zone-main .big,.en .big,.ring b{background:linear-gradient(180deg,#fff 30%,rgba(255,255,255,.5));
