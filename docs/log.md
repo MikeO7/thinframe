@@ -713,3 +713,47 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   registers are not readable from the `frame` user. Workaround: powered USB hub between brick and frame.
 - The earlier 8 h 49 min run on the dock ended at 08:40 with no shutdown event; the pre-outage log was
   already rotated away **[V]**. PR 102 logs the power supplies on every boot for next time.
+
+## 2026-10-26: wall-brick start, touch, stale Buildroot trees (PRs #110 to #114)
+
+- Cause of the dark frame on a brick [V]: `console=ttyGS0` was the last `console=`, so it was
+  `/dev/console`. `gs_write_room()` returns 0 until a USB host configures the gadget, so every
+  write to the console (init, rcS, daemons) waited forever on a brick. PR #110 moves
+  `/dev/console` to tty1; the kernel log stays on ttyGS0. Measured as root on the frame with the
+  gadget soft-disconnected (`echo disconnect > /sys/class/udc/*/soft_connect`, state
+  `not attached`): a write to `/dev/console` returned; a write to `/dev/ttyGS0` blocked, and
+  returned only after `connect` (state `configured`). `ls -l /proc/*/fd` showed init, getty,
+  iwd, dropbear, udhcpd and tfctl holding `/dev/console` (tty1), none holding ttyGS0.
+  PR #104 (PMIC registers in U-Boot) was closed: not the cause.
+- Touch [V]: taps at top-left, top-right, bottom-left read (2%, 97%), (98%, 96%), (2%, 4%) in
+  libinput: device = (x, 1 - y) of the landscape picture. With cog patch 0002 (rotation 3:
+  page = (py, 1 - px)) the matrix is the swap `0 1 0 1 0 0` (PR #113). Five-target test page,
+  beacons in the server log: every target within 21 px (top-left 12,21; top-right -1,0;
+  bottom-right -4,12; bottom-left 0,18; centre -7,16) on a 1280x800 page.
+- Stale trees [V]: the debug tree (`/br/output-debug`) kept a cog without patch 0002 and the
+  AIC8800 driver that still offered WPA3, so the debug system turned taps 90 degrees and could
+  not join Wi-Fi (reason 15). PR #114 rebuilds any package whose recipe or patches changed:
+  build 2026.10.26-5838690f-debug printed `aic8800 changed, rebuilding it` and
+  `cog changed, rebuilding it`; `aic8800_fdrv.ko` md5 954deb7e…, the fixed one.
+- Remote system update [V]: `versions.json` + `update-system` action from the server; the frame
+  fetched the 66 MB tar in 18 s, rebooted into slot a, `slot-confirmed` at 6.9 s, dashboard
+  agent connected at 6.8 s via `http://server.nox:8080`, new DHCP address picked up on its own.
+- Port 41007 [V]: `PORT=41007` on the server at 21:29:40; the frame logged 3 refused connects to
+  `server.nox:8080`, `server moved: http://server.nox:8080 -> http://192.168.1.5:41007 (found
+  on the LAN)` at 51.6 s and `connected` at 59.6 s (8 s of that was backoff, removed in #116).
+  `FRAME_URL` was saved as `http://192.168.1.5:41007/frame/office`.
+- Touch panel never read by tfctl [V]: `/proc/<tfctl>/fd` had no `/dev/input/event1`; the
+  frame's handler line is `H: Handlers=event1` (no mousedev), which light.rs did not match. So
+  a touch never woke a dark screen. Fixed in #116: log `tfctl: touch: reading the panel`.
+- Settings (#116) [V]: a 7 s BTN_TOUCH hold injected into `/dev/input/event1` (16-byte
+  `input_event`s via printf) logged `touch: held 5 s, opening Settings`; `cogctl open` showed it
+  in 0.09 s, loaded 0.9 s after the hold ended. By restart it had taken 8.2 s (2.2 s ending
+  cog, 3.9 s splash, 2.1 s load). "Find on the network" found `http://192.168.1.5:41007`
+  (`knows this frame`); typing `server.nox` saved `http://server.nox:41007`, the agent moved
+  0.7 s later and reconnected in 1.1 s; Done went back to the dashboard in place.
+- iwctl missing from the debug image [V]: `sh: iwctl: not found` on the frame; the debug tree
+  had built iwd before readline was on. Build 2026.10.26-f70af754-debug printed `iwd built
+  without usr/bin/iwctl, rebuilding it`; post-build now fails without iwctl, iwd, cog, cogctl
+  or dbus-daemon.
+- Wall-brick start on the brick itself is still owed: the owner was away. To do: brick only,
+  then over Wi-Fi as root `cat /sys/class/udc/*/state` (expect `not attached`) and the boot log.
