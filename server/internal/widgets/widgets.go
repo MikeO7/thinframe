@@ -15,7 +15,7 @@ import (
 	"github.com/MikeO7/thinframe/server/internal/store"
 )
 
-//go:embed templates/*.html templates/page.css templates/page.js templates/obsidian.css
+//go:embed templates/*.html templates/page.css templates/page.js templates/obsidian.css templates/aurora.css
 var files embed.FS
 
 // Known widget types. Adding one = a template file named <type>.html (and, for widgets fed
@@ -133,9 +133,14 @@ func RenderSim(f store.Frame, simW, simH, fitW, fitH int) ([]byte, error) {
 		scale = min(float64(fitW)/float64(simW), float64(fitH)/float64(simH))
 	}
 	css, _ := files.ReadFile("templates/page.css")
-	if lay := f.Layout; lay.Theme == "obsidian" {
+	// obsidian is a theme of its own and the base of aurora.
+	if lay := f.Layout; lay.Theme == "obsidian" || lay.Theme == "aurora" {
 		ob, _ := files.ReadFile("templates/obsidian.css")
 		css = append(append(css, '\n'), ob...)
+		if lay.Theme == "aurora" {
+			au, _ := files.ReadFile("templates/aurora.css")
+			css = append(append(css, '\n'), au...)
+		}
 	}
 	js, _ := files.ReadFile("templates/page.js")
 	lay := f.Layout

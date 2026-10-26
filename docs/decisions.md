@@ -681,3 +681,16 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   upload path tested in Go.]
 - An MCP client can now see what it built: `put_app`, `show_app`, `screenshot`, fix, repeat.
 
+## Aurora theme and the left rail (2026-10-26)
+- The owner found the dashboard plain. `theme: "aurora"`: translucent "glass" cards (a white
+  gradient at 4 to 9 % with a 1 px lit top edge) over coloured light, two or three radial
+  gradients on one fixed layer behind the page. The light and the accent colour follow the
+  active tab's icon (`html[data-mood]`); on Home they follow the time of day
+  (`html[data-daypart]`: dawn, day, dusk, night, checked every 5 min). Big numbers get a
+  white-to-translucent text gradient. Empty cards get a dashed outline instead of a solid card.
+- Mali-400: nothing animates. No backdrop-filter (glass is plain alpha over the light), no
+  animated shadows; the active tab's shadow repaints only on a tab change. [U] touch-to-paint
+  stays where obsidian was: measure with `frame_action bench` while the screen is on.
+- The tab bar moved to a rail on the left by default (`nav: left|bottom`): on a 1280x800
+  landscape panel the bottom pill took height from every grid row; width is the spare axis.
+

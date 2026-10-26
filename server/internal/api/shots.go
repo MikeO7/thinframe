@@ -30,7 +30,38 @@ const (
 
 type shotWaiters struct {
 	mu sync.Mutex
-	m  map[string][]chan []byte
+	m  map[string][]chan shotResult
+}
+
+type shotResult struct {
+	png []byte
+	err error
+}
+
+// finishShot hands a result to everyone waiting for a frame's screenshot.
+func (s *Server) finishShot(id string, r shotResult) {
+	s.shots.mu.Lock()
+	defer s.shots.mu.Unlock()
+	for _, ch := range s.shots.m[id] {
+		select {
+		case ch <- r:
+		default:
+		}
+	}
+	delete(s.shots.m, id)
+}
+
+// shotFailed turns the frame's "screenshot failed: ..." event into an answer for the waiters.
+// A panel that scans nothing out is a screen that is off.
+func (s *Server) shotFailed(id, text string) {
+	reason, ok := strings.CutPrefix(text, "failed: ")
+	if !ok {
+		return
+	}
+	if strings.Contains(reason, "no CRTC is scanning out") {
+		reason = "the screen is off (nothing is being displayed); " + reason
+	}
+	s.finishShot(id, shotResult{err: fmt.Errorf("frame %s could not take a screenshot: %s", id, reason)})
 }
 
 func (s *Server) shotDir(id string) string { return filepath.Join(s.data, "screenshots", id) }
@@ -69,15 +100,7 @@ func (s *Server) handleShotUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.shots.mu.Lock()
-	for _, ch := range s.shots.m[id] {
-		select {
-		case ch <- buf.Bytes():
-		default:
-		}
-	}
-	delete(s.shots.m, id)
-	s.shots.mu.Unlock()
+	s.finishShot(id, shotResult{png: buf.Bytes()})
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -143,10 +166,10 @@ func (s *Server) Screenshot(ctx context.Context, id string) ([]byte, error) {
 	if !s.Hub.Online(f.ID) {
 		return nil, fmt.Errorf("%w: frame %s is not connected", ErrInvalid, id)
 	}
-	ch := make(chan []byte, 1)
+	ch := make(chan shotResult, 1)
 	s.shots.mu.Lock()
 	if s.shots.m == nil {
-		s.shots.m = map[string][]chan []byte{}
+		s.shots.m = map[string][]chan shotResult{}
 	}
 	s.shots.m[id] = append(s.shots.m[id], ch)
 	s.shots.mu.Unlock()
@@ -154,8 +177,8 @@ func (s *Server) Screenshot(ctx context.Context, id string) ([]byte, error) {
 		return nil, err
 	}
 	select {
-	case b := <-ch:
-		return b, nil
+	case r := <-ch:
+		return r.png, r.err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-time.After(shotWait):
