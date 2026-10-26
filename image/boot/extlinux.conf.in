@@ -1,7 +1,8 @@
 # /extlinux/slot-@SLOT@.conf on PFBOOT, rendered by post-image.sh. boot.scr (ormarch build L +
 # boot.cmd.patch) picks slot-${slot}.conf from uEnv.txt. No screen, no keyboard: DEFAULT runs.
 # If a label cannot load its files, U-Boot tries the next one.
-# Kernel text never reaches the panel (TASK 15); the console is the USB-C serial (ttyGS0).
+# Kernel text never reaches the panel (TASK 15): kernel log on the USB-C serial (ttyGS0),
+# /dev/console on tty1 (no framebuffer console), so nothing waits for a USB host.
 DEFAULT thinframe
 TIMEOUT 1
 PROMPT 0
@@ -19,4 +20,4 @@ LABEL other-slot
 LABEL min
 	KERNEL /zImage.@SLOT@
 	FDT /sun8i-a33-pf1007l-min.dtb
-	APPEND root=PARTUUID=50463037-0@PART@ rootfstype=ext4 rootwait ro console=ttyGS0,115200 loglevel=7 panic=10
+	APPEND root=PARTUUID=50463037-0@PART@ rootfstype=ext4 rootwait ro console=ttyGS0,115200 console=tty1 loglevel=7 panic=10

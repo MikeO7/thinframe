@@ -46,7 +46,7 @@ prepare_image() {
 		mcopy -o -i $i$o /w/sun8i-h3-orangepi-pc.dtb /w/provision.txt ::/
 		for s in a b; do
 			mcopy -n -i $i$o ::/extlinux/slot-$s.conf /w/slot-$s.conf
-			sed -i "s|/sun8i-a33-pf1007l-full.dtb|/sun8i-h3-orangepi-pc.dtb|; s|console=ttyGS0,115200|console=ttyS0,115200|; s| quiet loglevel=0||" /w/slot-$s.conf
+			sed -i "s|/sun8i-a33-pf1007l-full.dtb|/sun8i-h3-orangepi-pc.dtb|; s|console=ttyGS0,115200 console=tty1|console=ttyS0,115200|; s| quiet loglevel=0||" /w/slot-$s.conf
 			mcopy -o -i $i$o /w/slot-$s.conf ::/extlinux/slot-$s.conf
 		done'
 	(cd "$ROOT/server" && go build -o "$W/frameserver" ./cmd/frameserver)
@@ -72,7 +72,7 @@ prepare_virt() {
 		mcopy -o -i $i$o /w/boot.scr /w/provision.txt ::/
 		for s in a b; do
 			mcopy -n -i $i$o ::/extlinux/slot-$s.conf /w/slot-$s.conf
-			sed -i -e "/^[[:space:]]*FDT /d" -e "s|console=ttyGS0,115200|console=ttyAMA0|; s| quiet loglevel=0||" \
+			sed -i -e "/^[[:space:]]*FDT /d" -e "s|console=ttyGS0,115200 console=tty1|console=ttyAMA0|; s| quiet loglevel=0||" \
 				-e "s| g_cdc[^ ]*||g; s|\(APPEND .*\)|\1 video=Virtual-1:800x1280|" /w/slot-$s.conf
 			mcopy -o -i $i$o /w/slot-$s.conf ::/extlinux/slot-$s.conf
 		done'

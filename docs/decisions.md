@@ -47,8 +47,10 @@ read-only; `/data` (p4) holds `etc/thinframe.conf` (`/etc/thinframe.conf` is a s
 authorized_keys, bound over `/etc/dropbear`, which is also `~frame/.ssh`) and `iwd/`, both
 bind-mounted from fstab. `dbus-daemon` runs because iwd takes its commands over D-Bus [V].
 Logs, dhcpcd leases and the status page live in RAM (`/tmp`, `/run`). No syslogd, klogd, cron.
-Kernel console is `ttyGS0` (USB-C CDC ACM, built in with CDC ECM `usb0` = 192.168.7.2); the panel
-never shows console text (`FRAMEBUFFER_CONSOLE` off).
+Kernel log goes to `ttyGS0` (USB-C CDC ACM, built in with CDC ECM `usb0` = 192.168.7.2) and `/dev/console`
+is `tty1` (`console=ttyGS0,115200 console=tty1`; the last one wins). ttyGS0 reports no write room until a
+USB host configures the gadget, so a user-space write to it waits forever on a wall brick **[V]** (read in
+`u_serial.c` `gs_write_room`). The panel never shows console text (`FRAMEBUFFER_CONSOLE` off).
 
 ## SSH key only, user `frame`, no sudo at all
 Dropbear, key-only. tfctl runs as root for DRM, backlight, clock and updates; there is nothing else to escalate to. Host key generated once into `image/secrets/` so re-flashing a card
