@@ -795,3 +795,27 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   `auto_brightness`, `wave`, `motion_wake` on (frame log `light: auto-brightness true, wave true,
   motion wake true`). Wave, motion and auto-brightness in a lit room not tried yet [U].
 - Calendar recurrence and several feeds (#130): deployed; no `CALENDAR_ICS_URL` on Nox yet [U].
+
+## 2026-10-26 Health check on Nox and the office frame; slow tab switches fixed
+- Health [V] 15:40 UTC: server container up; frame tfctl 2026.10.26-3de9c1a, screen on, light 62;
+  config `auto_brightness`, `wave`, `motion_wake` true. MCP `screenshot office` shows Aurora with
+  the Cameras tab in the rail. Morning: the frame logged `light: screen on` at 07:54 local (room lit)
+  and `motion` events 13:59 to 14:01 UTC. Auto-brightness in daylight: light 62, backlight 10 of 10.
+  Wave not tried (needs a hand at the frame) [U].
+- The page's touch samples had a 1044 ms entry. `tfctl bench 8 24,5 50,5` (new: taps given points,
+  #134) on the nav rail: tab switches 150 to 941 ms, Home <-> Cars up to 841 ms, Shows 826 ms. With
+  the layout's theme removed for a minute: p50 46 ms, max 78 ms. On a Mac design server shown on the
+  frame (`cogctl open`), A/B [V]: Aurora as shipped max 1814 ms; no card rise p50 29 ms, max 165 ms;
+  opacity fade per card max 965 ms; fade of the whole page max 1351 ms; no animation at all p50 28 ms,
+  max 47 ms. Shipped the last (#134). On Nox after the update: p50 27 to 30 ms, max 30 to 35 ms in
+  three runs of 8; one first visit of Shows right after the cog restart took 906 ms, not repeated.
+- Mesa's shader cache was disabled (`Failed to create /root/.cache for shader cache (Read-only file
+  system)`), so every cog start (each wake) compiled shaders again. #133 sets
+  `MESA_SHADER_CACHE_DIR=/data/thinframe/shaders` (32 MB cap) [V]: cog's environment has it, the
+  directory holds 1.5 MB after a few tab switches, no new warning since the restart.
+- Deployed: server and tfctl 2026.10.26-f9917b5 (main) on Nox; frame `software-updated` 16:09 UTC.
+- SD card vs eMMC (owner asked to drop the card): read-only facts [V] on the frame: every shipped DTB
+  has the eMMC controller `mmc@1c11000` disabled, so Linux does not see the eMMC; `/dev/mmcblk0` is
+  the 32 GB card. Backups on the Mac: only a 2 GiB partial dump of this frame's eMMC
+  (`~/Documents/scratch/photo-frame-dashboard/backups/pf1007-emmc`, 34 chunks); the full verified
+  image in ormarch E042 is upstream's unit. TASKS section E stays unstarted until the owner's go.
