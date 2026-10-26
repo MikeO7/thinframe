@@ -653,22 +653,22 @@ impl Ctx {
 
 const CSS: &str = "@font-face{font-family:P;src:url(/settings/poppins.ttf)}\
 html,body{margin:0;height:100%;overflow:hidden;background:#0b0d10;color:#e8e6e1;\
-font:3.2vh P,'DejaVu Sans',sans-serif;user-select:none;-webkit-user-select:none;touch-action:manipulation}\
-header{display:flex;align-items:center;gap:2vw;padding:3vh 4vw 2vh}h1{flex:1;margin:0;font-size:5.4vh;font-weight:400}\
+font:3.9vh P,'DejaVu Sans',sans-serif;user-select:none;-webkit-user-select:none;touch-action:manipulation}\
+header{display:flex;align-items:center;gap:2vw;padding:3vh 4vw 2vh}h1{flex:1;margin:0;font-size:6.4vh;font-weight:400}\
 main{padding:0 4vw;height:80vh;overflow-y:auto}\
-.card{background:#161a20;border-radius:2.4vh;padding:2vh 2.4vw;margin:0 0 2vh;display:flex;align-items:center;gap:2vw}\
+.card{background:#161a20;border-radius:2.4vh;padding:2.8vh 2.8vw;margin:0 0 2.4vh;display:flex;align-items:center;gap:2vw}\
 .card.col{display:block}.t{flex:1;min-width:0}\
-b{display:block;font-weight:400;color:#8d96a0;font-size:2.4vh;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.4vh}\
-.v{font-size:3.4vh;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.small{font-size:2.8vh}\
+b{display:block;font-weight:400;color:#8d96a0;font-size:2.8vh;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.4vh}\
+.v{font-size:4.2vh;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.small{font-size:3.2vh}\
 .ok{color:#5cc98a}.bad{color:#f07a6a}.dim{color:#8d96a0}\
-button,.btn{font:3.2vh P,'DejaVu Sans',sans-serif;color:#0b0d10;background:#f2b84b;border:0;border-radius:999px;\
-padding:1.5vh 2.6vw;text-decoration:none;display:inline-block;white-space:nowrap}\
+button,.btn{font:3.9vh P,'DejaVu Sans',sans-serif;color:#0b0d10;background:#f2b84b;border:0;border-radius:999px;\
+padding:2.2vh 3.2vw;text-decoration:none;display:inline-block;white-space:nowrap}\
 .btn2{background:#2a3038;color:#e8e6e1}button:disabled{opacity:.35}\
 button:active,.btn:active{transform:scale(.96);opacity:.8}form{margin:0}\
 .row{display:flex;gap:1.6vw;align-items:center}\
 .note{border-radius:1.6vh;padding:1.6vh 2vw;margin:0 0 2vh}.good{background:#16352a}.badn{background:#3a1d1a}\
 ul{list-style:none;margin:1vh 0 2vh;padding:0}li,li a{display:flex;align-items:center;gap:1.6vw}\
-li{border-bottom:1px solid #232830}li:last-child{border:0}li a{flex:1;color:inherit;text-decoration:none;padding:1.8vh .6vw}\
+li{border-bottom:1px solid #232830}li:last-child{border:0}li a{flex:1;color:inherit;text-decoration:none;padding:2.4vh .6vw}\
 li>.name{padding:1.4vh .6vw}.name{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}\
 .top{display:flex;align-items:center;gap:2vw}\
 .field{flex:1;font:4.2vh 'DejaVu Sans Mono',monospace;background:#161a20;border:1px solid #2a3038;\

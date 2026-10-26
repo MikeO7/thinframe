@@ -479,6 +479,11 @@ impl Kiosk {
     pub fn handle(&mut self, cmd: KioskCmd) {
         eprintln!("tfctl: kiosk: {cmd:?}");
         match cmd {
+            // The server's page watchdog sees the dashboard go quiet while Settings is up: the
+            // person at the screen comes first, the dashboard reloads when Settings closes.
+            KioskCmd::Restart | KioskCmd::Reload if self.back_to.is_some() => {
+                eprintln!("tfctl: kiosk: Settings open, not restarting");
+            }
             KioskCmd::Restart | KioskCmd::Reload => self.restart(),
             KioskCmd::SetUrl(u) if self.back_to.is_some() => self.back_to = Some(u),
             KioskCmd::SetUrl(u) => self.go(u),
