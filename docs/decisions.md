@@ -592,3 +592,17 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   in the page and on the server, icons are parsed once, no blurred shadows. In WPE 2.48 (sim,
   arm64 container): load 70 ms, tab switch 1 to 38 ms, all draws 25 ms [V 2026-10-25, sim].
 
+
+## HTTP port 41007, the same number as discovery (2026-10-25)
+- The server's default HTTP port moves from 8080 to **41007** (`PORT`). 8080 is crowded on the
+  owner's LAN; 41007 is already thinframe's UDP discovery port, and TCP and UDP ports do not
+  collide, so one number covers both: "thinframe lives on 41007". `PORT` still overrides it;
+  in compose it sets both sides of the port map and the port the discovery reply carries.
+- Existing frames with `SERVER_URL=http://<host>:8080` move on their own [U]: after
+  REDISCOVER_EVERY failed connects the agent broadcasts on UDP 41007, the server (host
+  networking) answers with its new port and an HMAC proof, and tfctl persists
+  `SERVER_URL=http://<server-ip>:41007` (`agent.rs` `move_server`). The new URL uses the
+  replying address, not the old hostname. A frame with a pinned `FRAME_URL` keeps that page URL.
+- Fallback when rediscovery cannot work (server with `DISCOVERY=off`, other subnet): rewrite the
+  card's settings with `scripts/flash.sh --settings-only` and the new URL, or
+  `doas tfctl set SERVER_URL http://<host>:41007` over SSH.
