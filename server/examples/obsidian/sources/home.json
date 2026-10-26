@@ -1,2 +1,1 @@
-{"badge": {"text": "All quiet at home", "state": "ok"},
- "chips": [{"icon": "lock", "text": "Locked"}, {"icon": "therm", "text": "70° inside"}, {"icon": "bolt", "text": "1.8 kW"}, {"icon": "person", "text": "2 home"}]}
+{"chips": [{"icon": "lock", "text": "Locked"}, {"icon": "therm", "text": "70\u00b0 inside"}, {"icon": "bolt", "text": "1.8 kW"}, {"icon": "person", "text": "2 home"}]}

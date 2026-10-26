@@ -5,6 +5,9 @@ import (
 	"sync"
 )
 
+// sseBuffer is the per-page queue. MaxSources plus a layout's built-in feeds fit with room.
+const sseBuffer = 256
+
 // broker fans SSE messages out per frame id.
 type broker struct {
 	mu   sync.Mutex
@@ -14,7 +17,9 @@ type broker struct {
 func newBroker() *broker { return &broker{subs: map[string]map[chan []byte]struct{}{}} }
 
 func (b *broker) subscribe(id string) (chan []byte, func()) {
-	ch := make(chan []byte, 16)
+	// Room for a page's whole replay on connect (weather, calendar and every source its widgets
+	// read, one message each) while the stream is still flushing the first ones.
+	ch := make(chan []byte, sseBuffer)
 	b.mu.Lock()
 	if b.subs[id] == nil {
 		b.subs[id] = map[chan []byte]struct{}{}

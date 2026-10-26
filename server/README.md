@@ -56,8 +56,24 @@ objects you push, kept in `DATA_DIR/sources` and replayed when a page connects.
 | `DELETE /api/sources/{key}` | bearer | forget |
 | `GET /api/data/asset/{name}` | public, like the page | PNG, JPEG, WebP, GIF or woff2 from `DATA_DIR/assets`; widgets say `asset:<name>` |
 
-`SERVICES_SSH=<host>` (native runs only: the container has no ssh) polls `docker ps` there every
-`SERVICES_EVERY` (1m) into the source `services`.
+`SERVICES_DOCKER=/var/run/docker.sock` (in a container, with the host's socket mounted) or
+`SERVICES_SSH=<host>` (native runs only: the container has no ssh) reads the container list every
+`SERVICES_EVERY` (1m) into the source `services`. An unchanged list is not re-sent.
+
+`forecast` shows the week from the weather adapter (`WEATHER_LAT`, `WEATHER_LON`; `WEATHER_UNITS=f`
+for °F); the hero shows the current temperature, icon and today's high and low, and with
+`props.health` set to a services source its badge reads "21 / 22 containers up".
+
+Car controls (climate, lock, frunk, trunk, charge port) show state from the `cars` source
+(`locked`, `frunk`/`trunk`/`port` = `open`, `charging`, `climate {on,set,note}`); a tap says
+controls are not connected yet.
+
+## Production on a Docker host
+`scripts/server-deploy.sh HOST` builds the image on the Mac, loads it on HOST over ssh and runs it
+with compose in `~/thinframe` (host networking for discovery, the Docker socket read-only for the
+services widget, the host's time zone). `~/thinframe/env` is made once and then yours to edit;
+`~/thinframe/data` holds frames, sources and assets. Run it again to ship a new build. Keep a
+local server for testing on another machine with `DISCOVERY=off`, so frames only find production.
 
 What is yours stays out of this repo: names, rooms, containers and pictures go in the layout you PUT
 and in `DATA_DIR`, never in Git. `examples/obsidian/` is a demo with made-up names:

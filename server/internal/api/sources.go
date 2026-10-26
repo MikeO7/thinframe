@@ -82,25 +82,31 @@ func (s *sourceSet) list() []SourceInfo {
 	return out
 }
 
-func (s *sourceSet) put(key string, data json.RawMessage) error {
+// put stores data and reports whether it differs from what was stored. An unchanged source
+// is not rewritten, so a poller that pushes the same state every minute costs nothing.
+func (s *sourceSet) put(key string, data json.RawMessage) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.data[key]; !ok && len(s.data) >= MaxSources {
-		return fmt.Errorf("%w: %d sources, limit %d", ErrInvalid, len(s.data), MaxSources)
+	old, ok := s.data[key]
+	if ok && bytes.Equal(old.Data, data) {
+		return false, nil
+	}
+	if !ok && len(s.data) >= MaxSources {
+		return false, fmt.Errorf("%w: %d sources, limit %d", ErrInvalid, len(s.data), MaxSources)
 	}
 	ent := sourceEntry{Data: data, Updated: time.Now().UTC()}
 	b, err := json.Marshal(ent)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return err
+		return false, err
 	}
 	if err := writeDurable(filepath.Join(s.dir, key+".json"), b); err != nil {
-		return err
+		return false, err
 	}
 	s.data[key] = ent
-	return nil
+	return true, nil
 }
 
 func (s *sourceSet) delete(key string) bool {
@@ -160,12 +166,13 @@ func (s *Server) SetSource(key string, raw []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := s.src.put(key, data); err != nil {
+	changed, err := s.src.put(key, data)
+	if err != nil || !changed {
 		return err
 	}
 	for _, f := range s.Store.List() {
 		for _, w := range f.Layout.Widgets {
-			if sourceOf(w) == key {
+			if reads(w, key) {
 				s.sse.publish(f.ID, map[string]any{"widget": w.ID, "data": data})
 			}
 		}
@@ -182,17 +189,26 @@ func (s *Server) Source(key string) (json.RawMessage, bool) { return s.src.get(k
 // DeleteSource forgets a source. Pages keep what they last showed until they reload.
 func (s *Server) DeleteSource(key string) bool { return s.src.delete(key) }
 
+// sourceOf is the widget's main source; reads also lists health, the services feed a hero
+// summarizes in its badge.
 func sourceOf(w store.Widget) string {
 	k, _ := w.Props["source"].(string)
 	return k
 }
 
+func reads(w store.Widget, key string) bool {
+	h, _ := w.Props["health"].(string)
+	return key != "" && (sourceOf(w) == key || h == key)
+}
+
 // pushSources replays the stored sources to a frame's widgets (on SSE connect).
 func (s *Server) pushSources(f store.Frame) {
 	for _, w := range f.Layout.Widgets {
-		if k := sourceOf(w); k != "" {
-			if data, ok := s.src.get(k); ok {
-				s.sse.publish(f.ID, map[string]any{"widget": w.ID, "data": data})
+		for _, p := range []string{"source", "health"} {
+			if k, _ := w.Props[p].(string); k != "" {
+				if data, ok := s.src.get(k); ok {
+					s.sse.publish(f.ID, map[string]any{"widget": w.ID, "data": data})
+				}
 			}
 		}
 	}

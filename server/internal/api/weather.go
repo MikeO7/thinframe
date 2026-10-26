@@ -9,10 +9,19 @@ import (
 	"time"
 )
 
-// Weather is a current-conditions reading.
+// Weather is a current-conditions reading plus the daily forecast (°C; WMO weather codes).
 type Weather struct {
 	TempC float64
 	Desc  string
+	Code  int
+	Days  []WeatherDay // today first; empty when the feed sent no daily block
+}
+
+// WeatherDay is one day of the forecast. Date is YYYY-MM-DD in the place's own time zone.
+type WeatherDay struct {
+	Date       string
+	Code       int
+	MaxC, MinC float64
 }
 
 // WeatherSource provides current weather.
@@ -95,7 +104,8 @@ func (o *OpenMeteo) fetch() (Weather, error) {
 	if base == "" {
 		base = OpenMeteoURL
 	}
-	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code", base, o.Lat, o.Lon)
+	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code"+
+		"&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7", base, o.Lat, o.Lon)
 	cl := http.Client{Timeout: 8 * time.Second}
 	resp, err := cl.Get(url)
 	if err != nil {
@@ -110,6 +120,12 @@ func (o *OpenMeteo) fetch() (Weather, error) {
 			T    float64 `json:"temperature_2m"`
 			Code int     `json:"weather_code"`
 		} `json:"current"`
+		Daily *struct {
+			Time []string  `json:"time"`
+			Code []int     `json:"weather_code"`
+			Max  []float64 `json:"temperature_2m_max"`
+			Min  []float64 `json:"temperature_2m_min"`
+		} `json:"daily"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return Weather{}, err
@@ -121,5 +137,14 @@ func (o *OpenMeteo) fetch() (Weather, error) {
 	if d == "" {
 		d = fmt.Sprintf("code %d", body.Current.Code)
 	}
-	return Weather{TempC: body.Current.T, Desc: d}, nil
+	wx := Weather{TempC: body.Current.T, Desc: d, Code: body.Current.Code}
+	if dl := body.Daily; dl != nil {
+		for i := range dl.Time {
+			if i >= len(dl.Code) || i >= len(dl.Max) || i >= len(dl.Min) || i >= 7 {
+				break
+			}
+			wx.Days = append(wx.Days, WeatherDay{Date: dl.Time[i], Code: dl.Code[i], MaxC: dl.Max[i], MinC: dl.Min[i]})
+		}
+	}
+	return wx, nil
 }

@@ -13,12 +13,14 @@
 //	FRAME_TOKEN   bearer token for /api and /mcp, Basic password for /admin; empty disables auth (LAN dev only)
 //	PHOTOS_DIR    folder photo source; unset = photo widget shows nothing
 //	ARTIFACTS_DIR default /artifacts; tfctl-armv7, system-*.tar, versions.json
-//	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter
+//	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter (current and 7-day forecast)
+//	WEATHER_UNITS  f for °F (default °C)
 //	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
 //	TZ            frames receive this time zone
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
 //	SERVICES_SSH  ssh destination whose `docker ps` feeds the source "services" (key auth only)
-//	SERVICES_EVERY  how often to poll it (default 1m, Go duration)
+//	SERVICES_DOCKER docker socket path read instead (in a container: mount the host's socket); wins over SERVICES_SSH
+//	SERVICES_EVERY  how often to poll (default 1m, Go duration)
 //	DISCOVERY     udp address frames probe to find this server (default :41007, "off" disables;
 //	              needs host networking in a container)
 package main
@@ -34,6 +36,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -85,6 +88,7 @@ func main() {
 		lo, e2 := strconv.ParseFloat(lon, 64)
 		if e1 == nil && e2 == nil {
 			opts.Weather = &api.OpenMeteo{Lat: la, Lon: lo}
+			opts.Fahrenheit = strings.HasPrefix(strings.ToLower(os.Getenv("WEATHER_UNITS")), "f")
 			log.Printf("weather: open-meteo %.3f,%.3f", la, lo)
 		}
 	}
@@ -121,11 +125,14 @@ func main() {
 			}
 		}()
 	}
-	if host := os.Getenv("SERVICES_SSH"); host != "" {
-		every, err := time.ParseDuration(env("SERVICES_EVERY", "1m"))
-		if err != nil || every < 10*time.Second {
-			every = time.Minute
-		}
+	every, err := time.ParseDuration(env("SERVICES_EVERY", "1m"))
+	if err != nil || every < 10*time.Second {
+		every = time.Minute
+	}
+	if sock := os.Getenv("SERVICES_DOCKER"); sock != "" {
+		go srv.PollDocker(ctx, sock, every)
+		log.Printf("services: docker socket %s every %s", sock, every)
+	} else if host := os.Getenv("SERVICES_SSH"); host != "" {
 		go srv.PollServices(ctx, host, every)
 		log.Printf("services: docker ps on %s every %s", host, every)
 	}

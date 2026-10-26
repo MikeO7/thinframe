@@ -21,14 +21,15 @@ var files embed.FS
 // Known widget types. Adding one = a template file named <type>.html (and, for widgets fed
 // by a data source, a renderer in page.js).
 var Types = []string{"clock", "photo", "weather", "calendar", "status", "text", "iframe",
-	"hero", "agenda", "cars", "rooms", "climate", "list", "tiles", "energy", "shows", "worldclock", "services"}
+	"hero", "forecast", "agenda", "cars", "rooms", "climate", "list", "tiles", "energy", "shows", "worldclock", "services"}
 
 // Props documents each type's props (MCP list_widgets, server/README.md). Types marked
 // "source" take their data from props.source: a key pushed with PUT /api/sources/{key}.
 var Props = map[string]string{
 	"photo": "interval_s (seconds between photos, default 600)", "text": "text", "iframe": "src (URL)",
 	"weather": "place (label)", "calendar": "", "clock": "", "status": "",
-	"hero":       "h12 (bool, default true), source; data: temp, desc (weather adapter), badge {text,state}, chips [{icon,text}]",
+	"hero":       "h12 (bool, default true), source, health (a services source key: badge shows containers healthy); data: temp, desc, code, hi, lo (weather adapter), badge {text,state}, chips [{icon,text}]",
+	"forecast":   "title, days (default 7); data from the weather adapter: days [{date,code,hi,lo}]; rows when narrow, columns when wide",
 	"agenda":     "title, view list|day|next, from/to (hours, day view), max, all (bool), source; data: events [{start,end,title,where}] (calendar adapter if no source)",
 	"cars":       "title, view full|compact, cars [{id,name,model,image}], source; data: cars [{id,battery,charging,range,status,stats [{label,value}],climate {on,set,note}}]",
 	"rooms":      "title, rooms [{name}], scenes [names], source; data: rooms [{name,on,lights,brightness,temp,humidity,occupied}], scenes [{name,active}]",
@@ -244,9 +245,11 @@ func Validate(l store.Layout) error {
 				return fmt.Errorf("widget %s: %w", w.ID, err)
 			}
 		}
-		if src, ok := w.Props["source"]; ok {
-			if k, _ := src.(string); !store.ValidID(k) {
-				return fmt.Errorf("widget %s: source must be a lowercase id (a-z, 0-9, _ or -), got %q", w.ID, fmt.Sprint(src))
+		for _, p := range []string{"source", "health"} {
+			if src, ok := w.Props[p]; ok {
+				if k, _ := src.(string); !store.ValidID(k) {
+					return fmt.Errorf("widget %s: %s must be a lowercase id (a-z, 0-9, _ or -), got %q", w.ID, p, fmt.Sprint(src))
+				}
 			}
 		}
 		tab := w.Tab

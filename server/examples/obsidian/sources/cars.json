@@ -1,4 +1,58 @@
-{"cars": [
-  {"id": "car1", "battery": 76, "charging": false, "range": "301 mi", "status": "Parked 2 h", "stats": [{"label": "Cabin", "value": "64°"}, {"label": "Doors", "value": "Locked"}, {"label": "Where", "value": "Home"}], "climate": {"on": false, "set": "70°", "note": "Cabin 64°"}},
-  {"id": "car2", "battery": 69, "charging": true, "range": "231 mi", "status": "Full in 1 h 15 min", "stats": [{"label": "Charging", "value": "11.5 kW"}, {"label": "Doors", "value": "Locked"}, {"label": "Where", "value": "Home"}], "climate": {"on": true, "set": "70°", "note": "Cabin 66° → 70°, ready in 6 min"}}
-]}
+{
+ "cars": [
+  {
+   "id": "car1",
+   "battery": 76,
+   "charging": false,
+   "range": "301 mi",
+   "status": "Parked 2 h",
+   "stats": [
+    {
+     "label": "Cabin",
+     "value": "64\u00b0"
+    },
+    {
+     "label": "Doors",
+     "value": "Locked"
+    },
+    {
+     "label": "Where",
+     "value": "Home"
+    }
+   ],
+   "climate": {
+    "on": false,
+    "set": "70\u00b0",
+    "note": "Cabin 64\u00b0"
+   },
+   "locked": true
+  },
+  {
+   "id": "car2",
+   "battery": 69,
+   "charging": true,
+   "range": "231 mi",
+   "status": "Full in 1 h 15 min",
+   "stats": [
+    {
+     "label": "Charging",
+     "value": "11.5 kW"
+    },
+    {
+     "label": "Doors",
+     "value": "Locked"
+    },
+    {
+     "label": "Where",
+     "value": "Home"
+    }
+   ],
+   "climate": {
+    "on": true,
+    "set": "70\u00b0",
+    "note": "Cabin 66\u00b0 \u2192 70\u00b0, ready in 6 min"
+   },
+   "locked": false
+  }
+ ]
+}
