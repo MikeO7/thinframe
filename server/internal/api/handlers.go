@@ -326,7 +326,7 @@ func (s *Server) weatherData() map[string]any {
 		}
 		return int(math.Round(c))
 	}
-	out := map[string]any{"temp": strconv.Itoa(deg(wx.TempC)), "desc": strings.ToLower(wx.Desc), "code": wx.Code}
+	out := map[string]any{"temp": strconv.Itoa(deg(wx.TempC)), "desc": strings.ToLower(wx.Desc), "code": wx.Code, "night": wx.Night}
 	days := make([]map[string]any, 0, len(wx.Days))
 	for _, d := range wx.Days {
 		days = append(days, map[string]any{"date": d.Date, "code": d.Code, "hi": deg(d.MaxC), "lo": deg(d.MinC)})

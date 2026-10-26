@@ -14,6 +14,7 @@ type Weather struct {
 	TempC float64
 	Desc  string
 	Code  int
+	Night bool         // the sun is down now (open-meteo is_day = 0)
 	Days  []WeatherDay // today first; empty when the feed sent no daily block
 }
 
@@ -104,7 +105,7 @@ func (o *OpenMeteo) fetch() (Weather, error) {
 	if base == "" {
 		base = OpenMeteoURL
 	}
-	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code"+
+	url := fmt.Sprintf("%s?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code,is_day"+
 		"&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7", base, o.Lat, o.Lon)
 	cl := http.Client{Timeout: 8 * time.Second}
 	resp, err := cl.Get(url)
@@ -119,6 +120,7 @@ func (o *OpenMeteo) fetch() (Weather, error) {
 		Current *struct {
 			T    float64 `json:"temperature_2m"`
 			Code int     `json:"weather_code"`
+			Day  *int    `json:"is_day"`
 		} `json:"current"`
 		Daily *struct {
 			Time []string  `json:"time"`
@@ -137,7 +139,7 @@ func (o *OpenMeteo) fetch() (Weather, error) {
 	if d == "" {
 		d = fmt.Sprintf("code %d", body.Current.Code)
 	}
-	wx := Weather{TempC: body.Current.T, Desc: d, Code: body.Current.Code}
+	wx := Weather{TempC: body.Current.T, Desc: d, Code: body.Current.Code, Night: body.Current.Day != nil && *body.Current.Day == 0}
 	if dl := body.Daily; dl != nil {
 		for i := range dl.Time {
 			if i >= len(dl.Code) || i >= len(dl.Max) || i >= len(dl.Min) || i >= 7 {
