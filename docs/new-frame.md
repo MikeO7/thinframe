@@ -11,7 +11,7 @@ After that everything (updates, settings, fixes, reboots) comes from the server.
    scripts/server-mac.sh install
    ```
 
-   It builds `frameserver`, makes an admin token, and runs it as a login service on port 8080
+   It builds `frameserver`, makes an admin token, and runs it as a login service on port 41007
    (restarts on its own; `scripts/server-mac.sh status` lists the frames). Frames find it on the
    network by themselves **[V]** (2026-10-22: the frame moved to the Mac's new address on its own).
    Keep the Mac awake while frames use it.
@@ -41,7 +41,7 @@ After that everything (updates, settings, fixes, reboots) comes from the server.
    inserted late, the frame starts its original Android instead; power-cycle with the card in.
 
 3. About a minute later the frame shows a **PAIR** button. Tap it once. The frame appears on the
-   admin page (`http://<mac>:8080/admin`, password = the token) and shows its dashboard.
+   admin page (`http://<mac>:41007/admin`, password = the token) and shows its dashboard.
 
 That is all. The frame's own storage (Android) is never written: take the card out and it is
 the original frame again.

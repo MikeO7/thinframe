@@ -2,7 +2,7 @@
 # Quotes optional. Lines starting with # ignored.
 WIFI_SSID=HomeWifi
 WIFI_PSK=correct horse battery staple
-SERVER_URL=http://nas.local:8080
+SERVER_URL=http://nas.local:41007
 FRAME_ID=kitchen
 # Optional: leave out to pair with the PAIR button on the frame (TASK 16).
 FRAME_TOKEN=dev-token-change-me

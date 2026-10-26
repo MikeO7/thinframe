@@ -82,7 +82,7 @@ const PLAIN_CSS: &str = "html,body{margin:0;height:100%;overflow:hidden;backgrou
     align-items:center;text-align:center}\
     h1{margin:0 0 .3em;font-size:44px;font-weight:600}p{margin:.2em 0;color:#9aa4af}";
 
-/// The line: headline ("cannot reach http://nas:8080") plus detail lines (frame id, IP, retry),
+/// The line: headline ("cannot reach http://nas:41007") plus detail lines (frame id, IP, retry),
 /// styled after `SPLASH_STYLE`.
 pub fn render_line(headline: &str, details: &[String], style: &str) -> String {
     let lines: String = details
