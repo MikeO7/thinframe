@@ -3,7 +3,8 @@
 #   scripts/server-deploy.sh HOST [DIR]      DIR on the host, default ~/thinframe
 # The host keeps: DIR/compose.yml (written here), DIR/env (FRAME_TOKEN and your settings,
 # made once, mode 600, never overwritten), DIR/data (frames, sources, assets).
-# The container uses host networking (frames find it by UDP discovery on 41007) and reads
+# The container uses host networking (HTTP on PORT from DIR/env, default 41007; frames find
+# it by UDP discovery on 41007, whose reply carries that port) and reads
 # the container list from the host's Docker socket for the services widget.
 # Tagged local/thinframe-server: update managers that skip local/* leave it alone.
 set -euo pipefail
@@ -54,11 +55,14 @@ services:
       - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
 YML
 docker compose -p thinframe up -d --remove-orphans >/dev/null
+port=\$(sed -n 's/^PORT=[^0-9]*\([0-9]*\).*/\1/p' env | tail -n 1)
+port=\${port:-41007}
 for _ in \$(seq 30); do
-	curl -fsS -m 2 http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break
+	curl -fsS -m 2 "http://127.0.0.1:\$port/healthz" >/dev/null 2>&1 && break
 	sleep 1
 done
-curl -fsS -m 2 http://127.0.0.1:8080/healthz >/dev/null
+curl -fsS -m 2 "http://127.0.0.1:\$port/healthz" >/dev/null
 EOF
-ok "running on $host:8080 ($tag)"
+port=$(ssh -o BatchMode=yes "$host" "sed -n 's/^PORT=[^0-9]*\([0-9]*\).*/\1/p' '$dir/env' | tail -n 1")
+ok "running on $host:${port:-41007} ($tag)"
 ssh -o BatchMode=yes "$host" "docker logs --tail 5 thinframe 2>&1"

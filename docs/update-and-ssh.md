@@ -51,7 +51,7 @@ as `dev-<stamp>-<sha>` in the server's artifacts directory (the server reads
 `versions.json` on every config request, no restart) and, with `SERVER_URL`, `FRAME_ID` and
 `FRAME_TOKEN` set, sends `update-software`. The frame swaps the binary within seconds; a build
 that crash-loops is rolled back by tfctl itself. A native server for that loop:
-`cd server && PORT=8080 DATA_DIR=~/.thinframe/data ARTIFACTS_DIR=~/.thinframe/artifacts FRAME_TOKEN=... go run ./cmd/frameserver`.
+`cd server && PORT=41007 DATA_DIR=~/.thinframe/data ARTIFACTS_DIR=~/.thinframe/artifacts FRAME_TOKEN=... go run ./cmd/frameserver`.
 
 A hung kernel or a wedged tfctl reboots itself: tfctl arms the A33's hardware watchdog (16 s)
 and pets it every 5 s; init's respawn re-arms it. Nothing to do at the frame.

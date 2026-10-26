@@ -17,5 +17,5 @@ COPY --from=build /frameserver /frameserver
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY artifacts/ /artifacts/
 VOLUME /data
-EXPOSE 8080
+EXPOSE 41007
 ENTRYPOINT ["/frameserver"]

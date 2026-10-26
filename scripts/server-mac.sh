@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="${THINFRAME_STATE:-$HOME/.thinframe}"
 LABEL=com.thinframe.server
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-PORT="${PORT:-8080}"
+PORT="${PORT:-41007}"
 B=$'\033[1m'; G=$'\033[32m'; N=$'\033[0m'
 ok()   { printf '  %s✓%s %s\n' "$G" "$N" "$*"; }
 stop() { printf '  \033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }

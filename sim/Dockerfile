@@ -20,7 +20,7 @@ COPY --from=tfctl /src/target/release/tfctl /usr/bin/tfctl
 COPY --from=driver /simframe /usr/bin/simframe
 # No bubblewrap sandbox: hosts that restrict user namespaces (Ubuntu 24.04 runners) kill the
 # WebProcess. Dev-only container loading our own server; the frame image keeps the sandbox.
-ENV SERVER_URL=http://frameserver:8080 FRAME_ID=sim SHOT_INTERVAL_S=5 OUT_DIR=/out \
+ENV SERVER_URL=http://frameserver:41007 FRAME_ID=sim SHOT_INTERVAL_S=5 OUT_DIR=/out \
     LIBGL_ALWAYS_SOFTWARE=1 EGL_PLATFORM=surfaceless WEBKIT_DISABLE_DMABUF_RENDERER=1 GALLIUM_DRIVER=llvmpipe \
     WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 VOLUME /out

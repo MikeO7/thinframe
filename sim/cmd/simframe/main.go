@@ -49,7 +49,7 @@ func env(k, def string) string {
 
 func main() {
 	log.SetFlags(log.Ltime)
-	server := strings.TrimRight(env("SERVER_URL", "http://frameserver:8080"), "/")
+	server := strings.TrimRight(env("SERVER_URL", "http://frameserver:41007"), "/")
 	id := env("FRAME_ID", "sim")
 	token := os.Getenv("FRAME_TOKEN")
 	outDir := env("OUT_DIR", "/out")

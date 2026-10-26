@@ -5,7 +5,7 @@ logic of its own; it renders `/frame/<id>` and obeys `/api/frames/<id>/config`.
 
 ```sh
 docker compose up -d --build        # from the repo root
-# on the frame (once): doas tfctl set SERVER_URL http://nas.local:8080 FRAME_ID livingroom
+# on the frame (once): doas tfctl set SERVER_URL http://nas.local:41007 FRAME_ID livingroom
 ```
 
 `/frame/<id>` is rendered from the frame's `layout.json` with the templates in `internal/widgets/templates/`.
@@ -77,7 +77,7 @@ local server for testing on another machine with `DISCOVERY=off`, so frames only
 
 What is yours stays out of this repo: names, rooms, containers and pictures go in the layout you PUT
 and in `DATA_DIR`, never in Git. `examples/obsidian/` is a demo with made-up names:
-`FRAME_TOKEN=... examples/obsidian/load.sh http://localhost:8080 demo`. Sources are server-wide,
+`FRAME_TOKEN=... examples/obsidian/load.sh http://localhost:41007 demo`. Sources are server-wide,
 so load the demo on a server whose source keys you are not using.
 
 Controls (climate on, lock, scenes) are display-only: the page plane has no credentials, so a tap
@@ -91,22 +91,22 @@ hints, results are JSON objects (structuredContent), and browser requests from o
 
 Claude Code:
 ```sh
-claude mcp add --transport http thinframe http://nas.local:8080/mcp --header "Authorization: Bearer $FRAME_TOKEN"
+claude mcp add --transport http thinframe http://nas.local:41007/mcp --header "Authorization: Bearer $FRAME_TOKEN"
 ```
 
 Hermes Agent (`~/.hermes/config.yaml`):
 ```yaml
 mcp_servers:
   thinframe:
-    url: "http://nas.local:8080/mcp"
+    url: "http://nas.local:41007/mcp"
     headers:
       Authorization: "Bearer <FRAME_TOKEN>"
 ```
 
 Any other client (Cursor, Codex, Claude Desktop through a remote connector, the MCP Inspector) works the same way:
-URL `http://<host>:8080/mcp`, transport "streamable HTTP" (sometimes just "http"), the header above. There is no
+URL `http://<host>:41007/mcp`, transport "streamable HTTP" (sometimes just "http"), the header above. There is no
 OAuth. A client that insists on OAuth needs the header option.
-Check it with `npx @modelcontextprotocol/inspector --cli http://nas.local:8080/mcp --transport http
+Check it with `npx @modelcontextprotocol/inspector --cli http://nas.local:41007/mcp --transport http
 --header "Authorization: Bearer $FRAME_TOKEN" --method tools/list`.
 
 Then: "list my frames", "rotate kitchen to landscape", "update all frames to the latest system",

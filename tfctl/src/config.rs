@@ -20,7 +20,7 @@ pub struct Config {
     /// https://github.com/<owner>/thinframe/archive/refs/heads/main.tar.gz
     pub repo_tarball: String,
     pub health_interval_s: u64,
-    /// Thin-client mode: base URL of frameserver, e.g. http://nas.local:8080. Empty = standalone.
+    /// Thin-client mode: base URL of frameserver, e.g. http://nas.local:41007. Empty = standalone.
     pub server_url: String,
     pub frame_id: String,
     pub poll_interval_s: u64,
