@@ -775,3 +775,23 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   sources and state after such a gap, and `screenshot` says when the screen is off (#123).
 - The widget mode (bridge over postMessage) is verified in Chromium only so far; the frame's
   WebKit is still [U] for it.
+
+## 2026-10-26 Aurora 11, cameras, doorbell wake, light sensor, calendar, bench fix
+- Aurora "up to 11" (#127) on Nox and the office frame. `frame_action bench` with it [V]:
+  `10 of 10 taps painted; tap -> paint p50 28 ms, max 36 ms; in the page p50 30 ms, max 36 ms`
+  (tfctl with #131, 07:04:19 UTC). The page's own samples before the fix: 17 to 99 ms, one 220 ms.
+- Bench had never passed on the frame: every tap "no paint reported within 5s" although the page
+  beaconed each paint within ~100 ms (seen by polling `GET /api/frames/office` from the frame with
+  wget). Cause: that reply is now ~30 KB and Go sends it `Transfer-Encoding: chunked`; tfctl's
+  HTTP client did not decode chunks, so the JSON did not parse. Fixed in #131 [V].
+- `wake` action (#128) [V]: tfctl ca5b784 acked `wake` with the screen on (no-op) at 05:55:04;
+  at 06:55:15 with the screen off the frame logged `tfctl: wake: screen on for 120 s`.
+- Cameras and doorbell (#128): deployed; Protect not configured on Nox yet (no API key), so only
+  the fake console in the tests and on the Mac has rung [U on a real console].
+  Office layout got a Cameras tab (backup `~/.thinframe/office-layout.bak-before-cams.json`).
+- Light sensor (#129): in the dark office at night `tfctl light` read 0 in ~2,000 reads over 20 s
+  with the backlight on [V]. After the update the frame logged `tfctl: light: sensor on LRADC0, 10
+  reads a second, screen off in a dark room`; `top` showed tfctl at 0 % CPU [V]. Office config:
+  `auto_brightness`, `wave`, `motion_wake` on (frame log `light: auto-brightness true, wave true,
+  motion wake true`). Wave, motion and auto-brightness in a lit room not tried yet [U].
+- Calendar recurrence and several feeds (#130): deployed; no `CALENDAR_ICS_URL` on Nox yet [U].
