@@ -226,6 +226,7 @@ impl Agent {
                 self.send_report();
                 Ok(())
             }
+            "screenshot" => self.start_screenshot(),
             "rollback" => {
                 let slot = sysupdate::rollback(&self.paths)?;
                 self.event("rollback", &format!("booting slot {} next", slot.name()));
@@ -234,6 +235,25 @@ impl Agent {
             }
             other => Err(io::Error::other(format!("unknown action '{other}'"))),
         }
+    }
+
+    /// Capture and upload in a thread (a 3 MB POST over Wi-Fi takes a moment); the action is
+    /// acked at once and the outcome arrives as a `screenshot` event.
+    fn start_screenshot(&self) -> io::Result<()> {
+        let (cfg, base, events) = (self.cfg.clone(), self.base.clone(), self.events.clone());
+        thread::Builder::new()
+            .name("screenshot".into())
+            .spawn(move || {
+                let msg = match crate::screenshot::capture_and_upload(&base, &cfg) {
+                    Ok(s) => s,
+                    Err(e) => format!("failed: {e}"),
+                };
+                eprintln!("tfctl: agent: event screenshot: {msg}");
+                if let Ok(mut q) = events.lock() {
+                    q.push(("screenshot".into(), msg));
+                }
+            })?;
+        Ok(())
     }
 
     /// TASK 13: `tfctl bench` from the server (it needs root, which the agent has). Taps take
@@ -498,6 +518,8 @@ mod tests {
         assert!(a.action("update-system", &Value::obj()).is_err());
         assert!(a.action("update-software", &Value::obj()).is_err());
         assert!(a.action("bogus", &Value::obj()).is_err());
+        // Acked at once; capture (no DRM here) fails later as an event, not as the ack.
+        assert!(a.action("screenshot", &Value::obj()).is_ok());
         let got: Vec<_> = rx.try_iter().collect();
         assert_eq!(got, vec![KioskCmd::Screen(false), KioskCmd::Restart]);
         let h = a.hello().to_string();
