@@ -218,7 +218,7 @@ func register(m *sdk.Server, s *api.Server) {
 				"types":   widgets.Types,
 				"props":   widgets.Props,
 				"images":  "http(s) URL or asset:<file> from DATA_DIR/assets",
-				"tabs":    "optional tabs [{id,title,icon,parent}] (icons: " + strings.Join(widgets.IconNames(), ", ") + "); widgets set tab; every tab shares cols x rows; idle_s returns to the first tab",
+				"tabs":    "optional tabs [{id,title,icon,parent}] (icons: " + strings.Join(widgets.IconNames(), ", ") + "); widgets set tab; every tab shares cols x rows; idle_s returns to the first tab; nav left (default, a rail on the left) or bottom",
 				"themes":  "light, dark, obsidian",
 				"apps":    "type app shows an app (put_app; see app_guide) in the cell: any HTML/CSS/JS, live data and buttons",
 				"grid":    "cols x rows (1..12 each); widgets have x,y,w,h in cells and must not overlap",
