@@ -757,3 +757,21 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   or dbus-daemon.
 - Wall-brick start on the brick itself is still owed: the owner was away. To do: brick only,
   then over Wi-Fi as root `cat /sys/class/udc/*/state` (expect `not attached`) and the boot log.
+
+## 2026-10-26 MCP apps and screenshots
+- Screenshot capture (#118) [V]: `/tmp/tfctl screenshot /tmp/s.ppm` on the frame printed
+  `1280x800 from /dev/dri/card1 (rotation 3) in 342 ms`; the image was the dashboard, upright,
+  colours right.
+- tfctl 2026.10.26-561fff4 pushed from Nox: `action update-software` 04:36:52, ack 04:36:53,
+  `frame:software-updated 2026.10.26-561fff4` 04:36:57.
+- Apps end to end on the frame (#123, server 561fff4 on Nox) [V]: MCP `put_app hello` then
+  `show_app office hello`, then `send_to_app hello say "Hello from Claude over MCP"`, then MCP
+  `screenshot office width=1280` returned the app full screen under the CSP sandbox: clock,
+  weather from `/api/data/weather` through CORS (46° clear), the message from MCP, the state
+  counter. Photo: `docs/img/2026-10-26-app-hello-screenshot.png`. `get_app_events` had no
+  `app-error`. `show_app office ""` put the dashboard back.
+- A `set_app_state` sent right after did not show: the screen had gone off in the dark room
+  (backlight 0, cog `T (stopped)`), so the page was paused. The SDK now refetches watched
+  sources and state after such a gap, and `screenshot` says when the screen is off (#123).
+- The widget mode (bridge over postMessage) is verified in Chromium only so far; the frame's
+  WebKit is still [U] for it.
