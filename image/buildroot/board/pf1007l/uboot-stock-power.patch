@@ -1,20 +1,22 @@
 --- a/board/sunxi/board.c
 +++ b/board/sunxi/board.c
-@@ -572,6 +572,21 @@
+@@ -572,6 +572,23 @@
  	defined CONFIG_AXP803_POWER
  	power_failed = axp_init();
- 
+
 +#ifdef CONFIG_AXP221_POWER
 +	/*
 +	 * thinframe: the stock firmware's charger setup (sys_config [pmu1_para] pmu_usbcur_limit=0,
 +	 * pmu_usbvol_limit=0, pmu_vbusen_func=1), before the DCDCs and the CPU clock go up: VBUS
 +	 * current limit off (0x30 bits 1:0 = 11), VHOLD off (0x30 bit 6), DRIVEBUS off (0x30 bit 2),
-+	 * N_VBUSEN as an output (0x8f bit 4), DC1SW on (0x12 bit 7). Stock Android starts on a wall
-+	 * brick; build L with chip defaults started only behind a USB host (docs/log.md, 2026-10-23).
++	 * VBUS path on whatever the N_VBUSEN pin reads (0x30 bit 7), N_VBUSEN a sense input and never
++	 * the DRIVEVBUS output (0x8f bit 4 = 1; Linux clears it for drive-vbus-en), DC1SW on (0x12
++	 * bit 7). Stock Android starts on a wall brick; build L with chip defaults started only
++	 * behind a USB host (docs/log.md, 2026-10-23).
 +	 */
 +	if (!power_failed)
 +		power_failed = pmic_bus_clrbits(0x30, BIT(6) | BIT(2)) ||
-+			       pmic_bus_setbits(0x30, 0x03) ||
++			       pmic_bus_setbits(0x30, BIT(7) | 0x03) ||
 +			       pmic_bus_setbits(0x8f, BIT(4)) ||
 +			       pmic_bus_setbits(0x12, BIT(7));
 +#endif
