@@ -18,7 +18,8 @@
 //	PROTECT_URL       UniFi Protect console (https://192.168.1.1): cameras widget, doorbell pop-up
 //	PROTECT_API_KEY   its Integration API key (Protect: Settings, Control Plane, Integrations)
 //	PROTECT_INSECURE  1 = accept the console's self-signed certificate
-//	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
+//	CALENDAR_ICS_URL  enable the calendar widget from public .ics feeds (https:// or webcal://);
+//	              several URLs separated by spaces, commas or newlines are merged; repeating events expand
 //	TZ            frames receive this time zone
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
 //	SERVICES_SSH  ssh destination whose `docker ps` feeds the source "services" (key auth only)
@@ -79,13 +80,13 @@ func main() {
 		opts.Photos = ph
 		log.Printf("photos: %s", dir)
 	}
-	if u := os.Getenv("CALENDAR_ICS_URL"); u != "" {
+	if urls := api.FeedURLs(os.Getenv("CALENDAR_ICS_URL")); len(urls) > 0 {
 		loc, err := time.LoadLocation(env("TZ", "UTC"))
 		if err != nil {
 			loc = time.UTC
 		}
-		opts.Calendar = &api.ICS{URL: u, Loc: loc}
-		log.Printf("calendar: ics feed enabled")
+		opts.Calendar = api.ICSFeeds(urls, loc)
+		log.Printf("calendar: %d ics feed(s) enabled", len(urls))
 	}
 	if u, k := os.Getenv("PROTECT_URL"), os.Getenv("PROTECT_API_KEY"); u != "" && k != "" {
 		opts.Protect = protect.New(u, k, os.Getenv("PROTECT_INSECURE") == "1")
