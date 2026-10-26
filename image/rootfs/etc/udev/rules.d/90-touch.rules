@@ -1,5 +1,6 @@
-# Silead touch calibration [V] 2026-10-26: taps at the screen's top-left, top-right and bottom-left
-# read (2%, 97%), (98%, 96%), (2%, 4%) on the device, so x is right and y is flipped. cog's drm
-# platform does not rotate touch (libinput rotation is pointer-only); it scales the calibrated
-# point onto the rotated screen, so this matrix is all the mapping there is.
-ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="silead_ts", ENV{LIBINPUT_CALIBRATION_MATRIX}="1 0 0 0 -1 1"
+# Silead touch calibration [V] 2026-10-26. Taps at the screen's top-left, top-right and
+# bottom-left read (2%, 97%), (98%, 96%), (2%, 4%) on the device: the chip reports in the
+# landscape picture's own axes, y upward. cog (patches/cog/0002) then turns each point as if it
+# came from the portrait panel: at rotation=3, page = (py, 1 - px). Swapping x and y here makes
+# that page = (device x, 1 - device y), the point under the finger.
+ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="silead_ts", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 1 0 0"
