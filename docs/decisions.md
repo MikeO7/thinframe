@@ -598,11 +598,34 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   owner's LAN; 41007 is already thinframe's UDP discovery port, and TCP and UDP ports do not
   collide, so one number covers both: "thinframe lives on 41007". `PORT` still overrides it;
   in compose it sets both sides of the port map and the port the discovery reply carries.
-- Existing frames with `SERVER_URL=http://<host>:8080` move on their own [U]: after
+- Existing frames with `SERVER_URL=http://<host>:8080` move on their own [V 2026-10-26: the
+  office frame went from `http://server.nox:8080` to `http://192.168.1.5:41007` 22 s after the
+  server moved, untouched; `FRAME_URL` moved with it]: after
   REDISCOVER_EVERY failed connects the agent broadcasts on UDP 41007, the server (host
   networking) answers with its new port and an HMAC proof, and tfctl persists
   `SERVER_URL=http://<server-ip>:41007` (`agent.rs` `move_server`). The new URL uses the
   replying address, not the old hostname. A frame with a pinned `FRAME_URL` keeps that page URL.
 - Fallback when rediscovery cannot work (server with `DISCOVERY=off`, other subnet): rewrite the
-  card's settings with `scripts/flash.sh --settings-only` and the new URL, or
-  `doas tfctl set SERVER_URL http://<host>:41007` over SSH.
+  card's settings with `scripts/flash.sh --settings-only` and the new URL, or type it in
+  Settings on the frame (hold the screen 5 s, below).
+
+## Settings on the frame: hold the screen 5 s (2026-10-26)
+- The frame must never need a card or a computer to recover. A finger held on the screen for 5 s,
+  on any page, opens Settings: change Wi-Fi (also while connected), forget saved networks, find
+  the server on the LAN or type its address, see addresses and versions, restart [V 2026-10-26:
+  opened on the frame by an injected 7 s BTN_TOUCH hold].
+- The hold is read by tfctl from the touch device, not by the page, so it works over the
+  dashboard, the status page, a broken page and with no server at all. Taps never add up to a
+  hold; the finger may move. 5 s is long enough that nobody does it by accident on a dashboard.
+- tfctl serves it on 127.0.0.1:8092, like the Wi-Fi setup page: loopback only, Host header
+  checked, 404 unless on screen. It closes after 3 min untouched; a server `restart-kiosk` waits
+  while it is open (the page watchdog sees the dashboard go quiet).
+- A typed address without a port is tried on 41007, 8080 and 80 (`GET /healthz`); one that does
+  not answer can still be saved ("use anyway"). A LAN search first asks for a server that proves
+  it knows this frame's token, then for any server, which then shows PAIR.
+- A frame with no `SERVER_URL` and no Wi-Fi opens Settings on Wi-Fi after 45 s: the Wi-Fi setup
+  page belongs to the agent, which starts only once a server is known.
+- Pages change in the running cog: cog gets a private D-Bus session bus
+  (`/run/thinframe/cog-bus`) and the kiosk sends `cogctl open URL`, falling back to a restart.
+  Settings came up in 0.9 s this way; by restart it took 8 s (2.2 s to end cog, 3.9 s of
+  splash, 2 s to load) [V 2026-10-26].

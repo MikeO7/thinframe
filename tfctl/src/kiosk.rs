@@ -32,6 +32,9 @@ pub enum KioskCmd {
     Schedule(String, String),
     /// Stop cog and return from `supervise`: a new tfctl was installed, init respawns us.
     Exit,
+    /// Show Settings (settings.rs) at this path; the page on screen comes back on close.
+    OpenSettings(String),
+    CloseSettings,
 }
 
 /// Kill what is left of cog's process group (WPEWebProcess, WPENetworkProcess) and wait up to
@@ -68,6 +71,11 @@ const FAST_FAIL_LIMIT: u32 = 5;
 const TOUCH_WAKE: Duration = Duration::from_secs(60);
 /// The light value goes to the log this often, to tune light.rs's thresholds at the frame.
 const LIGHT_LOG: Duration = Duration::from_secs(900);
+/// A private D-Bus session bus for cog, so a new page opens in the running cog (`cogctl open`)
+/// instead of a restart: ending cog took 2.2 s and the splash over the new start 3.9 s
+/// [V 2026-10-26]; in place the old page stays up until the new one paints.
+const BUS: &str = "unix:path=/run/thinframe/cog-bus";
+const COGCTL_TIMEOUT: Duration = Duration::from_secs(3);
 /// No cog binary: hold the splash instead of looping on spawn errors.
 const MISSING_DELAY: Duration = Duration::from_secs(3600);
 
@@ -107,6 +115,17 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     }
     let (tx, rx) = mpsc::channel();
     let mut k = Kiosk::new(cfg);
+    let st: crate::settings::Shared = Default::default();
+    match crate::settings::start(
+        st.clone(),
+        std::sync::Arc::new(crate::wifi::Iwctl),
+        tx.clone(),
+        cfg.path.clone(),
+        &format!("127.0.0.1:{}", crate::settings::PORT),
+    ) {
+        Ok(_) => k.settings = Some(st),
+        Err(e) => eprintln!("tfctl: settings: listen on {}: {e}", crate::settings::PORT),
+    }
     crate::logmirror::start(LOG, crate::logmirror::DIR);
     crate::prewarm::start();
     crate::boot::save_seed_when_ready();
@@ -117,7 +136,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
         thread::Builder::new()
             .name("discover".into())
             .spawn(move || {
-                if let Some(cfg) = discover_server(&cfg) {
+                if let Some(cfg) = discover_server(&cfg, &tx) {
                     start_agent(&cfg, &tx, None);
                 }
             })?;
@@ -127,17 +146,41 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     k.supervise(&rx)
 }
 
-/// Probe the LAN every 10 s until a server answers; persist it as SERVER_URL and return the
-/// config reloaded with it. None only when tfctl is asked to stop.
-fn discover_server(cfg: &Config) -> Option<Config> {
+/// Probe the LAN every 10 s until a server answers or one is typed in Settings; persist it as
+/// SERVER_URL and return the config reloaded with it. None only when tfctl is asked to stop.
+/// Without Wi-Fi for wifisetup::GRACE it opens Settings on Wi-Fi: the agent, which shows the
+/// Wi-Fi setup page otherwise, runs only once a server is known.
+fn discover_server(cfg: &Config, tx: &mpsc::Sender<KioskCmd>) -> Option<Config> {
+    use crate::wifi::Radio;
     let token = Some(cfg.token.as_str()).filter(|t| !t.is_empty());
     let who = crate::discover::Asker {
         id: &cfg.frame_id,
         token,
     };
+    crate::settings::LISTENING.store(true, Ordering::SeqCst);
+    let started = Instant::now();
+    let mut wifi_shown = false;
     loop {
         if crate::sys::term_requested() {
             return None;
+        }
+        if let Some(url) = crate::settings::take_server() {
+            eprintln!("tfctl: kiosk: no SERVER_URL; {url} set in Settings");
+            return Some(crate::config::load(&cfg.path).unwrap_or_else(|_| {
+                let mut c = cfg.clone();
+                c.server_url = url.clone();
+                c.url = format!("{url}/frame/{}", c.frame_id);
+                c
+            }));
+        }
+        let radio = crate::wifi::Iwctl;
+        if !wifi_shown
+            && radio.present()
+            && !radio.connected()
+            && started.elapsed() >= crate::wifisetup::GRACE
+        {
+            wifi_shown = true;
+            let _ = tx.send(KioskCmd::OpenSettings("/settings/wifi".into()));
         }
         let nonce = crate::pair::nonce().unwrap_or_default();
         if let Ok(Some(url)) = crate::discover::find(
@@ -157,7 +200,7 @@ fn discover_server(cfg: &Config) -> Option<Config> {
             }
             return Some(c);
         }
-        thread::sleep(Duration::from_secs(10));
+        crate::settings::nap(Duration::from_secs(10));
     }
 }
 
@@ -235,6 +278,12 @@ pub struct Kiosk {
     /// Held from start until cog is spawned (TASK 15); shown again when cog is missing.
     splash: Option<splash::Splash>,
     exit: bool,
+    /// Settings (settings.rs), when its listener started; and the page to go back to while it
+    /// is on screen (pages the agent asks for meanwhile replace it).
+    settings: Option<crate::settings::Shared>,
+    back_to: Option<String>,
+    /// The session bus cog listens on (`BUS`); None where dbus-daemon is missing.
+    bus: Option<Child>,
 }
 
 impl Kiosk {
@@ -269,6 +318,9 @@ impl Kiosk {
             splash_style: cfg.splash_style.clone(),
             splash: None,
             exit: false,
+            settings: None,
+            back_to: None,
+            bus: None,
         }
     }
 
@@ -317,6 +369,7 @@ impl Kiosk {
             .unwrap_or_else(|_| format!("/run/user/{}", uid_of(&self.user).unwrap_or(1000)));
         c.env("XDG_RUNTIME_DIR", runtime_dir)
             .env("LIBSEAT_BACKEND", "seatd")
+            .env("DBUS_SESSION_BUS_ADDRESS", BUS)
             .stdin(Stdio::null());
         if crate::dbg::on() {
             c.env("G_MESSAGES_DEBUG", "all");
@@ -426,13 +479,14 @@ impl Kiosk {
     pub fn handle(&mut self, cmd: KioskCmd) {
         eprintln!("tfctl: kiosk: {cmd:?}");
         match cmd {
-            KioskCmd::Restart | KioskCmd::Reload => self.restart(),
-            KioskCmd::SetUrl(u) => {
-                if u != self.url {
-                    self.url = u;
-                    self.restart();
-                }
+            // The server's page watchdog sees the dashboard go quiet while Settings is up: the
+            // person at the screen comes first, the dashboard reloads when Settings closes.
+            KioskCmd::Restart | KioskCmd::Reload if self.back_to.is_some() => {
+                eprintln!("tfctl: kiosk: Settings open, not restarting");
             }
+            KioskCmd::Restart | KioskCmd::Reload => self.restart(),
+            KioskCmd::SetUrl(u) if self.back_to.is_some() => self.back_to = Some(u),
+            KioskCmd::SetUrl(u) => self.go(u),
             KioskCmd::SetRotation(r) => {
                 if r != self.rotation {
                     self.rotation = r;
@@ -458,6 +512,103 @@ impl Kiosk {
                 self.kill_child();
                 self.exit = true;
             }
+            KioskCmd::OpenSettings(path) => {
+                let Some(st) = &self.settings else {
+                    return;
+                };
+                crate::settings::open(st);
+                if self.back_to.is_none() {
+                    self.back_to = Some(self.url.clone());
+                }
+                if !SCREEN_ON.load(Ordering::SeqCst) {
+                    self.set_screen(true);
+                }
+                self.go(crate::settings::url(&path));
+            }
+            KioskCmd::CloseSettings => {
+                if let Some(st) = &self.settings {
+                    crate::settings::close(st);
+                }
+                if let Some(u) = self.back_to.take() {
+                    self.go(u);
+                }
+            }
+        }
+    }
+
+    /// Show `u`: in the running cog when it answers on the bus, else by a restart.
+    fn go(&mut self, u: String) {
+        if u == self.url {
+            return;
+        }
+        if self.open_in_place(&u) {
+            eprintln!("tfctl: kiosk: opened {u} in place");
+            self.url = u;
+            return;
+        }
+        self.url = u;
+        self.restart();
+    }
+
+    fn open_in_place(&mut self, u: &str) -> bool {
+        if self.child.is_none() || self.stopped || self.bus.is_none() {
+            return false;
+        }
+        if self
+            .bus
+            .as_mut()
+            .is_some_and(|b| !matches!(b.try_wait(), Ok(None)))
+        {
+            self.bus = None;
+            return false;
+        }
+        let child = Command::new("cogctl")
+            .args(["open", u])
+            .env("DBUS_SESSION_BUS_ADDRESS", BUS)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = child else {
+            return false;
+        };
+        let end = Instant::now() + COGCTL_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(st)) => return st.success(),
+                Ok(None) if Instant::now() < end => thread::sleep(Duration::from_millis(20)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+            }
+        }
+    }
+
+    /// cog's session bus, once: dbus-daemon in the foreground as our child.
+    fn start_bus(&mut self) {
+        if self.platform == "wl" {
+            return;
+        }
+        let path = BUS.trim_start_matches("unix:path=");
+        let _ = fs::remove_file(path);
+        match Command::new("dbus-daemon")
+            .args(["--session", "--nofork", "--nopidfile"])
+            .arg(format!("--address={BUS}"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => {
+                // cog must find the socket at its start, or it runs without the bus.
+                let end = Instant::now() + Duration::from_secs(1);
+                while !std::path::Path::new(path).exists() && Instant::now() < end {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                self.bus = Some(c);
+            }
+            Err(e) => eprintln!("tfctl: kiosk: no session bus ({e}); pages change by restart"),
         }
     }
 
@@ -518,7 +669,19 @@ impl Kiosk {
     }
 
     fn tick_touch(&mut self, now: Instant) {
-        if self.touch.touched() {
+        let touched = self.touch.touched();
+        if self.touch.long_press(crate::settings::HOLD) && self.back_to.is_none() {
+            eprintln!(
+                "tfctl: touch: held {} s, opening Settings",
+                crate::settings::HOLD.as_secs()
+            );
+            self.handle(KioskCmd::OpenSettings("/settings".into()));
+        }
+        if self.settings.as_ref().is_some_and(crate::settings::idle) {
+            eprintln!("tfctl: settings: idle, closing");
+            self.handle(KioskCmd::CloseSettings);
+        }
+        if touched {
             if !SCREEN_ON.load(Ordering::SeqCst) {
                 eprintln!("tfctl: touch: screen on for {} s", TOUCH_WAKE.as_secs());
                 self.set_screen(true);
@@ -555,10 +718,15 @@ impl Kiosk {
         let _ = screen::set_brightness(self.brightness);
         self.show_splash("warming up");
         self.open_inputs();
+        self.start_bus();
         loop {
             if sys::term_requested() || self.exit {
                 eprintln!("tfctl: kiosk: stopping cog");
                 self.kill_child();
+                if let Some(mut b) = self.bus.take() {
+                    let _ = b.kill();
+                    let _ = b.wait();
+                }
                 self.splash = None;
                 return Ok(());
             }

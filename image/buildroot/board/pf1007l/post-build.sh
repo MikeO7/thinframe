@@ -47,3 +47,9 @@ if [ "${VARIANT:-}" = debug ]; then
 	sed -i 's|/usr/sbin/dropbear -F -R -s -w |/usr/sbin/dropbear -F -R -s |' "$T/etc/inittab"
 	grep -q 'dropbear -F -R -s >' "$T/etc/inittab" || { echo "post-build: debug root: inittab line not found" >&2; exit 1; }
 fi
+
+# What tfctl runs (Command::new): a tree that built a package before an option it needs was on
+# lost the binary silently (iwd before readline: no iwctl, so no Wi-Fi from the screen, 2026-10-26).
+for b in usr/bin/iwctl usr/libexec/iwd usr/bin/cog usr/bin/cogctl usr/bin/dbus-daemon; do
+	[ -x "$T/$b" ] || { echo "post-build: $b missing; tfctl needs it" >&2; exit 1; }
+done

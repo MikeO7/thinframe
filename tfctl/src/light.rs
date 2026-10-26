@@ -181,10 +181,73 @@ impl Sensor {
     }
 }
 
-/// The touch panel's event device, read without blocking: a touch wakes an off screen.
+/// The touch panel's event device, read without blocking: a touch wakes an off screen, and a
+/// finger held down HOLD opens Settings (settings.rs).
 pub struct Touch {
     f: Option<std::fs::File>,
     next_try: Instant,
+    /// Bytes of a struct input_event read so far (reads need not end on an event).
+    part: Vec<u8>,
+    hold: Hold,
+    /// The last open error went to the log (once, not every minute on a host without a panel).
+    told: bool,
+}
+
+/// struct input_event: two longs of time, then type, code, value (16 bytes on the frame's
+/// 32-bit ARM, 24 on a 64-bit host).
+const EV_SIZE: usize = if cfg!(target_pointer_width = "64") {
+    24
+} else {
+    16
+};
+const EV_KEY: u16 = 1;
+const EV_ABS: u16 = 3;
+const BTN_TOUCH: u16 = 0x14a;
+const ABS_MT_TRACKING_ID: u16 = 0x39;
+
+/// Whether a finger is down, from the event stream: BTN_TOUCH (pointer emulation the silead
+/// driver reports through input_mt_sync_frame), or a multitouch tracking id for drivers without it.
+#[derive(Default)]
+pub struct Hold {
+    down_since: Option<Instant>,
+    fired: bool,
+}
+
+impl Hold {
+    pub fn event(&mut self, kind: u16, code: u16, value: i32, now: Instant) {
+        let down = match (kind, code) {
+            (EV_KEY, BTN_TOUCH) => value != 0,
+            (EV_ABS, ABS_MT_TRACKING_ID) => value >= 0,
+            _ => return,
+        };
+        if !down {
+            self.down_since = None;
+            self.fired = false;
+        } else if self.down_since.is_none() {
+            self.down_since = Some(now);
+        }
+    }
+
+    /// True once per press, when the finger has been down for `hold`.
+    pub fn long_press(&mut self, hold: Duration, now: Instant) -> bool {
+        match self.down_since {
+            Some(t) if !self.fired && now.saturating_duration_since(t) >= hold => {
+                self.fired = true;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// (type, code, value) of one struct input_event.
+pub fn parse_event(b: &[u8]) -> Option<(u16, u16, i32)> {
+    let t = b.get(EV_SIZE - 8..EV_SIZE)?;
+    Some((
+        u16::from_ne_bytes([t[0], t[1]]),
+        u16::from_ne_bytes([t[2], t[3]]),
+        i32::from_ne_bytes([t[4], t[5], t[6], t[7]]),
+    ))
 }
 
 impl Touch {
@@ -193,6 +256,9 @@ impl Touch {
         Touch {
             f: None,
             next_try: Instant::now(),
+            part: Vec::new(),
+            hold: Hold::default(),
+            told: false,
         }
     }
 
@@ -201,31 +267,62 @@ impl Touch {
         use std::io::Read;
         if self.f.is_none() && Instant::now() >= self.next_try {
             self.next_try = Instant::now() + Duration::from_secs(60);
-            self.f = open_touch();
+            self.f = match open_touch() {
+                Ok(f) => {
+                    eprintln!("tfctl: touch: reading the panel");
+                    self.told = false;
+                    Some(f)
+                }
+                Err(e) => {
+                    if !self.told {
+                        eprintln!("tfctl: touch: {e}");
+                        self.told = true;
+                    }
+                    None
+                }
+            };
         }
         let Some(f) = &mut self.f else {
             return false;
         };
         let mut buf = [0u8; 1024];
         let mut seen = false;
+        let now = Instant::now();
         loop {
             match f.read(&mut buf) {
                 Ok(0) => break,
-                Ok(_) => seen = true,
+                Ok(n) => {
+                    seen = true;
+                    self.part.extend_from_slice(&buf[..n]);
+                    let whole = self.part.len() / EV_SIZE * EV_SIZE;
+                    for ev in self.part[..whole].chunks(EV_SIZE) {
+                        if let Some((k, c, v)) = parse_event(ev) {
+                            self.hold.event(k, c, v, now);
+                        }
+                    }
+                    self.part.drain(..whole);
+                }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                Err(_) => {
+                Err(e) => {
+                    eprintln!("tfctl: touch: read: {e}");
                     self.f = None; // device gone (module reload): stop trying
+                    self.hold = Hold::default();
                     break;
                 }
             }
         }
         seen
     }
+
+    /// True once per press held down for `hold` (call after `touched`).
+    pub fn long_press(&mut self, hold: Duration) -> bool {
+        self.hold.long_press(hold, Instant::now())
+    }
 }
 
-fn open_touch() -> Option<std::fs::File> {
-    let devices = std::fs::read_to_string("/proc/bus/input/devices").ok()?;
-    let ev = touch_event(&devices)?;
+fn open_touch() -> io::Result<std::fs::File> {
+    let devices = std::fs::read_to_string("/proc/bus/input/devices")?;
+    let ev = touch_event(&devices).ok_or_else(|| io::Error::other("no silead panel yet"))?;
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -234,12 +331,11 @@ fn open_touch() -> Option<std::fs::File> {
             .read(true)
             .custom_flags(O_NONBLOCK)
             .open(format!("/dev/input/{ev}"))
-            .ok()
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = ev;
-        None
+        Err(io::Error::other("no touch panel on this host"))
     }
 }
 
@@ -249,7 +345,7 @@ fn touch_event(devices: &str) -> Option<String> {
         .split("\n\n")
         .find(|b| b.contains("silead"))?
         .lines()
-        .find(|l| l.starts_with("H: Handlers="))?
+        .find_map(|l| l.strip_prefix("H: Handlers="))?
         .split_whitespace()
         .find(|w| w.starts_with("event"))
         .map(String::from)
@@ -305,7 +401,45 @@ mod tests {
                     I: Bus=0018 Vendor=0000\nN: Name=\"silead_ts\"\nP: Phys=input/ts\n\
                     H: Handlers=mouse0 event1 \nB: EV=b\n";
         assert_eq!(touch_event(devs).as_deref(), Some("event1"));
+        // The frame itself: no mousedev, so the event handler is the first word [V 2026-10-26].
+        let frame = "N: Name=\"silead_ts\"\nP: Phys=input/ts\nH: Handlers=event1 \nB: EV=b\n";
+        assert_eq!(touch_event(frame).as_deref(), Some("event1"));
         assert_eq!(touch_event("N: Name=\"x\"\nH: Handlers=event0\n"), None);
+    }
+
+    fn ev(kind: u16, code: u16, value: i32) -> Vec<u8> {
+        let mut b = vec![0u8; EV_SIZE - 8];
+        b.extend_from_slice(&kind.to_ne_bytes());
+        b.extend_from_slice(&code.to_ne_bytes());
+        b.extend_from_slice(&value.to_ne_bytes());
+        b
+    }
+
+    #[test]
+    fn a_finger_held_five_seconds_is_one_long_press() {
+        let t0 = Instant::now();
+        let s = |n| t0 + Duration::from_secs(n);
+        let five = Duration::from_secs(5);
+        let mut h = Hold::default();
+        let (k, c, v) = parse_event(&ev(EV_KEY, BTN_TOUCH, 1)).unwrap();
+        h.event(k, c, v, t0);
+        h.event(EV_ABS, 0x35, 400, s(1)); // movement does not restart the hold
+        assert!(!h.long_press(five, s(4)));
+        assert!(h.long_press(five, s(5)));
+        assert!(!h.long_press(five, s(9)), "once per press");
+        h.event(EV_KEY, BTN_TOUCH, 0, s(10));
+        assert!(!h.long_press(five, s(20)), "lifted");
+        // Taps never add up.
+        for i in 0..10 {
+            h.event(EV_KEY, BTN_TOUCH, 1, s(30 + i));
+            h.event(EV_KEY, BTN_TOUCH, 0, s(30 + i));
+        }
+        assert!(!h.long_press(five, s(45)));
+        // A driver with tracking ids only.
+        h.event(EV_ABS, ABS_MT_TRACKING_ID, 7, s(50));
+        assert!(h.long_press(five, s(56)));
+        h.event(EV_ABS, ABS_MT_TRACKING_ID, -1, s(57));
+        assert!(!h.long_press(five, s(70)));
     }
 
     #[test]
