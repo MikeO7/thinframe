@@ -1,6 +1,9 @@
-//! `tfctl bench [TAPS]` (TASK 13): touch to first paint, measured on the frame itself. A virtual
-//! touchscreen (/dev/uinput) taps the middle of the panel through the same udev + libinput path
-//! as the real one. The page's beacon (page.js) tells the server when its response was on screen
+//! `tfctl bench [TAPS] [X,Y ...]` (TASK 13): touch to first paint, measured on the frame itself. A
+//! virtual touchscreen (/dev/uinput) taps the middle of the panel, or the given points in turn,
+//! through the same udev + libinput path as the real one. Points are per cent of the panel's own
+//! (portrait) axes: the real panel's calibration matrix does not apply to the virtual one, so on
+//! a frame with COG_ROTATION=3 a point is the screen's (y, x) [V 2026-10-26: 50,5 opens the
+//! Cameras tab at screen (5 %, 50 %)]. Two nav-rail points measure tab switches. The page's beacon (page.js) tells the server when its response was on screen
 //! (`painted_at_ms`, the frame's wall clock); this reads that back and prints tap -> paint per tap.
 //! Left out: the touch controller itself (I2C read and IRQ before the kernel has the event).
 use crate::config::Config;
@@ -102,14 +105,34 @@ fn painted_after(url: &Url, token: &str, t0: i64) -> io::Result<Option<(i64, i64
     Ok(None)
 }
 
-pub fn run(cfg: &Config, args: &[String]) -> io::Result<()> {
-    let taps = match args.first() {
-        Some(n) => n
-            .parse()
-            .map_err(|_| io::Error::other("usage: tfctl bench [TAPS]"))?,
-        None => TAPS,
+const USAGE: &str = "usage: tfctl bench [TAPS] [X,Y ...] (points in per cent of the panel)";
+
+/// A point "X,Y" in per cent of the panel, as virtual-screen coordinates.
+fn parse_point(s: &str) -> Option<(i32, i32)> {
+    let (x, y) = s.split_once(',')?;
+    let pct = |v: &str| {
+        v.trim()
+            .parse::<i32>()
+            .ok()
+            .filter(|v| (0..=100).contains(v))
     };
-    println!("{}", measure(cfg, taps, &mut |l| println!("{l}"))?);
+    Some((pct(x)? * RANGE / 100, pct(y)? * RANGE / 100))
+}
+
+pub fn run(cfg: &Config, args: &[String]) -> io::Result<()> {
+    let mut taps = TAPS;
+    let mut points = Vec::new();
+    for a in args {
+        if a.contains(',') {
+            points.push(parse_point(a).ok_or_else(|| io::Error::other(USAGE))?);
+        } else {
+            taps = a.parse().map_err(|_| io::Error::other(USAGE))?;
+        }
+    }
+    println!(
+        "{}",
+        measure_at(cfg, taps, &points, &mut |l| println!("{l}"))?
+    );
     Ok(())
 }
 
@@ -118,6 +141,16 @@ pub const TAPS: usize = 10;
 /// Taps `taps` times, one line per tap to `line`; returns the summary line. Needs root
 /// (/dev/uinput), so over the network it runs as the agent's `bench` action.
 pub fn measure(cfg: &Config, taps: usize, line: &mut dyn FnMut(&str)) -> io::Result<String> {
+    measure_at(cfg, taps, &[], line)
+}
+
+/// measure, tapping `points` in turn (none: the middle).
+fn measure_at(
+    cfg: &Config,
+    taps: usize,
+    points: &[(i32, i32)],
+    line: &mut dyn FnMut(&str),
+) -> io::Result<String> {
     let base = Url::parse(&cfg.server_url).ok_or_else(|| {
         io::Error::other("bench needs SERVER_URL: the page reports to the server")
     })?;
@@ -126,13 +159,13 @@ pub fn measure(cfg: &Config, taps: usize, line: &mut dyn FnMut(&str)) -> io::Res
     thread::sleep(SETTLE);
     let (mut total, mut page) = (Vec::new(), Vec::new());
     for i in 0..taps {
+        let (x, y) = if points.is_empty() {
+            (RANGE / 2, RANGE / 2)
+        } else {
+            points[i % points.len()]
+        };
         let t0 = now_ms();
-        dev.write(&encode(&touch_events(
-            i as i32 + 1,
-            RANGE / 2,
-            RANGE / 2,
-            true,
-        )))?;
+        dev.write(&encode(&touch_events(i as i32 + 1, x, y, true)))?;
         thread::sleep(HOLD);
         dev.write(&encode(&touch_events(0, 0, 0, false)))?;
         match painted_after(&url, &cfg.token, t0)? {
@@ -339,5 +372,14 @@ mod tests {
         assert_eq!(touch_of(r#"{"id":"f"}"#), None);
         assert_eq!(summary(&[30, 10, 20]), Some((20, 30)));
         assert_eq!(summary(&[]), None);
+    }
+
+    #[test]
+    fn points_are_per_cent_of_the_panel() {
+        assert_eq!(parse_point("50,50"), Some((RANGE / 2, RANGE / 2)));
+        assert_eq!(parse_point("0, 100"), Some((0, RANGE)));
+        for bad in ["101,5", "5", "a,b", "-1,2"] {
+            assert_eq!(parse_point(bad), None, "{bad}");
+        }
     }
 }

@@ -701,10 +701,12 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   (public, like the page). Without it the frame falls back to DejaVu Sans. [V] renders in
   Chromium from the server; [U] WPE on the frame, check with a screenshot.
 - Motion, the first in any theme: the light layer drifts a few per cent over 5 minutes in
-  `steps(600)` (one transform update every half second, on one composited layer), and cards
-  rise for 0.55 s when a tab opens. No continuous 60 fps animation, no animated shadows, no
-  backdrop-filter or blend modes. [U] cost on the Mali-400: measure `frame_action bench` with
-  the screen on; if touch-to-paint gets worse, drop the drift first.
+  `steps(600)` (one transform update every half second, on one composited layer). No
+  continuous 60 fps animation, no animated shadows, no backdrop-filter or blend modes.
+- No animation on a tab switch. Cards rising for 0.55 s made a switch take 150 to 1800 ms
+  [V 2026-10-26, `tfctl bench 8 24,5 50,5` taps the nav rail]; an opacity fade per card or of
+  the whole page cost the same (each gives WebKit a new composited layer to raster on the
+  first frame). Without: p50 28 ms, max 47 ms. The drift costs nothing measurable.
 - A static SVG noise layer at 7 % opacity breaks up gradient banding. Cards get a corner sheen
   and a 1 px top edge in the tab's accent; bars, the energy "now" bar and status dots carry a
   small fixed glow in the accent colour; the Home clock has a soft glow behind it.
