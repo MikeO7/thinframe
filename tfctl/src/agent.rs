@@ -102,7 +102,13 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
                     Err(e) => {
                         eprintln!("tfctl: agent: http poll: {e}");
                         a.server_failed();
+                        let was = a.cfg.server_url.clone();
                         a.rediscover();
+                        if a.cfg.server_url != was {
+                            // Found it elsewhere: connect now, not after the backoff (8 s).
+                            backoff = 1;
+                            continue;
+                        }
                     }
                 }
             }
