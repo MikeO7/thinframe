@@ -768,7 +768,7 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   `show_app office hello`, then `send_to_app hello say "Hello from Claude over MCP"`, then MCP
   `screenshot office width=1280` returned the app full screen under the CSP sandbox: clock,
   weather from `/api/data/weather` through CORS (46° clear), the message from MCP, the state
-  counter. Photo: `docs/img/2026-10-26-app-hello-screenshot.png`. `get_app_events` had no
+  counter. Photo: `docs/img/2026-10-26-app-hello-screenshot.jpg`. `get_app_events` had no
   `app-error`. `show_app office ""` put the dashboard back.
 - A `set_app_state` sent right after did not show: the screen had gone off in the dark room
   (backlight 0, cog `T (stopped)`), so the page was paused. The SDK now refetches watched
