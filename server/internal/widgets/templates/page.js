@@ -423,6 +423,7 @@
     cameras(sec, d, p) {
       const b = body(sec), cams = arr(d.cameras);
       sec.querySelector('.live').hidden = !cams.length;
+      if (d.setup) { empty(b, 'Cameras need setting up: PROTECT_URL and PROTECT_API_KEY on the server'); return; }
       if (d.error) { empty(b, 'Cameras unavailable'); return; }
       if (!cams.length) { empty(b, d.cameras ? 'No cameras match' : 'No camera data yet'); return; }
       const g = h('div', 'cams n' + Math.min(cams.length, 9));
@@ -634,6 +635,18 @@
   }
   TF.ring = ring; // tests and the MCP preview
 
+  // A hand held over the light sensor (tfctl sense.rs): close a camera view, else the next tab.
+  function gesture(g) {
+    if (g !== 'wave') return;
+    if (view.el) { if (view.ringId) dismissed(view.ringId, true); closeView(); return; }
+    const tabs = Array.from(document.querySelectorAll('.tab'));
+    if (!tabs.length) return;
+    const i = tabs.findIndex(t => t.classList.contains('on'));
+    tabs[(i + 1) % tabs.length].click();
+    dispatchEvent(new Event('tf-activity'));
+  }
+  TF.gesture = gesture;
+
   function connect() {
     const es = new EventSource('/api/stream/' + encodeURIComponent(TF.frame) + (appFrames.length ? '?apps=1' : ''));
     es.onmessage = ev => {
@@ -643,6 +656,7 @@
       if (m.source || m.app_state || m.app_event) { toApps(m); return; }
       if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) f.src = f.src; }); return; }
       if (m.doorbell) { ring(m.doorbell); return; }
+      if (m.gesture) { gesture(m.gesture); return; }
       if (!m.widget) return;
       const sec = document.getElementById('w-' + m.widget);
       if (!sec) return;

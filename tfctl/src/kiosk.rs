@@ -7,19 +7,32 @@
 //! in a dark room (light.rs); a touch while off wakes it for a minute. SIGTERM is forwarded to cog.
 use crate::config::Config;
 use crate::update::{self, Paths, StartCheck};
-use crate::{agent, light, screen, splash, sys};
+use crate::{agent, light, screen, sense, splash, sys};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::FileExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
 /// Current screen state, read by the agent for heartbeats.
 pub static SCREEN_ON: AtomicBool = AtomicBool::new(true);
+/// The last light reading (0..63), 255 = no sensor; for heartbeats.
+pub static LIGHT: AtomicU8 = AtomicU8::new(255);
+/// Events for the server (kind, text), sent by the agent on its next pass (light: wave, motion).
+pub static EVENTS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+fn push_event(kind: &str, text: &str) {
+    if let Ok(mut q) = EVENTS.lock() {
+        if q.len() < 50 {
+            q.push((kind.into(), text.into()));
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum KioskCmd {
@@ -32,6 +45,12 @@ pub enum KioskCmd {
     /// schedule and the light decide again. An on screen stays as it is.
     Wake(u64),
     Brightness(u8),
+    /// What the light sensor may do besides "dark = off" (sense.rs).
+    Sense {
+        auto_brightness: bool,
+        wave: bool,
+        motion_wake: bool,
+    },
     Schedule(String, String),
     /// Stop cog and return from `supervise`: a new tfctl was installed, init respawns us.
     Exit,
@@ -275,6 +294,13 @@ pub struct Kiosk {
     auto_off: bool,
     /// A touch woke the screen; the schedule and the light wait until then.
     wake_until: Option<Instant>,
+    /// Wave, motion and auto-brightness (sense.rs), and which of them the server turned on.
+    sense: sense::Sense,
+    auto_brightness: bool,
+    wave: bool,
+    motion_wake: bool,
+    /// The backlight now; auto-brightness keeps it at or below `brightness`.
+    backlight: u8,
     splash_bg: u32,
     splash_text: String,
     splash_style: String,
@@ -316,6 +342,11 @@ impl Kiosk {
             touch: light::Touch::closed(),
             auto_off: false,
             wake_until: None,
+            sense: sense::Sense::new(),
+            auto_brightness: cfg.auto_brightness,
+            wave: cfg.wave,
+            motion_wake: cfg.motion_wake,
+            backlight: cfg.brightness,
             splash_bg: cfg.splash_bg,
             splash_text: cfg.splash_text.clone(),
             splash_style: cfg.splash_style.clone(),
@@ -457,7 +488,7 @@ impl Kiosk {
     fn set_screen(&mut self, on: bool) {
         SCREEN_ON.store(on, Ordering::SeqCst);
         if on {
-            if let Err(e) = screen::set_brightness(self.brightness) {
+            if let Err(e) = screen::set_brightness(self.backlight) {
                 eprintln!("tfctl: backlight: {e}");
             }
             if self.stopped {
@@ -497,20 +528,31 @@ impl Kiosk {
                 }
             }
             KioskCmd::Screen(on) => self.set_screen(on),
-            KioskCmd::Wake(secs) => {
-                let until = Instant::now() + Duration::from_secs(secs);
-                if !SCREEN_ON.load(Ordering::SeqCst) {
-                    eprintln!("tfctl: wake: screen on for {secs} s");
-                    self.set_screen(true);
-                    self.wake_until = Some(until);
-                } else if self.wake_until.is_some_and(|t| t < until) {
-                    self.wake_until = Some(until);
+            KioskCmd::Wake(secs) => self.wake(Duration::from_secs(secs), "wake"),
+            KioskCmd::Sense {
+                auto_brightness,
+                wave,
+                motion_wake,
+            } => {
+                eprintln!("tfctl: light: auto-brightness {auto_brightness}, wave {wave}, motion wake {motion_wake}");
+                (self.auto_brightness, self.wave, self.motion_wake) =
+                    (auto_brightness, wave, motion_wake);
+                if !auto_brightness && self.backlight != self.brightness {
+                    self.backlight = self.brightness;
+                    if SCREEN_ON.load(Ordering::SeqCst) {
+                        let _ = screen::set_brightness(self.backlight);
+                    }
                 }
             }
             KioskCmd::Brightness(b) => {
                 self.brightness = b;
+                self.backlight = if self.auto_brightness {
+                    self.backlight.min(b)
+                } else {
+                    b
+                };
                 if SCREEN_ON.load(Ordering::SeqCst) {
-                    if let Err(e) = screen::set_brightness(b) {
+                    if let Err(e) = screen::set_brightness(self.backlight) {
                         eprintln!("tfctl: backlight: {e}");
                     }
                 }
@@ -657,28 +699,89 @@ impl Kiosk {
         }
     }
 
-    /// Once a second: read the light sensor, and let a touch wake an off screen.
-    fn tick_light(&mut self) {
-        if self.last_light.elapsed() < Duration::from_secs(1) {
-            return;
+    /// An off screen on for `d` (a touch, a wave, a doorbell); one that a wake already turned on
+    /// stays on longer. The schedule and the light decide again when it ends.
+    fn wake(&mut self, d: Duration, why: &str) {
+        let until = Instant::now() + d;
+        if !SCREEN_ON.load(Ordering::SeqCst) {
+            eprintln!("tfctl: {why}: screen on for {} s", d.as_secs());
+            self.set_screen(true);
+            self.wake_until = Some(until);
+        } else if self.wake_until.is_some_and(|t| t < until) {
+            self.wake_until = Some(until);
         }
+    }
+
+    /// Every pass (10 a second with a sensor): the sensor's fast features (sense.rs) and touch.
+    /// Once a second: the dark rule and auto-brightness.
+    fn tick_light(&mut self) {
         let now = Instant::now();
-        self.last_light = now;
+        let mut fresh = None;
         if let Some(s) = &mut self.light {
             let v = s.read();
-            if self.last_light_log.elapsed() >= LIGHT_LOG {
-                self.last_light_log = now;
-                eprintln!("tfctl: light: {v}");
+            LIGHT.store(v, Ordering::Relaxed);
+            fresh = Some(v);
+            if let Some(g) = self.sense.step(v, now) {
+                self.gesture(g, v);
             }
-            if let Some(dark) = self.dark.step(v, now) {
-                eprintln!(
-                    "tfctl: light: room {} ({v})",
-                    if dark { "dark" } else { "lit" }
-                );
-                self.apply_auto("light");
+        }
+        if self.last_light.elapsed() >= Duration::from_secs(1) {
+            self.last_light = now;
+            if let Some(v) = fresh {
+                if self.last_light_log.elapsed() >= LIGHT_LOG {
+                    self.last_light_log = now;
+                    eprintln!("tfctl: light: {v}");
+                }
+                if let Some(dark) = self.dark.step(v, now) {
+                    eprintln!(
+                        "tfctl: light: room {} ({v})",
+                        if dark { "dark" } else { "lit" }
+                    );
+                    self.apply_auto("light");
+                }
+                self.tick_auto_brightness(v, now);
             }
         }
         self.tick_touch(now);
+    }
+
+    fn gesture(&mut self, g: sense::Gesture, v: u8) {
+        let on = SCREEN_ON.load(Ordering::SeqCst);
+        match g {
+            sense::Gesture::Wave if self.wave && self.back_to.is_none() => {
+                if on {
+                    // The page moves to the next tab (the server relays it).
+                    eprintln!("tfctl: light: wave");
+                    push_event("light", "wave");
+                } else {
+                    self.wake(TOUCH_WAKE, "light: wave");
+                }
+            }
+            sense::Gesture::Motion if self.motion_wake => {
+                eprintln!("tfctl: light: motion ({v})");
+                push_event("light", &format!("motion {v}"));
+                if !self.dark.is_dark() {
+                    self.wake(TOUCH_WAKE, "light: motion");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Auto-brightness: the backlight follows the room light, a few points a second.
+    fn tick_auto_brightness(&mut self, v: u8, now: Instant) {
+        if !self.auto_brightness || !SCREEN_ON.load(Ordering::SeqCst) {
+            return;
+        }
+        let light = self.sense.base(now).unwrap_or(v);
+        let target = (self.brightness as u32 * sense::auto_pct(light) as u32 / 100).max(5) as u8;
+        let next = sense::approach(self.backlight, target.min(self.brightness));
+        if next != self.backlight {
+            self.backlight = next;
+            if let Err(e) = screen::set_brightness(next) {
+                eprintln!("tfctl: backlight: {e}");
+            }
+        }
     }
 
     fn tick_touch(&mut self, now: Instant) {
@@ -696,9 +799,7 @@ impl Kiosk {
         }
         if touched {
             if !SCREEN_ON.load(Ordering::SeqCst) {
-                eprintln!("tfctl: touch: screen on for {} s", TOUCH_WAKE.as_secs());
-                self.set_screen(true);
-                self.wake_until = Some(now + TOUCH_WAKE);
+                self.wake(TOUCH_WAKE, "touch");
             } else if self.wake_until.is_some() {
                 self.wake_until = Some(now + TOUCH_WAKE);
             }
@@ -716,10 +817,17 @@ impl Kiosk {
     /// The sensor and the touch panel, on the frame only. The touch module loads after tfctl
     /// starts (touchfw.rs), so the touch device is looked for again until found.
     fn open_inputs(&mut self) {
-        if self.dark_off && light::on_pf1007l() {
+        if light::on_pf1007l() {
             match light::Sensor::open() {
                 Ok(s) => {
-                    eprintln!("tfctl: light: sensor on LRADC0, screen off in a dark room");
+                    eprintln!(
+                        "tfctl: light: sensor on LRADC0, 10 reads a second{}",
+                        if self.dark_off {
+                            ", screen off in a dark room"
+                        } else {
+                            ""
+                        }
+                    );
                     self.light = Some(s);
                 }
                 Err(e) => eprintln!("tfctl: light: {e}"),
@@ -728,7 +836,7 @@ impl Kiosk {
     }
 
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
-        let _ = screen::set_brightness(self.brightness);
+        let _ = screen::set_brightness(self.backlight);
         self.show_splash("warming up");
         self.open_inputs();
         self.start_bus();
@@ -763,7 +871,13 @@ impl Kiosk {
             }
             self.tick_schedule();
             self.tick_light();
-            match rx.recv_timeout(Duration::from_secs(1)) {
+            // With a light sensor the loop runs 10 times a second (a wave lasts 0.15 to 1.5 s).
+            let pass = if self.light.is_some() {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_secs(1)
+            };
+            match rx.recv_timeout(pass) {
                 Ok(cmd) => self.handle(cmd),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => thread::sleep(Duration::from_secs(1)),

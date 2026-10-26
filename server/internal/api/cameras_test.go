@@ -121,3 +121,21 @@ func TestRingPushedAndReplayed(t *testing.T) {
 		resp.Body.Close()
 	}
 }
+
+func TestLightConfig(t *testing.T) {
+	s, _ := newDataServer(t, Options{})
+	if _, err := s.Store.Ensure("hall"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.SetConfig("hall", map[string]any{"auto_brightness": true, "wave": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := s.ConfigFor(f)
+	if c["auto_brightness"] != true || c["wave"] != true || c["motion_wake"] != false {
+		t.Fatalf("config %v", c)
+	}
+	if _, err := s.SetConfig("hall", map[string]any{"motion_wake": "maybe"}); err == nil {
+		t.Fatal("motion_wake accepted a non-bool")
+	}
+}

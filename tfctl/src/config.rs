@@ -33,6 +33,11 @@ pub struct Config {
     pub screen_on: String,
     /// DARK_OFF="0" keeps the screen on in a dark room; default on (light.rs).
     pub dark_off: bool,
+    /// AUTO_BRIGHTNESS, WAVE, MOTION_WAKE ("1"): more from the light sensor (sense.rs), set by the
+    /// server's config fields of the same names in lower case. Default off.
+    pub auto_brightness: bool,
+    pub wave: bool,
+    pub motion_wake: bool,
     /// Shared secret with frameserver, sent as `Authorization: Bearer`.
     pub token: String,
     /// Last page_version applied from the server; reload cog when it changes.
@@ -73,6 +78,9 @@ impl Default for Config {
             screen_off: String::new(),
             screen_on: String::new(),
             dark_off: true,
+            auto_brightness: false,
+            wave: false,
+            motion_wake: false,
             token: String::new(),
             page_version: String::new(),
             tz: String::new(),
@@ -149,6 +157,9 @@ pub fn parse(text: &str) -> Config {
         Some("0" | "false" | "no" | "off")
     );
     cfg.debug = matches!(kv.get("DEBUG").copied(), Some("1" | "true" | "yes" | "on"));
+    let on = |k: &str| matches!(kv.get(k).copied(), Some("1" | "true" | "yes" | "on"));
+    (cfg.auto_brightness, cfg.wave, cfg.motion_wake) =
+        (on("AUTO_BRIGHTNESS"), on("WAVE"), on("MOTION_WAKE"));
     if let Some(bg) = kv.get("SPLASH_BG").and_then(|v| parse_rgb(v)) {
         cfg.splash_bg = bg;
     }
