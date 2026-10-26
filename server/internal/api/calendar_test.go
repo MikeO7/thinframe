@@ -48,7 +48,7 @@ func TestPickAndLine(t *testing.T) {
 func TestFeedURL(t *testing.T) {
 	for in, want := range map[string]string{
 		"webcal://p52-caldav.icloud.com/published/2/abc": "https://p52-caldav.icloud.com/published/2/abc",
-		"https://example.com/a.ics":                       "https://example.com/a.ics",
+		"https://example.com/a.ics":                      "https://example.com/a.ics",
 	} {
 		if got := feedURL(in); got != want {
 			t.Errorf("feedURL(%q) = %q", in, got)
