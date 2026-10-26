@@ -13,8 +13,10 @@
 ::sysinit:/bin/mkdir -p /run/lock/subsys /tmp/iwd/hotspot
 ::sysinit:/bin/hostname -F /etc/hostname
 ::sysinit:/etc/init.d/rcS
-# Login prompt on the kernel console (ttyGS0 over USB-C on the frame, ttyS0 in QEMU). Key-only
-# accounts: this is a prompt, not a way in. Recovery is ssh over the USB link.
+# Login prompt on /dev/console (tty1 on the frame, a VT the panel never shows; ttyS0 in QEMU).
+# Never ttyGS0 on the frame: it takes no writes until a USB host connects, so init and every
+# sysinit line would wait on a wall brick. Key-only accounts: this is a prompt, not a way in.
+# Recovery is ssh over the USB link.
 console::respawn:/sbin/getty -L console 115200 vt100
 # The daemons the frame cannot do without, supervised: init restarts any that ends. Buildroot's
 # start-once scripts for them are removed in post-build.sh; at boot iwd once exited and the frame

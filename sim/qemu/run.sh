@@ -53,7 +53,7 @@ docker run --rm -v "$W":/w thinframe-br mcopy -o -i /w/sim.img@@4M /w/provision.
 # The real slot-A command line (quiet, no cursor, fbcon off the panel), serial on the PL011,
 # and the panel's mode pinned (as on the frame, where the panel has only one).
 APPEND="$(grep -m1 APPEND "$Q/slot-a.conf" | sed -e 's/^[[:space:]]*APPEND //' \
-	-e 's/console=ttyGS0,115200/console=ttyAMA0/' -e 's/ g_cdc[^ ]*//g') video=Virtual-1:${PW}x${PH}"
+	-e 's/console=ttyGS0,115200 console=tty1/console=ttyAMA0/' -e 's/ g_cdc[^ ]*//g') video=Virtual-1:${PW}x${PH}"
 # SHOW=1 watches over VNC: a cocoa window would resize the guest's screen to its own size.
 VIEW=(); [ -z "${SHOW:-}" ] || VIEW=(-vnc "127.0.0.1:1,password=on")
 # Modern virtio-mmio: virtio-gpu and virtio-input refuse the legacy transport (QEMU default).

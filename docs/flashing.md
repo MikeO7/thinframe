@@ -55,7 +55,7 @@ system. You never flash it again unless the card dies.
 | Dark screen after 2 minutes | Pull the card and put it back. If still dark, re-run `flash.sh`; it offers to keep your answers. |
 | Logo but no dashboard | The frame cannot reach the server. Check the server URL you typed is reachable from the Wi-Fi network. The frame shows the reason on screen. |
 | Not in `/admin` | Wrong Wi-Fi password or token. Re-run `flash.sh`, choose "rewrite settings only" (10 seconds, no full flash). |
-| Black screen on the wall brick, boots on a computer or dock | The frame needs the USB data wires, not only 5 V. A brick plus the A-to-C cable (or any power-only cable) leaves it off; a data cable into a powered hub or a computer port starts it. Put a powered USB hub between the brick and the frame. **[V]** 2026-10-23, see `docs/log.md`. |
+| Black screen on the wall brick, boots on a computer or dock | A card flashed before 2026-10-26 waits for a USB host: its console was the USB serial port, which takes no text until a computer connects. Re-run `flash.sh` with a newer image. Until then a powered USB hub between the brick and the frame starts it. **[U]** cause read in the kernel source 2026-10-26, see `docs/log.md`. |
 | Want the old Android back | Power off, remove the card, power on. The original firmware is untouched. |
 | Need a shell | `ssh frame@<ip from admin>`. The key is at `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh`. |
 

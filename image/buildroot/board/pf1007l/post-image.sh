@@ -10,7 +10,10 @@ IN="$WORK/inputs"
 VER="${THINFRAME_VERSION:-dev}"
 B="$BINARIES_DIR"
 S="$B/stage"
-CMDLINE="console=ttyGS0,115200 quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0"
+# Kernel log on the USB serial (ttyGS0); /dev/console (the last console=) on tty1, a VT with no
+# framebuffer console. ttyGS0 reports no write room until a USB host configures the gadget, so a
+# user-space write to it waits forever on a wall brick: the frame never started off a computer.
+CMDLINE="console=ttyGS0,115200 console=tty1 quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0"
 CMDLINE="$CMDLINE fbcon=map:9 panic=10 psi=1 g_cdc.dev_addr=02:50:46:10:07:01 g_cdc.host_addr=02:50:46:10:07:02"
 
 rm -rf "$S" && mkdir -p "$S"

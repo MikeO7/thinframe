@@ -151,7 +151,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 
 ## 15. Boot experience (ours from the first lit pixel)
 - [ ] Kernel cmdline: `quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0 fbcon=map:9`
-      so no console text ever appears on the panel; serial console stays on ttyGS0 for debugging.
+      so no console text ever appears on the panel; kernel log stays on ttyGS0 for debugging,
+      `/dev/console` is tty1 (a write to ttyGS0 waits for a USB host).
 - [ ] `tfctl splash`: open /dev/dri/card0 (dumb buffer, no GLES), fill background colour, blit a PNG
       from `/etc/thinframe/splash.png` (tiny PNG decoder, no crates) centred, draw one text line with
       an embedded bitmap font. Runs from OpenRC `boot` runlevel right after udev, before networking.

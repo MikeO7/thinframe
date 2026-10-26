@@ -7,8 +7,9 @@ New frame? Start at [flashing.md](flashing.md). This page is for after that.
    Key: `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh` (or
    `image/secrets/frame_id_ed25519` for a local build). Dropbear, key only, no root login. [U]
 2. USB-C data cable to the Mac: the kernel's built-in CDC gadget gives a USB Ethernet device
-   (frame 192.168.7.2, the Mac gets 192.168.7.1 from the frame's udhcpd) and a serial console
-   on `ttyGS0`: `ssh frame@192.168.7.2`, or `screen /dev/tty.usbmodem* 115200`. [U]
+   (frame 192.168.7.2, the Mac gets 192.168.7.1 from the frame's udhcpd) and the kernel log
+   on `ttyGS0`: `ssh frame@192.168.7.2`, or `screen /dev/tty.usbmodem* 115200` (kernel messages only,
+   no login prompt: `/dev/console` is tty1). [U]
 3. Pull the card: p1 (`PFBOOT`) is FAT32, readable on the Mac: `uEnv.txt` (slot, tries,
    `pf_mode`), `extlinux/slot-a.conf` / `slot-b.conf`, and `provision.txt` (dropped there by
    `flash.sh --settings-only`, applied and deleted on the next boot).
