@@ -1,4 +1,5 @@
-# Silead touch calibration for the rotated panel. Values are a placeholder; measure in TASK 6.
-# Identity = "1 0 0 0 1 0". Vertical flip = "1 0 0 0 -1 1". Upstream found a vertical flip
-# was needed after the compositor's own rotation; cog drm rotation may behave differently.
-ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="silead_ts", ENV{LIBINPUT_CALIBRATION_MATRIX}="1 0 0 0 1 0"
+# Silead touch calibration [V] 2026-10-26: taps at the screen's top-left, top-right and bottom-left
+# read (2%, 97%), (98%, 96%), (2%, 4%) on the device, so x is right and y is flipped. cog's drm
+# platform does not rotate touch (libinput rotation is pointer-only); it scales the calibrated
+# point onto the rotated screen, so this matrix is all the mapping there is.
+ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="silead_ts", ENV{LIBINPUT_CALIBRATION_MATRIX}="1 0 0 0 -1 1"
