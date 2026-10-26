@@ -49,6 +49,7 @@ mod report;
 mod retro;
 mod screen;
 mod sdf;
+mod settings;
 mod seventies;
 mod sha1;
 mod sha256;

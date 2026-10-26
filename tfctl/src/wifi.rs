@@ -436,6 +436,26 @@ impl Radio for Iwctl {
     }
 }
 
+/// The network in `iwctl station wlan0 show` ("Connected network  Name"), if any.
+pub fn parse_connected(text: &str) -> Option<String> {
+    strip_ansi(text).lines().find_map(|l| {
+        let name = l.trim().strip_prefix("Connected network")?.trim();
+        (!name.is_empty()).then(|| name.to_string())
+    })
+}
+
+/// The network the station is on now (None off the frame, or not connected).
+pub fn connected_ssid() -> Option<String> {
+    let (_, out) = iwctl(&["station", STATION, "show"], Duration::from_secs(3)).ok()?;
+    parse_connected(&out)
+}
+
+/// Forget a saved network: iwd's entry and our profile file.
+pub fn forget(ssid: &str) {
+    let _ = iwctl(&["known-networks", ssid, "forget"], Duration::from_secs(5));
+    let _ = fs::remove_file(Path::new(IWD_DIR).join(profile_name(ssid)));
+}
+
 /// `iwctl station wlan0 connect <name> <security>` (iwd 3.0: `<"network name"> [security]`).
 pub fn connect_args<'a>(ssid: &'a str, security: &'a str) -> [&'a str; 5] {
     ["station", STATION, "connect", ssid, security]

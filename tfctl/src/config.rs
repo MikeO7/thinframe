@@ -177,6 +177,19 @@ pub fn parse(text: &str) -> Config {
     cfg
 }
 
+/// `url` moved from server `old` to server `new` ("http://host:port", trailing slash ignored),
+/// when it lives on `old`; None for a page elsewhere. A dashboard URL the server pushed is stored
+/// absolute (FRAME_URL), so without this a server that moved kept the frame's agent but lost its
+/// page at the next start.
+pub fn rebase(url: &str, old: &str, new: &str) -> Option<String> {
+    let (old, new) = (old.trim_end_matches('/'), new.trim_end_matches('/'));
+    if old.is_empty() {
+        return None;
+    }
+    let rest = url.strip_prefix(old)?;
+    (rest.is_empty() || rest.starts_with('/')).then(|| format!("{new}{rest}"))
+}
+
 /// "#rrggbb" or "rrggbb" -> 0xrrggbb.
 pub fn parse_rgb(s: &str) -> Option<u32> {
     let h = s.trim().trim_start_matches('#');
@@ -467,5 +480,25 @@ mod tests {
     fn server_url_derives_frame_url() {
         let c = parse("SERVER_URL=http://nas:8080/\nFRAME_ID=kitchen\n");
         assert_eq!(c.url, "http://nas:8080/frame/kitchen");
+    }
+
+    #[test]
+    fn rebase_moves_only_pages_on_the_old_server() {
+        let (o, n) = ("http://nas:8080/", "http://10.0.0.5:41007");
+        assert_eq!(
+            rebase("http://nas:8080/frame/k?x=1", o, n).as_deref(),
+            Some("http://10.0.0.5:41007/frame/k?x=1")
+        );
+        assert_eq!(
+            rebase("http://nas:8080", o, n).as_deref(),
+            Some("http://10.0.0.5:41007")
+        );
+        assert_eq!(
+            rebase("http://nas:80801/frame/k", o, n),
+            None,
+            "another port"
+        );
+        assert_eq!(rebase("https://example.com/", o, n), None);
+        assert_eq!(rebase("http://nas:8080/x", "", n), None);
     }
 }

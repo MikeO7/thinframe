@@ -56,12 +56,16 @@ pub fn run(cfg: &Config, kiosk: Sender<KioskCmd>) -> io::Result<()> {
 
 /// The connect / session / poll loop for an agent the caller built (the kiosk prepares it first).
 pub fn serve(mut a: Agent) -> io::Result<()> {
+    crate::settings::LISTENING.store(true, Ordering::SeqCst);
     let mut backoff = 1u64;
     loop {
         if sys::term_requested() {
             return Ok(());
         }
         a.maybe_reboot_unconfirmed();
+        if a.take_settings_server() {
+            backoff = 1;
+        }
         // Wi-Fi first, then pairing, then the server (TASK 17).
         if a.needs_wifi() {
             thread::sleep(a.wifi_step());
@@ -103,7 +107,7 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
                 }
             }
         }
-        thread::sleep(Duration::from_secs(backoff));
+        crate::settings::nap(Duration::from_secs(backoff));
         backoff = (backoff * 2).min(60);
     }
 }
@@ -354,8 +358,10 @@ impl Agent {
         }
     }
 
-    /// Point the agent (and the dashboard URL, unless FRAME_URL pinned it) at `url`, persisted.
-    pub(crate) fn move_server(&mut self, url: &str) {
+    /// Point the agent (and the dashboard URL, when it lives on the old server) at `url`,
+    /// persisted. `how`: "found on the LAN", "set on the frame".
+    pub(crate) fn move_server_how(&mut self, url: &str, how: &str) {
+        let url = url.trim_end_matches('/');
         let old = self.cfg.server_url.trim_end_matches('/').to_string();
         let Some(base) = Url::parse(url) else {
             return;
@@ -363,21 +369,37 @@ impl Agent {
         if url == old {
             return;
         }
-        let id = self.cfg.frame_id.clone();
-        if self.cfg.url == format!("{old}/frame/{id}") {
-            self.cfg.url = format!("{url}/frame/{id}");
+        let page = crate::config::rebase(&self.cfg.url, &old, url);
+        let mut kv = vec![("SERVER_URL", url.to_string())];
+        if let Some(p) = &page {
+            self.cfg.url = p.clone();
+            kv.push(("FRAME_URL", p.clone()));
         }
         self.base = base;
         self.cfg.server_url = url.to_string();
-        self.persist(&[("SERVER_URL", url)]);
-        eprintln!("tfctl: agent: server moved: {old} -> {url} (found on the LAN)");
-        self.event(
-            "server",
-            &format!("server found on the LAN at {url} (was {old})"),
-        );
+        let kv: Vec<(&str, &str)> = kv.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.persist(&kv);
+        eprintln!("tfctl: agent: server moved: {old} -> {url} ({how})");
+        self.event("server", &format!("server {how}: {url} (was {old})"));
         self.failures = 0;
+        self.pair_nonce = None;
         if !self.on_fallback {
             let _ = self.send(KioskCmd::SetUrl(self.cfg.url.clone()));
+        }
+    }
+
+    pub(crate) fn move_server(&mut self, url: &str) {
+        self.move_server_how(url, "found on the LAN");
+    }
+
+    /// A server address the person entered in Settings (settings.rs): switch to it now.
+    pub(crate) fn take_settings_server(&mut self) -> bool {
+        match crate::settings::take_server() {
+            Some(url) => {
+                self.move_server_how(&url, "set on the frame");
+                true
+            }
+            None => false,
         }
     }
 
@@ -438,6 +460,7 @@ impl Agent {
         if self.failures > 0 {
             details.push("retrying every few seconds".into());
         }
+        details.push("hold the screen 5 s for settings".into());
         let path = std::env::var("TFCTL_STATUS_PAGE")
             .unwrap_or_else(|_| crate::statuspage::DEFAULT_PATH.into());
         let bg_path = std::path::Path::new(&path).with_file_name("backdrop.png");
@@ -527,6 +550,10 @@ impl Agent {
                 None => {}
             }
             self.flush_events(c)?;
+            if self.take_settings_server() {
+                c.close();
+                return Err(io::Error::other("server changed in Settings, reconnecting"));
+            }
             if self.exit {
                 eprintln!("tfctl: agent: new tfctl installed, exiting for respawn");
                 c.close();

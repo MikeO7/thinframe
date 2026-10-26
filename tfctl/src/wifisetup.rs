@@ -26,8 +26,8 @@ const STEP: Duration = Duration::from_secs(2);
 /// DHCP answers instead of up to 2 s later.
 const WAIT_STEP: Duration = Duration::from_millis(400);
 const FONT: &str = "/usr/share/fonts/thinframe/Shrikhand-Regular.ttf";
-const POPPINS: &str = "/usr/share/fonts/thinframe/Poppins-Regular.ttf";
-const POPPINS_LIGHT: &str = "/usr/share/fonts/thinframe/Poppins-ExtraLight.ttf";
+pub(crate) const POPPINS: &str = "/usr/share/fonts/thinframe/Poppins-Regular.ttf";
+pub(crate) const POPPINS_LIGHT: &str = "/usr/share/fonts/thinframe/Poppins-ExtraLight.ttf";
 
 #[derive(Default)]
 pub struct Setup {
@@ -101,7 +101,7 @@ pub struct Resp {
     pub location: Option<String>,
 }
 
-fn html(body: String) -> Resp {
+pub(crate) fn html(body: String) -> Resp {
     Resp {
         status: 200,
         ctype: "text/html; charset=utf-8",
@@ -110,7 +110,7 @@ fn html(body: String) -> Resp {
     }
 }
 
-fn see_other(to: &str) -> Resp {
+pub(crate) fn see_other(to: &str) -> Resp {
     Resp {
         status: 303,
         ctype: "text/plain",
@@ -119,7 +119,7 @@ fn see_other(to: &str) -> Resp {
     }
 }
 
-fn not_found() -> Resp {
+pub(crate) fn not_found() -> Resp {
     Resp {
         status: 404,
         ctype: "text/plain",
@@ -177,7 +177,7 @@ pub fn pct(s: &str) -> String {
         .collect()
 }
 
-fn field<'a>(kv: &'a [(String, String)], k: &str) -> Option<&'a str> {
+pub(crate) fn field<'a>(kv: &'a [(String, String)], k: &str) -> Option<&'a str> {
     kv.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str())
 }
 
@@ -222,7 +222,7 @@ impl Read for Deadline<'_> {
     }
 }
 
-fn read_req(s: &mut TcpStream) -> io::Result<Req> {
+pub(crate) fn read_req(s: &mut TcpStream) -> io::Result<Req> {
     read_req_within(s, REQ_DEADLINE)
 }
 
@@ -282,7 +282,7 @@ fn read_req_within(s: &TcpStream, limit: Duration) -> io::Result<Req> {
     })
 }
 
-fn write_resp(s: &mut TcpStream, r: &Resp) -> io::Result<()> {
+pub(crate) fn write_resp(s: &mut TcpStream, r: &Resp) -> io::Result<()> {
     let reason = match r.status {
         200 => "OK",
         303 => "See Other",
@@ -415,7 +415,7 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
     }
 }
 
-fn file(path: &str, ctype: &'static str) -> Resp {
+pub(crate) fn file(path: &str, ctype: &'static str) -> Resp {
     match std::fs::read(path) {
         Ok(body) => Resp {
             status: 200,
@@ -473,7 +473,7 @@ fn page(s: &Setup, step: &str, body: &str, refresh: Option<u32>, script: &str) -
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">{meta}<title>thinframe</title>\
          <style>{css}</style></head><body><div class=\"steps\">{step}</div>{body}\
-         <small>frame {}</small>{script}</body></html>",
+         <small>frame {} &middot; hold the screen 5 s for settings</small>{script}</body></html>",
         esc(&s.frame_id)
     )
 }
@@ -548,7 +548,7 @@ pub fn render_list(s: &Setup) -> String {
 
 /// The keyboard: four layers, special keys by name. Small on purpose (no library). Every key is
 /// printable ASCII (WPA passphrases are nothing else), so 63 UTF-16 units here are 63 bytes.
-const KEYBOARD_JS: &str = r##"<script>
+pub(crate) const KEYBOARD_JS: &str = r##"<script>
 var L={a:["qwertyuiop","asdfghjkl","zxcvbnm"],A:["QWERTYUIOP","ASDFGHJKL","ZXCVBNM"],
 n:["1234567890","-/:;()$&@\"",".,?!'"],s:["[]{}#%^*+=","_\\|~<>`",".,?!'"]};
 var layer="a",pw="",shown=true,kb=document.getElementById("kb"),out=document.getElementById("pw"),
@@ -565,7 +565,7 @@ var d=document.createElement("div");
 d.appendChild(key(layer=="a"||layer=="A"?"123":"abc","k2",function(){layer=layer=="a"||layer=="A"?"n":"a";draw()}));
 d.appendChild(key("space","sp",function(){if(pw.length<63)pw+=" ";show()}));
 d.appendChild(key(shown?"hide":"show","k2",function(){shown=!shown;show();draw()}));kb.appendChild(d)}
-function show(){out.className=pw.length?"field":"field hint";out.textContent=pw.length?(shown?pw:pw.replace(/./g,"•")):"password";
+function show(){out.className=pw.length?"field":"field hint";out.textContent=pw.length?(shown?pw:pw.replace(/./g,"•")):(out.dataset.hint||"password");
 document.getElementById("psk").value=pw;go.disabled=pw.length<min}
 draw();show();
 </script>"##;

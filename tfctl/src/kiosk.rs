@@ -32,6 +32,9 @@ pub enum KioskCmd {
     Schedule(String, String),
     /// Stop cog and return from `supervise`: a new tfctl was installed, init respawns us.
     Exit,
+    /// Show Settings (settings.rs) at this path; the page on screen comes back on close.
+    OpenSettings(String),
+    CloseSettings,
 }
 
 /// Kill what is left of cog's process group (WPEWebProcess, WPENetworkProcess) and wait up to
@@ -107,6 +110,17 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     }
     let (tx, rx) = mpsc::channel();
     let mut k = Kiosk::new(cfg);
+    let st: crate::settings::Shared = Default::default();
+    match crate::settings::start(
+        st.clone(),
+        std::sync::Arc::new(crate::wifi::Iwctl),
+        tx.clone(),
+        cfg.path.clone(),
+        &format!("127.0.0.1:{}", crate::settings::PORT),
+    ) {
+        Ok(_) => k.settings = Some(st),
+        Err(e) => eprintln!("tfctl: settings: listen on {}: {e}", crate::settings::PORT),
+    }
     crate::logmirror::start(LOG, crate::logmirror::DIR);
     crate::prewarm::start();
     crate::boot::save_seed_when_ready();
@@ -117,7 +131,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
         thread::Builder::new()
             .name("discover".into())
             .spawn(move || {
-                if let Some(cfg) = discover_server(&cfg) {
+                if let Some(cfg) = discover_server(&cfg, &tx) {
                     start_agent(&cfg, &tx, None);
                 }
             })?;
@@ -127,17 +141,41 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     k.supervise(&rx)
 }
 
-/// Probe the LAN every 10 s until a server answers; persist it as SERVER_URL and return the
-/// config reloaded with it. None only when tfctl is asked to stop.
-fn discover_server(cfg: &Config) -> Option<Config> {
+/// Probe the LAN every 10 s until a server answers or one is typed in Settings; persist it as
+/// SERVER_URL and return the config reloaded with it. None only when tfctl is asked to stop.
+/// Without Wi-Fi for wifisetup::GRACE it opens Settings on Wi-Fi: the agent, which shows the
+/// Wi-Fi setup page otherwise, runs only once a server is known.
+fn discover_server(cfg: &Config, tx: &mpsc::Sender<KioskCmd>) -> Option<Config> {
+    use crate::wifi::Radio;
     let token = Some(cfg.token.as_str()).filter(|t| !t.is_empty());
     let who = crate::discover::Asker {
         id: &cfg.frame_id,
         token,
     };
+    crate::settings::LISTENING.store(true, Ordering::SeqCst);
+    let started = Instant::now();
+    let mut wifi_shown = false;
     loop {
         if crate::sys::term_requested() {
             return None;
+        }
+        if let Some(url) = crate::settings::take_server() {
+            eprintln!("tfctl: kiosk: no SERVER_URL; {url} set in Settings");
+            return Some(crate::config::load(&cfg.path).unwrap_or_else(|_| {
+                let mut c = cfg.clone();
+                c.server_url = url.clone();
+                c.url = format!("{url}/frame/{}", c.frame_id);
+                c
+            }));
+        }
+        let radio = crate::wifi::Iwctl;
+        if !wifi_shown
+            && radio.present()
+            && !radio.connected()
+            && started.elapsed() >= crate::wifisetup::GRACE
+        {
+            wifi_shown = true;
+            let _ = tx.send(KioskCmd::OpenSettings("/settings/wifi".into()));
         }
         let nonce = crate::pair::nonce().unwrap_or_default();
         if let Ok(Some(url)) = crate::discover::find(
@@ -157,7 +195,7 @@ fn discover_server(cfg: &Config) -> Option<Config> {
             }
             return Some(c);
         }
-        thread::sleep(Duration::from_secs(10));
+        crate::settings::nap(Duration::from_secs(10));
     }
 }
 
@@ -235,6 +273,10 @@ pub struct Kiosk {
     /// Held from start until cog is spawned (TASK 15); shown again when cog is missing.
     splash: Option<splash::Splash>,
     exit: bool,
+    /// Settings (settings.rs), when its listener started; and the page to go back to while it
+    /// is on screen (pages the agent asks for meanwhile replace it).
+    settings: Option<crate::settings::Shared>,
+    back_to: Option<String>,
 }
 
 impl Kiosk {
@@ -269,6 +311,8 @@ impl Kiosk {
             splash_style: cfg.splash_style.clone(),
             splash: None,
             exit: false,
+            settings: None,
+            back_to: None,
         }
     }
 
@@ -427,6 +471,7 @@ impl Kiosk {
         eprintln!("tfctl: kiosk: {cmd:?}");
         match cmd {
             KioskCmd::Restart | KioskCmd::Reload => self.restart(),
+            KioskCmd::SetUrl(u) if self.back_to.is_some() => self.back_to = Some(u),
             KioskCmd::SetUrl(u) => {
                 if u != self.url {
                     self.url = u;
@@ -457,6 +502,29 @@ impl Kiosk {
             KioskCmd::Exit => {
                 self.kill_child();
                 self.exit = true;
+            }
+            KioskCmd::OpenSettings(path) => {
+                let Some(st) = &self.settings else {
+                    return;
+                };
+                crate::settings::open(st);
+                if self.back_to.is_none() {
+                    self.back_to = Some(self.url.clone());
+                }
+                self.url = crate::settings::url(&path);
+                if !SCREEN_ON.load(Ordering::SeqCst) {
+                    self.set_screen(true);
+                }
+                self.restart();
+            }
+            KioskCmd::CloseSettings => {
+                if let Some(st) = &self.settings {
+                    crate::settings::close(st);
+                }
+                if let Some(u) = self.back_to.take() {
+                    self.url = u;
+                    self.restart();
+                }
             }
         }
     }
@@ -518,7 +586,19 @@ impl Kiosk {
     }
 
     fn tick_touch(&mut self, now: Instant) {
-        if self.touch.touched() {
+        let touched = self.touch.touched();
+        if self.touch.long_press(crate::settings::HOLD) && self.back_to.is_none() {
+            eprintln!(
+                "tfctl: touch: held {} s, opening Settings",
+                crate::settings::HOLD.as_secs()
+            );
+            self.handle(KioskCmd::OpenSettings("/settings".into()));
+        }
+        if self.settings.as_ref().is_some_and(crate::settings::idle) {
+            eprintln!("tfctl: settings: idle, closing");
+            self.handle(KioskCmd::CloseSettings);
+        }
+        if touched {
             if !SCREEN_ON.load(Ordering::SeqCst) {
                 eprintln!("tfctl: touch: screen on for {} s", TOUCH_WAKE.as_secs());
                 self.set_screen(true);
