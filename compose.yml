@@ -4,9 +4,10 @@ services:
     build: ./server
     image: ghcr.io/mikeo7/thinframe-server:latest
     restart: unless-stopped
-    ports: ["${PORT:-8080}:8080"]
+    ports: ["${PORT:-41007}:${PORT:-41007}"]
     volumes: ["${DATA_DIR:-./server/data}:/data"]
     environment:
+      - PORT=${PORT:-41007}
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
       - PAGE_STALE=${PAGE_STALE:-}
   simframe:
@@ -15,7 +16,7 @@ services:
       context: .
       dockerfile: sim/Dockerfile
     environment:
-      - SERVER_URL=http://frameserver:8080
+      - SERVER_URL=http://frameserver:${PORT:-41007}
       - FRAME_ID=sim
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
       - SHOT_INTERVAL_S=5

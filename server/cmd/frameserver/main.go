@@ -8,7 +8,7 @@
 //
 // Environment:
 //
-//	PORT          default 8080
+//	PORT          default 41007 (tcp, the same number as DISCOVERY's udp port)
 //	DATA_DIR      default /data
 //	FRAME_TOKEN   bearer token for /api and /mcp, Basic password for /admin; empty disables auth (LAN dev only)
 //	PHOTOS_DIR    folder photo source; unset = photo widget shows nothing
@@ -99,7 +99,9 @@ func main() {
 		opts.PageStale = d
 	}
 	srv := api.New(st, opts)
-	hs := newHTTPServer(":"+env("PORT", "8080"), handler(srv))
+	// TCP on the same number as discovery's UDP port: "thinframe lives on 41007".
+	port := env("PORT", strconv.Itoa(discover.Port))
+	hs := newHTTPServer(":"+port, handler(srv))
 	go func() {
 		log.Printf("frameserver %s listening on %s (data %s)", Version, hs.Addr, dataDir)
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -120,7 +122,7 @@ func main() {
 				}
 				return k
 			}
-			if err := discover.Serve(ctx, addr, env("PORT", "8080"), keys); err != nil {
+			if err := discover.Serve(ctx, addr, port, keys); err != nil {
 				log.Printf("discovery: %v (frames need SERVER_URL)", err)
 			}
 		}()
