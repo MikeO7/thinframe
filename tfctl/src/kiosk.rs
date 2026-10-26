@@ -71,6 +71,11 @@ const FAST_FAIL_LIMIT: u32 = 5;
 const TOUCH_WAKE: Duration = Duration::from_secs(60);
 /// The light value goes to the log this often, to tune light.rs's thresholds at the frame.
 const LIGHT_LOG: Duration = Duration::from_secs(900);
+/// A private D-Bus session bus for cog, so a new page opens in the running cog (`cogctl open`)
+/// instead of a restart: ending cog took 2.2 s and the splash over the new start 3.9 s
+/// [V 2026-10-26]; in place the old page stays up until the new one paints.
+const BUS: &str = "unix:path=/run/thinframe/cog-bus";
+const COGCTL_TIMEOUT: Duration = Duration::from_secs(3);
 /// No cog binary: hold the splash instead of looping on spawn errors.
 const MISSING_DELAY: Duration = Duration::from_secs(3600);
 
@@ -277,6 +282,8 @@ pub struct Kiosk {
     /// is on screen (pages the agent asks for meanwhile replace it).
     settings: Option<crate::settings::Shared>,
     back_to: Option<String>,
+    /// The session bus cog listens on (`BUS`); None where dbus-daemon is missing.
+    bus: Option<Child>,
 }
 
 impl Kiosk {
@@ -313,6 +320,7 @@ impl Kiosk {
             exit: false,
             settings: None,
             back_to: None,
+            bus: None,
         }
     }
 
@@ -361,6 +369,7 @@ impl Kiosk {
             .unwrap_or_else(|_| format!("/run/user/{}", uid_of(&self.user).unwrap_or(1000)));
         c.env("XDG_RUNTIME_DIR", runtime_dir)
             .env("LIBSEAT_BACKEND", "seatd")
+            .env("DBUS_SESSION_BUS_ADDRESS", BUS)
             .stdin(Stdio::null());
         if crate::dbg::on() {
             c.env("G_MESSAGES_DEBUG", "all");
@@ -472,12 +481,7 @@ impl Kiosk {
         match cmd {
             KioskCmd::Restart | KioskCmd::Reload => self.restart(),
             KioskCmd::SetUrl(u) if self.back_to.is_some() => self.back_to = Some(u),
-            KioskCmd::SetUrl(u) => {
-                if u != self.url {
-                    self.url = u;
-                    self.restart();
-                }
-            }
+            KioskCmd::SetUrl(u) => self.go(u),
             KioskCmd::SetRotation(r) => {
                 if r != self.rotation {
                     self.rotation = r;
@@ -511,21 +515,95 @@ impl Kiosk {
                 if self.back_to.is_none() {
                     self.back_to = Some(self.url.clone());
                 }
-                self.url = crate::settings::url(&path);
                 if !SCREEN_ON.load(Ordering::SeqCst) {
                     self.set_screen(true);
                 }
-                self.restart();
+                self.go(crate::settings::url(&path));
             }
             KioskCmd::CloseSettings => {
                 if let Some(st) = &self.settings {
                     crate::settings::close(st);
                 }
                 if let Some(u) = self.back_to.take() {
-                    self.url = u;
-                    self.restart();
+                    self.go(u);
                 }
             }
+        }
+    }
+
+    /// Show `u`: in the running cog when it answers on the bus, else by a restart.
+    fn go(&mut self, u: String) {
+        if u == self.url {
+            return;
+        }
+        if self.open_in_place(&u) {
+            eprintln!("tfctl: kiosk: opened {u} in place");
+            self.url = u;
+            return;
+        }
+        self.url = u;
+        self.restart();
+    }
+
+    fn open_in_place(&mut self, u: &str) -> bool {
+        if self.child.is_none() || self.stopped || self.bus.is_none() {
+            return false;
+        }
+        if self
+            .bus
+            .as_mut()
+            .is_some_and(|b| !matches!(b.try_wait(), Ok(None)))
+        {
+            self.bus = None;
+            return false;
+        }
+        let child = Command::new("cogctl")
+            .args(["open", u])
+            .env("DBUS_SESSION_BUS_ADDRESS", BUS)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = child else {
+            return false;
+        };
+        let end = Instant::now() + COGCTL_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(st)) => return st.success(),
+                Ok(None) if Instant::now() < end => thread::sleep(Duration::from_millis(20)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+            }
+        }
+    }
+
+    /// cog's session bus, once: dbus-daemon in the foreground as our child.
+    fn start_bus(&mut self) {
+        if self.platform == "wl" {
+            return;
+        }
+        let path = BUS.trim_start_matches("unix:path=");
+        let _ = fs::remove_file(path);
+        match Command::new("dbus-daemon")
+            .args(["--session", "--nofork", "--nopidfile"])
+            .arg(format!("--address={BUS}"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => {
+                // cog must find the socket at its start, or it runs without the bus.
+                let end = Instant::now() + Duration::from_secs(1);
+                while !std::path::Path::new(path).exists() && Instant::now() < end {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                self.bus = Some(c);
+            }
+            Err(e) => eprintln!("tfctl: kiosk: no session bus ({e}); pages change by restart"),
         }
     }
 
@@ -635,10 +713,15 @@ impl Kiosk {
         let _ = screen::set_brightness(self.brightness);
         self.show_splash("warming up");
         self.open_inputs();
+        self.start_bus();
         loop {
             if sys::term_requested() || self.exit {
                 eprintln!("tfctl: kiosk: stopping cog");
                 self.kill_child();
+                if let Some(mut b) = self.bus.take() {
+                    let _ = b.kill();
+                    let _ = b.wait();
+                }
                 self.splash = None;
                 return Ok(());
             }

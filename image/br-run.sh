@@ -52,6 +52,13 @@ docker run --rm -i \
 			fi
 			echo "$h" > "$k"
 		done
+		# Nor one built before an option it needs was on: iwd built before readline has no iwctl.
+		for pb in iwd:usr/bin/iwctl cog:usr/bin/cogctl dbus:usr/bin/dbus-daemon; do
+			p=${pb%%:*} b=${pb#*:}
+			if ls -d $O/build/$p-[0-9]* >/dev/null 2>&1 && [ ! -e $O/target/$b ]; then
+				echo "buildroot: $p built without $b, rebuilding it"; make -s -C "$BR" O=$O $p-dirclean
+			fi
+		done
 		# WebKit: ~4.5 GB per compile job. GeneratedSerializers.cpp alone OOM-killed cc1plus at 5 jobs
 		# in 16 GB (8 jobs failed earlier too); GitHub runners have 16 GB as well.
 		if [ -z "$JOBS" ]; then

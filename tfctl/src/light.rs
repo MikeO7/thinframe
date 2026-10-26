@@ -189,6 +189,8 @@ pub struct Touch {
     /// Bytes of a struct input_event read so far (reads need not end on an event).
     part: Vec<u8>,
     hold: Hold,
+    /// The last open error went to the log (once, not every minute on a host without a panel).
+    told: bool,
 }
 
 /// struct input_event: two longs of time, then type, code, value (16 bytes on the frame's
@@ -256,6 +258,7 @@ impl Touch {
             next_try: Instant::now(),
             part: Vec::new(),
             hold: Hold::default(),
+            told: false,
         }
     }
 
@@ -264,7 +267,20 @@ impl Touch {
         use std::io::Read;
         if self.f.is_none() && Instant::now() >= self.next_try {
             self.next_try = Instant::now() + Duration::from_secs(60);
-            self.f = open_touch();
+            self.f = match open_touch() {
+                Ok(f) => {
+                    eprintln!("tfctl: touch: reading the panel");
+                    self.told = false;
+                    Some(f)
+                }
+                Err(e) => {
+                    if !self.told {
+                        eprintln!("tfctl: touch: {e}");
+                        self.told = true;
+                    }
+                    None
+                }
+            };
         }
         let Some(f) = &mut self.f else {
             return false;
@@ -287,7 +303,8 @@ impl Touch {
                     self.part.drain(..whole);
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                Err(_) => {
+                Err(e) => {
+                    eprintln!("tfctl: touch: read: {e}");
                     self.f = None; // device gone (module reload): stop trying
                     self.hold = Hold::default();
                     break;
@@ -303,9 +320,9 @@ impl Touch {
     }
 }
 
-fn open_touch() -> Option<std::fs::File> {
-    let devices = std::fs::read_to_string("/proc/bus/input/devices").ok()?;
-    let ev = touch_event(&devices)?;
+fn open_touch() -> io::Result<std::fs::File> {
+    let devices = std::fs::read_to_string("/proc/bus/input/devices")?;
+    let ev = touch_event(&devices).ok_or_else(|| io::Error::other("no silead panel yet"))?;
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -314,12 +331,11 @@ fn open_touch() -> Option<std::fs::File> {
             .read(true)
             .custom_flags(O_NONBLOCK)
             .open(format!("/dev/input/{ev}"))
-            .ok()
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = ev;
-        None
+        Err(io::Error::other("no touch panel on this host"))
     }
 }
 
@@ -329,7 +345,7 @@ fn touch_event(devices: &str) -> Option<String> {
         .split("\n\n")
         .find(|b| b.contains("silead"))?
         .lines()
-        .find(|l| l.starts_with("H: Handlers="))?
+        .find_map(|l| l.strip_prefix("H: Handlers="))?
         .split_whitespace()
         .find(|w| w.starts_with("event"))
         .map(String::from)
@@ -385,6 +401,9 @@ mod tests {
                     I: Bus=0018 Vendor=0000\nN: Name=\"silead_ts\"\nP: Phys=input/ts\n\
                     H: Handlers=mouse0 event1 \nB: EV=b\n";
         assert_eq!(touch_event(devs).as_deref(), Some("event1"));
+        // The frame itself: no mousedev, so the event handler is the first word [V 2026-10-26].
+        let frame = "N: Name=\"silead_ts\"\nP: Phys=input/ts\nH: Handlers=event1 \nB: EV=b\n";
+        assert_eq!(touch_event(frame).as_deref(), Some("event1"));
         assert_eq!(touch_event("N: Name=\"x\"\nH: Handlers=event0\n"), None);
     }
 
