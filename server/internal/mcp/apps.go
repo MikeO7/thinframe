@@ -224,7 +224,14 @@ func registerApps(m *sdk.Server, s *api.Server) {
 			if b, err = api.ScalePNG(b, w); err != nil {
 				return nil, nil, err
 			}
-			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.ImageContent{Data: b, MIMEType: "image/png"}}}, map[string]any{"bytes": len(b)}, nil
+			out := map[string]any{"bytes": len(b)}
+			content := []sdk.Content{&sdk.ImageContent{Data: b, MIMEType: "image/png"}}
+			if f, err := s.Store.Get(in.ID); err == nil && f.Last != nil && f.Last.ScreenState != "" && f.Last.ScreenState != "on" {
+				// The frame pauses the browser while the screen is off: the image is the last frame drawn.
+				out["screen"] = f.Last.ScreenState
+				content = append(content, &sdk.TextContent{Text: "screen is " + f.Last.ScreenState + ": the page is paused, this is the last frame drawn before that"})
+			}
+			return &sdk.CallToolResult{Content: content}, out, nil
 		})
 
 	type evIn struct {

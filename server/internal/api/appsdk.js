@@ -103,15 +103,16 @@
       return off;
     },
   };
-  // After a lost stream, sources may have changed: fetch the watched ones again.
+  // After a lost stream, or after the frame paused the browser (screen off), messages may have
+  // been missed: fetch the watched sources and state again.
   function refetch() {
-    for (const k of Object.keys(subs)) {
-      if (k.startsWith('source:') && k !== 'source:*' && subs[k].length) {
-        const key = k.slice(7);
-        tf.data(key).then(d => { if (d !== null) fire('source', key, d); });
-      }
-    }
+    const keys = kind => Object.keys(subs).filter(k => k.startsWith(kind + ':') && k !== kind + ':*' && subs[k].length).map(k => k.slice(kind.length + 1));
+    for (const key of keys('source')) tf.data(key).then(d => { if (d !== null) fire('source', key, d); });
+    const st = keys('state');
+    if (st.length) tf.state.all().then(all => st.forEach(key => fire('state', key, key in all ? all[key] : null)));
   }
+  let lastTick = Date.now();
+  setInterval(() => { const now = Date.now(); if (now - lastTick > 15000) refetch(); lastTick = now; }, 5000);
   // Errors go to the server (get_app_events shows them as app-error), at most 5 per load.
   let errors = 0;
   const report = (msg, where) => {
