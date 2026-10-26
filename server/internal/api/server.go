@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MikeO7/thinframe/server/internal/apps"
 	"github.com/MikeO7/thinframe/server/internal/artifacts"
 	"github.com/MikeO7/thinframe/server/internal/hub"
 	"github.com/MikeO7/thinframe/server/internal/photos"
@@ -63,6 +64,16 @@ type Server struct {
 	// src: pushed data sources (sources.go); assets: DATA_DIR/assets.
 	src    *sourceSet
 	assets string
+	// data: DATA_DIR. apps: MCP-written web apps (apps.go); events: their emits and rate
+	// limits; hooks and polls: outside APIs (hooks.go); shots: screenshot waiters (shots.go).
+	data     string
+	apps     *apps.Store
+	events   eventLog
+	hooks    *jsonSet[Hook]
+	polls    *jsonSet[Poll]
+	pollRun  pollRun
+	pollTick time.Duration
+	shots    shotWaiters
 	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
 	// does not wait for hijacked connections, so a process that exits right after Shutdown
 	// could cut the "disconnected" event short; Drain waits for them.
@@ -81,6 +92,10 @@ func New(st *store.Store, opts Options) *Server {
 		s.opts.Reports = filepath.Join(data, "reports")
 	}
 	s.src, s.assets = loadSources(filepath.Join(data, "sources")), filepath.Join(data, "assets")
+	s.data, s.apps = data, apps.Open(filepath.Join(data, "apps"))
+	s.hooks, s.polls = loadSet[Hook](filepath.Join(data, "hooks.json")), loadSet[Poll](filepath.Join(data, "polls.json"))
+	s.pollRun = pollRun{last: map[string]PollStatus{}, busy: map[string]bool{}}
+	s.pollTick = 5 * time.Second
 	s.Hub.OnClose = func(id string) {
 		_, _ = st.Update(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
 	}
@@ -122,6 +137,14 @@ func (s *Server) Routes() http.Handler {
 	fn("GET /api/data/asset/{name}", s.handleAsset)
 	fn("POST /api/frames/{id}/beacon", s.handleBeacon)
 	fn("POST /api/frames/{id}/alive", s.handleAlive)
+	// Apps (apps.go): sandboxed documents and the public endpoints their SDK calls. Like the
+	// page, none of these carries a token; emit and state writes are rate limited.
+	fn("GET /apps/{name}/{path...}", s.handleAppFile)
+	fn("GET /apps-sdk.js", s.handleAppSDK)
+	fn("GET /api/data/source/{key}", s.handleDataSource)
+	fn("POST /api/frames/{id}/emit", s.handleEmit)
+	fn("GET /api/apps/{name}/state", s.handleGetAppState)
+	fn("POST /api/apps/{name}/state/{key}", s.handleSetAppState)
 	// Pairing: a frame without a token asks for one (pair.go).
 	fn("POST /api/pair", s.handlePairRequest)
 	fn("GET /api/pair/{id}", s.handlePairPoll)
@@ -140,6 +163,8 @@ func (s *Server) Routes() http.Handler {
 	handle("GET /api/frames/{id}/reports", s.auth(http.HandlerFunc(s.handleListReports)))
 	handle("GET /api/frames/{id}/reports/{name}", s.auth(http.HandlerFunc(s.handleGetReport)))
 	handle("GET /api/frames/{id}/ws", s.authFrame(http.HandlerFunc(s.handleWS)))
+	handle("POST /api/frames/{id}/screenshot", s.authFrame(http.HandlerFunc(s.handleShotUpload)))
+	handle("GET /api/frames/{id}/screenshot", s.auth(http.HandlerFunc(s.handleShotLatest)))
 	handle("GET /api/sources", s.auth(http.HandlerFunc(s.handleListSources)))
 	handle("GET /api/sources/{key}", s.auth(http.HandlerFunc(s.handleGetSource)))
 	handle("PUT /api/sources/{key}", s.auth(http.HandlerFunc(s.handlePutSource)))
@@ -393,6 +418,9 @@ func (s *Server) SetLayout(id string, l store.Layout) (store.Frame, error) {
 	if err := widgets.Validate(l); err != nil {
 		return store.Frame{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	if err := s.checkAppWidgets(l); err != nil {
+		return store.Frame{}, err
+	}
 	f, err := s.Store.Update(id, func(f *store.Frame) {
 		f.Layout = l
 		f.Config.PageVersion++
@@ -580,9 +608,9 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, apps.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
-	case errors.Is(err, ErrInvalid), errors.Is(err, store.ErrInvalidID):
+	case errors.Is(err, ErrInvalid), errors.Is(err, store.ErrInvalidID), errors.Is(err, apps.ErrInvalid):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)

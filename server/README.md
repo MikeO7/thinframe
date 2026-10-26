@@ -83,6 +83,23 @@ so load the demo on a server whose source keys you are not using.
 Controls (climate on, lock, scenes) are display-only: the page plane has no credentials, so a tap
 on it cannot be trusted to act on a car or a house (docs/decisions.md).
 
+## Apps: any web page, sandboxed
+MCP (or anything with the token) can put a whole web page on a frame: `put_app` stores a folder of
+HTML/CSS/JS/images as a new version, `show_app` shows it full screen, the widget type `app` puts it
+in a grid cell, `screenshot` returns what the panel shows. Pages run sandboxed and get
+`window.thinframe` (live sources, buttons that run server-side hooks, shared state, events from
+MCP). The MCP tool `app_guide` is the full reference; the design is in `docs/decisions.md` ("Apps").
+
+| Endpoint | Auth | |
+|---|---|---|
+| `GET /apps/{name}/{path}` | public, sandboxed (CSP) | the app's files; the SDK is injected into HTML |
+| `GET /apps-sdk.js` | public | `window.thinframe` |
+| `GET /api/data/source/{key}` | public | one source, for apps |
+| `GET /api/apps/{name}/state`, `POST .../state/{key}` | public, rate limited | app state (JSON, null deletes) |
+| `POST /api/frames/{id}/emit` | public, rate limited | `{app,name,data}`; runs the hook `name` |
+| `POST /api/frames/{id}/screenshot?w=&h=` | frame | raw RGB from the frame |
+| `GET /api/frames/{id}/screenshot` | bearer | the newest screenshot, PNG |
+
 ## MCP
 `/mcp`: streamable HTTP, stateless, `Authorization: Bearer $FRAME_TOKEN`. Speaks MCP
 **2026-07-28** (`server/discover`, no handshake) and falls back per client to 2025-11-25, 2025-06-18,

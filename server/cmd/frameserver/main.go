@@ -127,6 +127,7 @@ func main() {
 			}
 		}()
 	}
+	go srv.RunPolls(ctx)
 	every, err := time.ParseDuration(env("SERVICES_EVERY", "1m"))
 	if err != nil || every < 10*time.Second {
 		every = time.Minute

@@ -50,7 +50,7 @@ func TestBodyLimits(t *testing.T) {
 		{"admin config over 64 KiB", "POST", "/admin/adminf/config", "name=" + big(100<<10), form, basicAuth, []int{413}},
 		{"admin layout over 64 KiB", "POST", "/admin/adminf/layout", "layout=" + big(100<<10), form, basicAuth, []int{413}},
 		{"admin action over 64 KiB", "POST", "/admin/adminf/action", "name=" + big(100<<10), form, basicAuth, []int{413}},
-		{"mcp over 1 MiB", "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"x":"` + big(2<<20) + `"}}`, jsonT, mcpAuth, []int{413, 400}},
+		{"mcp over 8 MiB", "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"x":"` + big(9<<20) + `"}}`, jsonT, mcpAuth, []int{413, 400}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
