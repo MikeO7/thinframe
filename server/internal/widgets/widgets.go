@@ -37,7 +37,7 @@ func Font(name string) ([]byte, string, bool) {
 // Known widget types. Adding one = a template file named <type>.html (and, for widgets fed
 // by a data source, a renderer in page.js).
 var Types = []string{"clock", "photo", "weather", "calendar", "status", "text", "iframe",
-	"hero", "forecast", "agenda", "cars", "rooms", "climate", "list", "tiles", "energy", "shows", "worldclock", "services", "app"}
+	"hero", "forecast", "agenda", "cars", "rooms", "climate", "list", "tiles", "energy", "shows", "worldclock", "services", "app", "cameras"}
 
 // Props documents each type's props (MCP list_widgets, server/README.md). Types marked
 // "source" take their data from props.source: a key pushed with PUT /api/sources/{key}.
@@ -56,6 +56,7 @@ var Props = map[string]string{
 	"shows":      "title, part upcoming|added, max, source; data: upcoming [{date YYYY-MM-DD,title,sub,image}], added [{title,when,image}]",
 	"worldclock": "title, zones [{label,tz}]",
 	"app":        "app (an app stored with put_app), props (object the app reads as thinframe.props); the app fills the cell, sandboxed (MCP app_guide)",
+	"cameras":    "title, cameras [Protect camera names or ids; none = all], interval_s (seconds between snapshots, default 4, min 2); needs PROTECT_URL. Tap a camera for full screen. A doorbell ring pops up on every page (no widget needed)",
 	"services":   "title, groups [{name,members [container names]}], source (default feed: services); data: containers [{name,state,note}], host {name,meters [{label,pct,text}],note}",
 }
 
@@ -74,6 +75,7 @@ var Icons = map[string]string{
 	"system": `<rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/>`,
 	"photo":  `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/>`,
 	"bolt":   `<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>`,
+	"camera": `<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>`,
 }
 
 var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
@@ -285,6 +287,19 @@ func Validate(l store.Layout) error {
 			if p, ok := w.Props["props"]; ok {
 				if _, obj := p.(map[string]any); !obj {
 					return fmt.Errorf("widget %s: props.props must be an object", w.ID)
+				}
+			}
+		}
+		if w.Type == "cameras" {
+			if c, ok := w.Props["cameras"]; ok {
+				l, isList := c.([]any)
+				if !isList || len(l) > 16 {
+					return fmt.Errorf("widget %s: props.cameras must be a list of up to 16 camera names or ids", w.ID)
+				}
+				for _, x := range l {
+					if s, _ := x.(string); s == "" || len(s) > 100 {
+						return fmt.Errorf("widget %s: props.cameras entries must be names or ids (1 to 100 characters)", w.ID)
+					}
 				}
 			}
 		}

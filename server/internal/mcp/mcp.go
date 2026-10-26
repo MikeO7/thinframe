@@ -178,7 +178,7 @@ func register(m *sdk.Server, s *api.Server) {
 
 	type actIn struct {
 		ID      string `json:"id,omitempty" jsonschema:"frame id; omit with confirm=true to target every frame"`
-		Name    string `json:"name" jsonschema:"one of: reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot, bench, report (the frame posts a debug report: versions, config, mounts, processes, dmesg, this and the previous boot's log; read it with get_report)"`
+		Name    string `json:"name" jsonschema:"one of: reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot, bench, wake (an off screen on for arg seconds, default 120, like a touch), report (the frame posts a debug report: versions, config, mounts, processes, dmesg, this and the previous boot's log; read it with get_report)"`
 		Arg     string `json:"arg,omitempty" jsonschema:"argument, e.g. on|off for screen"`
 		Confirm bool   `json:"confirm,omitempty" jsonschema:"required true when id is omitted (applies to all frames)"`
 	}

@@ -15,6 +15,9 @@
 //	ARTIFACTS_DIR default /artifacts; tfctl-armv7, system-*.tar, versions.json
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter (current and 7-day forecast)
 //	WEATHER_UNITS  f for °F (default °C)
+//	PROTECT_URL       UniFi Protect console (https://192.168.1.1): cameras widget, doorbell pop-up
+//	PROTECT_API_KEY   its Integration API key (Protect: Settings, Control Plane, Integrations)
+//	PROTECT_INSECURE  1 = accept the console's self-signed certificate
 //	CALENDAR_ICS_URL  enable the calendar widget from a public .ics feed (no recurrence expansion)
 //	TZ            frames receive this time zone
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
@@ -45,6 +48,7 @@ import (
 	"github.com/MikeO7/thinframe/server/internal/discover"
 	"github.com/MikeO7/thinframe/server/internal/mcp"
 	"github.com/MikeO7/thinframe/server/internal/photos"
+	"github.com/MikeO7/thinframe/server/internal/protect"
 	"github.com/MikeO7/thinframe/server/internal/store"
 )
 
@@ -82,6 +86,10 @@ func main() {
 		}
 		opts.Calendar = &api.ICS{URL: u, Loc: loc}
 		log.Printf("calendar: ics feed enabled")
+	}
+	if u, k := os.Getenv("PROTECT_URL"), os.Getenv("PROTECT_API_KEY"); u != "" && k != "" {
+		opts.Protect = protect.New(u, k, os.Getenv("PROTECT_INSECURE") == "1")
+		log.Printf("protect: cameras and doorbell from %s", u)
 	}
 	if lat, lon := os.Getenv("WEATHER_LAT"), os.Getenv("WEATHER_LON"); lat != "" && lon != "" {
 		la, e1 := strconv.ParseFloat(lat, 64)
@@ -128,6 +136,7 @@ func main() {
 		}()
 	}
 	go srv.RunPolls(ctx)
+	go srv.RunProtect(ctx)
 	every, err := time.ParseDuration(env("SERVICES_EVERY", "1m"))
 	if err != nil || every < 10*time.Second {
 		every = time.Minute

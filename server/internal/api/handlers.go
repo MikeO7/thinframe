@@ -283,6 +283,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		s.recordHeartbeatSSE(f)
 	}
 	go s.pushData(id)
+	s.pushRing(id)
 	// The adapters cache for 10 minutes; refresh on that cadence so a page that stays
 	// open for days still shows current weather and calendar.
 	refresh := time.NewTicker(s.dataEvery)
@@ -383,6 +384,8 @@ func (s *Server) pushData(id string) {
 				ag = s.agendaData(time.Now())
 			}
 			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": ag})
+		case wdg.Type == "cameras" && s.opts.Protect != nil:
+			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": s.camerasData(wdg)})
 		}
 	}
 	s.pushSources(f)
