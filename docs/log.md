@@ -713,3 +713,28 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   registers are not readable from the `frame` user. Workaround: powered USB hub between brick and frame.
 - The earlier 8 h 49 min run on the dock ended at 08:40 with no shutdown event; the pre-outage log was
   already rotated away **[V]**. PR 102 logs the power supplies on every boot for next time.
+
+## 2026-10-26: wall-brick start, touch, stale Buildroot trees (PRs #110 to #114)
+
+- Cause of the dark frame on a brick [V]: `console=ttyGS0` was the last `console=`, so it was
+  `/dev/console`. `gs_write_room()` returns 0 until a USB host configures the gadget, so every
+  write to the console (init, rcS, daemons) waited forever on a brick. PR #110 moves
+  `/dev/console` to tty1; the kernel log stays on ttyGS0. Measured as root on the frame with the
+  gadget soft-disconnected (`echo disconnect > /sys/class/udc/*/soft_connect`, state
+  `not attached`): a write to `/dev/console` returned; a write to `/dev/ttyGS0` blocked, and
+  returned only after `connect` (state `configured`). `ls -l /proc/*/fd` showed init, getty,
+  iwd, dropbear, udhcpd and tfctl holding `/dev/console` (tty1), none holding ttyGS0.
+  PR #104 (PMIC registers in U-Boot) was closed: not the cause.
+- Touch [V]: taps at top-left, top-right, bottom-left read (2%, 97%), (98%, 96%), (2%, 4%) in
+  libinput: device = (x, 1 - y) of the landscape picture. With cog patch 0002 (rotation 3:
+  page = (py, 1 - px)) the matrix is the swap `0 1 0 1 0 0` (PR #113). Five-target test page,
+  beacons in the server log: every target within 21 px (top-left 12,21; top-right -1,0;
+  bottom-right -4,12; bottom-left 0,18; centre -7,16) on a 1280x800 page.
+- Stale trees [V]: the debug tree (`/br/output-debug`) kept a cog without patch 0002 and the
+  AIC8800 driver that still offered WPA3, so the debug system turned taps 90 degrees and could
+  not join Wi-Fi (reason 15). PR #114 rebuilds any package whose recipe or patches changed:
+  build 2026.10.26-5838690f-debug printed `aic8800 changed, rebuilding it` and
+  `cog changed, rebuilding it`; `aic8800_fdrv.ko` md5 954deb7e…, the fixed one.
+- Remote system update [V]: `versions.json` + `update-system` action from the server; the frame
+  fetched the 66 MB tar in 18 s, rebooted into slot a, `slot-confirmed` at 6.9 s, dashboard
+  agent connected at 6.8 s via `http://server.nox:8080`, new DHCP address picked up on its own.
