@@ -386,6 +386,8 @@ func (s *Server) pushData(id string) {
 			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": ag})
 		case wdg.Type == "cameras" && s.opts.Protect != nil:
 			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": s.camerasData(wdg)})
+		case wdg.Type == "cameras":
+			s.sse.publish(id, map[string]any{"widget": wdg.ID, "data": map[string]any{"setup": true}})
 		}
 	}
 	s.pushSources(f)

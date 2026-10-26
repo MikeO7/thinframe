@@ -116,18 +116,21 @@ func register(m *sdk.Server, s *api.Server) {
 		})
 
 	type setCfgIn struct {
-		ID         string   `json:"id" jsonschema:"frame id"`
-		Name       *string  `json:"name,omitempty" jsonschema:"human name"`
-		Rotation   *int     `json:"rotation,omitempty" jsonschema:"quarter turns 0..3; 3 = landscape with the cable at the bottom, 1 = cable at the top"`
-		Brightness *int     `json:"brightness,omitempty" jsonschema:"0..100"`
-		ScreenOff  *string  `json:"screen_off,omitempty" jsonschema:"HH:MM local, empty to disable"`
-		ScreenOn   *string  `json:"screen_on,omitempty" jsonschema:"HH:MM local"`
-		URL        *string  `json:"url,omitempty" jsonschema:"override page URL; empty = this server's dashboard"`
-		Tags       []string `json:"tags,omitempty"`
-		SplashText *string  `json:"splash_text,omitempty" jsonschema:"one line under the boot logo; shown from the next boot"`
-		SplashBG   *string  `json:"splash_bg,omitempty" jsonschema:"boot splash background #rrggbb"`
-		SplashPNG  *string  `json:"splash_png,omitempty" jsonschema:"boot logo as base64 PNG, at most 48 KiB; empty stops sending it (the frame keeps its last logo)"`
-		Debug      *bool    `json:"debug,omitempty" jsonschema:"true: tfctl logs everything (socket traffic, config writes, cog with G_MESSAGES_DEBUG=all) and posts a report on every connect"`
+		ID             string   `json:"id" jsonschema:"frame id"`
+		Name           *string  `json:"name,omitempty" jsonschema:"human name"`
+		Rotation       *int     `json:"rotation,omitempty" jsonschema:"quarter turns 0..3; 3 = landscape with the cable at the bottom, 1 = cable at the top"`
+		Brightness     *int     `json:"brightness,omitempty" jsonschema:"0..100"`
+		ScreenOff      *string  `json:"screen_off,omitempty" jsonschema:"HH:MM local, empty to disable"`
+		ScreenOn       *string  `json:"screen_on,omitempty" jsonschema:"HH:MM local"`
+		URL            *string  `json:"url,omitempty" jsonschema:"override page URL; empty = this server's dashboard"`
+		Tags           []string `json:"tags,omitempty"`
+		SplashText     *string  `json:"splash_text,omitempty" jsonschema:"one line under the boot logo; shown from the next boot"`
+		SplashBG       *string  `json:"splash_bg,omitempty" jsonschema:"boot splash background #rrggbb"`
+		SplashPNG      *string  `json:"splash_png,omitempty" jsonschema:"boot logo as base64 PNG, at most 48 KiB; empty stops sending it (the frame keeps its last logo)"`
+		Debug          *bool    `json:"debug,omitempty" jsonschema:"true: tfctl logs everything (socket traffic, config writes, cog with G_MESSAGES_DEBUG=all) and posts a report on every connect"`
+		AutoBrightness *bool    `json:"auto_brightness,omitempty" jsonschema:"true: the backlight follows the room light (light sensor), 25 to 100 per cent of brightness"`
+		Wave           *bool    `json:"wave,omitempty" jsonschema:"true: a hand held over the light sensor (bottom left of the bezel) for a moment wakes an off screen, or turns the dashboard to the next tab"`
+		MotionWake     *bool    `json:"motion_wake,omitempty" jsonschema:"true: a shadow passing the light sensor wakes the screen; works in lamp-lit rooms, not in a bright room (experimental; get_logs shows frame:light motion events)"`
 	}
 	sdk.AddTool(m, tool("set_frame_config", "Set frame config", "Change one or more config fields on a frame. Pushed to the frame immediately if it is online.", safeWrite),
 		func(_ context.Context, _ *sdk.CallToolRequest, in setCfgIn) (*sdk.CallToolResult, map[string]any, error) {
@@ -164,6 +167,15 @@ func register(m *sdk.Server, s *api.Server) {
 			}
 			if in.Debug != nil {
 				patch["debug"] = *in.Debug
+			}
+			if in.AutoBrightness != nil {
+				patch["auto_brightness"] = *in.AutoBrightness
+			}
+			if in.Wave != nil {
+				patch["wave"] = *in.Wave
+			}
+			if in.MotionWake != nil {
+				patch["motion_wake"] = *in.MotionWake
 			}
 			if len(patch) == 0 {
 				return nil, nil, fmt.Errorf("nothing to change")

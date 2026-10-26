@@ -383,12 +383,21 @@ func applyConfig(c *store.Config, name *string, patch map[string]any) error {
 				err = checkSplashPNG(str)
 			}
 			c.SplashPNG = str
-		case "debug":
+		case "debug", "auto_brightness", "wave", "motion_wake":
 			b, ok := asBool(v)
 			if !ok {
-				return fmt.Errorf("%w: debug must be true or false", ErrInvalid)
+				return fmt.Errorf("%w: %s must be true or false", ErrInvalid, k)
 			}
-			c.Debug = b
+			switch k {
+			case "debug":
+				c.Debug = b
+			case "auto_brightness":
+				c.AutoBrightness = b
+			case "wave":
+				c.Wave = b
+			default:
+				c.MotionWake = b
+			}
 		default:
 			return fmt.Errorf("%w: unknown config field %q", ErrInvalid, k)
 		}
@@ -477,7 +486,7 @@ func (s *Server) ConfigFor(f store.Frame) map[string]any {
 		"screen_off": c.ScreenOff, "screen_on": c.ScreenOn, "page_version": c.PageVersion,
 		"tags": c.Tags, "name": f.Name,
 		"splash_text": c.SplashText, "splash_bg": c.SplashBG, "splash_png": c.SplashPNG,
-		"debug": c.Debug,
+		"debug": c.Debug, "auto_brightness": c.AutoBrightness, "wave": c.Wave, "motion_wake": c.MotionWake,
 	}
 	if s.opts.Artifacts != nil {
 		v := s.opts.Artifacts.Versions()

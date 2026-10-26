@@ -121,6 +121,39 @@ impl Agent {
                 eprintln!("tfctl: agent: debug mode {}", if d { "on" } else { "off" });
             }
         }
+        // More from the light sensor (sense.rs). Absent keys leave a setting as it is.
+        let flag = |k: &str| match v.get(k) {
+            Some(Value::Bool(b)) => Some(*b),
+            Some(Value::Str(s)) => Some(s == "1" || s == "true"),
+            _ => None,
+        };
+        let (ab, wv, mw) = (
+            flag("auto_brightness").unwrap_or(self.cfg.auto_brightness),
+            flag("wave").unwrap_or(self.cfg.wave),
+            flag("motion_wake").unwrap_or(self.cfg.motion_wake),
+        );
+        if (ab, wv, mw)
+            != (
+                self.cfg.auto_brightness,
+                self.cfg.wave,
+                self.cfg.motion_wake,
+            )
+        {
+            let b = |x: bool| if x { "1" } else { "0" }.to_string();
+            over.push(("AUTO_BRIGHTNESS", b(ab)));
+            over.push(("WAVE", b(wv)));
+            over.push(("MOTION_WAKE", b(mw)));
+            (
+                self.cfg.auto_brightness,
+                self.cfg.wave,
+                self.cfg.motion_wake,
+            ) = (ab, wv, mw);
+            let _ = self.send(KioskCmd::Sense {
+                auto_brightness: ab,
+                wave: wv,
+                motion_wake: mw,
+            });
+        }
         if let Some(ver) = v.field_string("software_version") {
             self.software_version = ver;
         }
@@ -512,6 +545,30 @@ mod tests {
         let want = format!("{}/frame/rel", a.cfg.server_url.trim_end_matches('/'));
         assert_eq!(a.cfg.url, want);
         assert_eq!(rx.try_recv().unwrap(), KioskCmd::SetUrl(want));
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn light_features_follow_the_server() {
+        let (mut a, rx, _) = agent("sense");
+        a.apply_config(
+            &json::parse(r#"{"auto_brightness":true,"wave":true,"motion_wake":false}"#).unwrap(),
+        );
+        let want = KioskCmd::Sense {
+            auto_brightness: true,
+            wave: true,
+            motion_wake: false,
+        };
+        assert!(rx.try_iter().any(|c| c == want));
+        // The same again changes nothing; a missing key keeps its value.
+        a.apply_config(&json::parse(r#"{"auto_brightness":true}"#).unwrap());
+        assert!(rx.try_iter().all(|c| !matches!(c, KioskCmd::Sense { .. })));
+        assert!(a.cfg.wave);
+        let saved = std::fs::read_to_string(&a.conf_path).unwrap();
+        assert!(
+            saved.contains("WAVE=\"1\"") && saved.contains("AUTO_BRIGHTNESS=\"1\""),
+            "{saved}"
+        );
         let _ = std::fs::remove_file(&a.conf_path);
     }
 
