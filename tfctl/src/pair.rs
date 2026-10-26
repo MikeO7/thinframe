@@ -137,6 +137,9 @@ impl Agent {
                 eprintln!("tfctl: agent: pairing: {e}");
                 if !self.pair_page_up {
                     self.server_failed();
+                    // The server may have a new address (DHCP, another computer): ask the LAN,
+                    // as the connected loop does. With no token any server's answer is taken.
+                    self.rediscover();
                 }
                 Duration::from_secs(5)
             }
