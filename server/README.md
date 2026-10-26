@@ -32,8 +32,22 @@ The page never calls a third party. The server fetches, caches for 10 minutes, a
 |---|---|---|
 | `GET /api/data/photo/next?frame=<id>` | `PHOTOS_DIR` | `PHOTOS_DIR` |
 | `GET /api/data/weather` | open-meteo (no key) | `WEATHER_LAT`, `WEATHER_LON` |
-| `GET /api/data/calendar` | public `.ics` feed, no RRULE expansion | `CALENDAR_ICS_URL` (times in `TZ`) |
+| `GET /api/data/calendar` | public `.ics` feeds (`https://` or `webcal://`), repeating events expanded, several feeds merged | `CALENDAR_ICS_URL`: one or more URLs separated by spaces, commas or newlines (times in `TZ`) |
 | `GET /api/data/camera/<id>` | UniFi Protect snapshot (JPEG), only cameras a `cameras` widget shows or a doorbell that rang | `PROTECT_URL`, `PROTECT_API_KEY`, `PROTECT_INSECURE=1` for the console's self-signed certificate |
+
+**Calendars.** Repeating events (daily, weekly, monthly, yearly; "every 2nd Tuesday", "last
+Friday", skipped and moved dates) show for the next 60 days, at the same local time across DST.
+A feed that fails is logged and the others still show. What is supported: docs/decisions.md
+"Calendar recurrence".
+
+An Apple (iCloud) family calendar [D]: in Calendar on the Mac, right-click the calendar in the
+sidebar, choose Share Calendar, tick Public Calendar, and copy the `webcal://` link it shows. Put
+it in `CALENDAR_ICS_URL`; for several calendars, put several links separated by spaces:
+
+    CALENDAR_ICS_URL="webcal://p52-caldav.icloud.com/published/2/AAA webcal://p52-caldav.icloud.com/published/2/BBB"
+
+Anyone with the link can read the calendar, so treat it like a password. iCloud refreshes a
+published calendar on its own schedule, so a change can take a while to reach the frame [D].
 
 **Cameras and the doorbell.** Make an API key in Protect (Settings, Control Plane, Integrations).
 The `cameras` widget shows snapshots every `interval_s` (default 4 s); a tap opens one camera over

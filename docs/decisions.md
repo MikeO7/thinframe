@@ -731,6 +731,31 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   from the replay on connect. [U] time from ring to picture on the frame: cog restarts on wake.
 - Protect's public events carry no face names, so "who is it" is the live picture.
 
+## Calendar recurrence (2026-10-26)
+- A family calendar is mostly repeating events, and the feed carries each one once with an
+  RRULE. The server now expands them itself, stdlib only (`server/internal/api/rrule.go`), on
+  every read of the cached feed, so the cache stays right as days pass. [V] unit tests.
+- Supported: FREQ DAILY, WEEKLY, MONTHLY, YEARLY; INTERVAL; COUNT; UNTIL (date, UTC or floating
+  date-time); BYDAY (with ordinals like 2TU, -1FR for MONTHLY and YEARLY); BYMONTHDAY (negative
+  counts from the month's end); BYMONTH; BYSETPOS ("first weekday of the month"). WKST is ignored (weeks start on Monday). EXDATE (several
+  lines, comma lists, TZID, VALUE=DATE). A VEVENT with RECURRENCE-ID replaces that occurrence;
+  with STATUS:CANCELLED it removes it. Cancelled events are dropped. [V] unit tests.
+- Each occurrence keeps the event's length (DTEND, else DURATION); all-day events keep whole
+  days. Rules repeat in DTSTART's zone (its TZID; UTC for a `Z` time; `TZ` for floating and
+  all-day), so a 9:00 meeting stays 9:00 across DST. [V] unit test across 2026-11-01 in
+  America/Los_Angeles.
+- Only occurrences from a day before now to 60 days ahead are made. A rule without COUNT jumps
+  straight to the window; at most 5000 days, weeks, months or years are walked per rule, so a
+  bad rule cannot spin (a COUNT rule that starts thousands of periods back shows nothing).
+- Not supported: BYWEEKNO, BYYEARDAY, BYHOUR and finer, HOURLY and finer, RDATE,
+  RANGE=THISANDFUTURE. Such a rule is not expanded: the event shows once, at DTSTART, and the
+  rest of the feed still works. [U] whether the owner's iCloud feeds use any of them: check the
+  frame against the Mac's Calendar for a week.
+- `CALENDAR_ICS_URL` takes several URLs (spaces, commas or newlines). Each feed keeps its own
+  10-minute cache and backoff; they are read in parallel and merged by start. A failing feed is
+  logged and left out; the widget says "calendar unavailable" only when every feed fails with
+  nothing cached. `webcal://` is read as `https://`.
+
 ## More from the light sensor: wave, motion, auto-brightness (2026-10-26)
 - The owner asked for "a motion sensor". The PF1007L has one analog light sensor (LRADC0, 6 bits;
   light.rs), no PIR or proximity part. tfctl now reads it 10 times a second (it was once a
