@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Load the Obsidian demo onto a frame: the layout, then every sample source.
-# Usage: FRAME_TOKEN=... load.sh [server-url] [frame-id]   (default http://localhost:8080 demo)
+# Usage: FRAME_TOKEN=... load.sh [server-url] [frame-id]   (default http://localhost:41007 demo)
 # Sample dates are written as @D0..@D6 (today .. today+6) and filled in here.
 set -euo pipefail
-url=${1:-http://localhost:8080}
+url=${1:-http://localhost:41007}
 id=${2:-demo}
 here=$(cd "$(dirname "$0")" && pwd)
 auth=()
