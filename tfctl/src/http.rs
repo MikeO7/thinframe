@@ -183,11 +183,37 @@ fn request(
     }
     let (status, headers, end) =
         parse_head(&buf).ok_or_else(|| io::Error::other("bad http response"))?;
+    // Go's server chunks a body it cannot size up front (about 2 KiB and more: a frame's full
+    // record). Read to EOF (Connection: close), so every chunk is here.
+    let chunked = headers.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked")
+    });
+    let body = if chunked {
+        dechunk(&buf[end..]).ok_or_else(|| io::Error::other("bad chunked body"))?
+    } else {
+        buf[end..].to_vec()
+    };
     Ok(Response {
         status,
         headers,
-        body: buf[end..].to_vec(),
+        body,
     })
+}
+
+/// A chunked body (RFC 9112 7.1): hex size, optional extensions, CRLF, data, CRLF; size 0 ends.
+fn dechunk(mut b: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    loop {
+        let line_end = b.windows(2).position(|w| w == b"\r\n")?;
+        let size_txt = std::str::from_utf8(&b[..line_end]).ok()?;
+        let size = usize::from_str_radix(size_txt.split(';').next()?.trim(), 16).ok()?;
+        b = &b[line_end + 2..];
+        if size == 0 {
+            return Some(out);
+        }
+        out.extend_from_slice(b.get(..size)?);
+        b = b.get(size + 2..)?;
+    }
 }
 
 /// A value that goes into the request line or a header: the frame id (in the path), an
@@ -269,6 +295,16 @@ pub fn download(url: &Url, token: &str, timeout: Duration, dest: &Path) -> io::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunked_bodies_are_decoded() {
+        assert_eq!(
+            dechunk(b"4\r\n{\"a\"\r\n6;x=1\r\n:12345\r\n1\r\n}\r\n0\r\n\r\n").unwrap(),
+            b"{\"a\":12345}"
+        );
+        assert!(dechunk(b"zz\r\nabc").is_none());
+        assert!(dechunk(b"10\r\nshort").is_none());
+    }
 
     #[test]
     fn request_values_reject_control_characters_and_spaces() {
