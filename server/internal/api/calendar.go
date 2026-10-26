@@ -41,7 +41,7 @@ func (c *ICS) Upcoming(now time.Time, n int) ([]Event, error) {
 
 func (c *ICS) fetch() ([]Event, error) {
 	cl := http.Client{Timeout: 10 * time.Second}
-	resp, err := cl.Get(c.URL)
+	resp, err := cl.Get(feedURL(c.URL))
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +50,14 @@ func (c *ICS) fetch() ([]Event, error) {
 		return nil, fmt.Errorf("calendar: %s", resp.Status)
 	}
 	return ParseICS(io.LimitReader(resp.Body, 8<<20), c.Loc)
+}
+
+// feedURL turns the webcal:// links Apple Calendar and iCloud hand out into https://.
+func feedURL(u string) string {
+	if rest, ok := strings.CutPrefix(u, "webcal://"); ok {
+		return "https://" + rest
+	}
+	return u
 }
 
 func pick(evs []Event, now time.Time, n int) []Event {
