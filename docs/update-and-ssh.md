@@ -2,6 +2,11 @@
 
 New frame? Start at [flashing.md](flashing.md). This page is for after that.
 
+## At the frame: hold the screen 5 s
+Hold a finger on the screen for 5 seconds, on any page, and Settings opens: change Wi-Fi, find
+the server on the network or type its address, see the frame's addresses and versions, restart.
+It works with no server and over a broken page. Tap Done, or leave it 3 minutes. [V 2026-10-26]
+
 ## Paths in
 1. Wi-Fi: `ssh frame@<frame name>` (hostname = FRAME_ID, router DNS) or the IP shown in `/admin`.
    Key: `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh` (or
@@ -15,7 +20,8 @@ New frame? Start at [flashing.md](flashing.md). This page is for after that.
    `flash.sh --settings-only`, applied and deleted on the next boot).
 
 `frame` is an ordinary user: there is no sudo or doas on the image. Everything that changes the
-frame goes through the server (config, actions, updates), `provision.txt`, or a new card.
+frame goes through Settings on its screen, the server (config, actions, updates), `provision.txt`,
+or a new card.
 
 ## Changing the page
 Edit `server/static/` or the layout in `/admin`; the frame follows on its control socket.
