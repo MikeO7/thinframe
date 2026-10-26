@@ -20,7 +20,7 @@ case $(ssh -o BatchMode=yes "$host" uname -m) in
 esac
 ver=$(git -C "$root" rev-parse --short HEAD)
 tag=local/thinframe-server:$ver
-docker buildx build --platform "linux/$arch" --build-arg VERSION="$ver" -t "$tag" --load "$root/server" >/dev/null
+docker build --platform "linux/$arch" --build-arg VERSION="$ver" -t "$tag" "$root/server" >/dev/null
 ok "built $tag for linux/$arch"
 docker save "$tag" | gzip -1 | ssh -o BatchMode=yes "$host" 'gunzip | docker load' >/dev/null
 ok "image loaded on $host"
@@ -32,6 +32,7 @@ cd ~ && mkdir -p "$dir/data" && chmod 700 "$dir" && cd "$dir"
 if [ ! -f env ]; then
 	tz=\$(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')
 	(umask 077; printf 'FRAME_TOKEN=%s\nTZ=%s\n' "\$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" "\${tz:-UTC}" > env)
+	chmod 600 env  # a default ACL can widen what umask allowed
 	echo "  made env with a new FRAME_TOKEN"
 fi
 cat > compose.yml <<'YML'
