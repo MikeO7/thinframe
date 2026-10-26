@@ -18,6 +18,22 @@ import (
 //go:embed templates/*.html templates/page.css templates/page.js templates/obsidian.css templates/aurora.css
 var files embed.FS
 
+// Fonts the themes use, served at /fonts/<name>. Manrope: SIL OFL 1.1 (fonts/OFL.txt).
+//
+//go:embed fonts/manrope.woff2 fonts/OFL.txt
+var fonts embed.FS
+
+// Font returns a bundled font file (or its licence, OFL.txt) and its Content-Type.
+func Font(name string) ([]byte, string, bool) {
+	types := map[string]string{"manrope.woff2": "font/woff2", "OFL.txt": "text/plain; charset=utf-8"}
+	ct, ok := types[name]
+	if !ok {
+		return nil, "", false
+	}
+	b, err := fonts.ReadFile("fonts/" + name)
+	return b, ct, err == nil
+}
+
 // Known widget types. Adding one = a template file named <type>.html (and, for widgets fed
 // by a data source, a renderer in page.js).
 var Types = []string{"clock", "photo", "weather", "calendar", "status", "text", "iframe",

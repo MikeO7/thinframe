@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/MikeO7/thinframe/server/internal/store"
+	"github.com/MikeO7/thinframe/server/internal/widgets"
 )
 
 // Sources are named JSON objects that something outside the server pushes (a script, a home
@@ -287,4 +288,19 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "max-age=3600")
 	http.ServeContent(w, r, name, st.ModTime(), f)
+}
+
+// handleFont serves the fonts built into the server (widgets.Font). Public like the page; apps
+// may use them too.
+func (s *Server) handleFont(w http.ResponseWriter, r *http.Request) {
+	b, ct, ok := widgets.Font(r.PathValue("name"))
+	if !ok {
+		http.Error(w, "no such font", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	_, _ = w.Write(b)
 }
