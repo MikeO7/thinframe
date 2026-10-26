@@ -39,3 +39,11 @@ if [ -f "$WORK/touch/gsl_m86_hd.fw" ]; then
 else
 	echo "post-build: no touch firmware staged; touch will not work on this image" >&2
 fi
+
+# DEBUG=1 only: root over SSH with the frame user's keys, for quick iteration at the desk
+# (copy a tfctl, edit /boot, remount). Release and normal images keep dropbear's -w (no root).
+if [ "${VARIANT:-}" = debug ]; then
+	ln -sfn /etc/dropbear "$T/root/.ssh"
+	sed -i 's|/usr/sbin/dropbear -F -R -s -w |/usr/sbin/dropbear -F -R -s |' "$T/etc/inittab"
+	grep -q 'dropbear -F -R -s >' "$T/etc/inittab" || { echo "post-build: debug root: inittab line not found" >&2; exit 1; }
+fi
