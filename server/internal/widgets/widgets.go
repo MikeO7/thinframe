@@ -233,6 +233,9 @@ func Validate(l store.Layout) error {
 	if err != nil {
 		return err
 	}
+	if l.Nav != "" && l.Nav != "left" && l.Nav != "bottom" {
+		return fmt.Errorf("nav must be left or bottom")
+	}
 	if l.IdleS < 0 || l.IdleS > 86400 {
 		return fmt.Errorf("idle_s must be 0..86400")
 	}

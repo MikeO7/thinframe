@@ -33,7 +33,7 @@ func TestDemoLayoutRenders(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, want := range []string{`class="tabbed"`, `data-page="security"`, `class="page on" data-page="home"`,
+	for _, want := range []string{`class="tabbed nav-left"`, `data-page="security"`, `class="page on" data-page="home"`,
 		`data-for="house"`, `>Security &amp; energy<`, `class="wp"`, `/api/data/asset/inter.woff2`, `id="w-server"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q", want)
@@ -41,6 +41,11 @@ func TestDemoLayoutRenders(t *testing.T) {
 	}
 	if strings.Count(s, `<main class="page`) != len(l.Tabs) {
 		t.Errorf("want one page per tab")
+	}
+	l.Nav = "bottom"
+	b, _ = Render(store.Frame{ID: "demo", Config: store.DefaultConfig(), Layout: l})
+	if !strings.Contains(string(b), `class="tabbed nav-bottom"`) {
+		t.Error("nav bottom not rendered")
 	}
 }
 
@@ -62,6 +67,7 @@ func TestValidateTabs(t *testing.T) {
 		"title":            func(l *store.Layout) { l.Tabs[1].Title = "" },
 		"no tabs":          func(l *store.Layout) { l.Tabs = nil },
 		"idle_s":           func(l *store.Layout) { l.IdleS = -1 },
+		"nav must be":      func(l *store.Layout) { l.Nav = "top" },
 		"source must be a": func(l *store.Layout) { l.Widgets[0].Props = map[string]any{"source": "../x"} },
 	}
 	for want, mut := range cases {

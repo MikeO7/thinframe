@@ -42,7 +42,8 @@ and `server_version`.
 A layout may have `tabs` (`[{id,title,icon,parent,label}]`); each widget names its `tab`, and every
 tab is its own `cols x rows` grid. A tab with `parent` is a second page of that tab, picked with a
 segmented switch (`label` names it there). After `idle_s` seconds without a touch (default 90) the
-page returns to the first tab. `theme: "obsidian"` is the dark Apple-style look; it uses Inter if
+page returns to the first tab. `nav` puts the tab bar in a rail on the left (`left`, the default,
+which leaves the grid the full height) or as a pill at the bottom (`bottom`). `theme: "obsidian"` is the dark Apple-style look; it uses Inter if
 `DATA_DIR/assets/inter.woff2` exists (OFL, not shipped here), else DejaVu Sans.
 
 Widgets `hero agenda cars rooms climate list tiles energy shows worldclock services` draw from

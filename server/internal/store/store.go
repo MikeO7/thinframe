@@ -136,6 +136,7 @@ type Layout struct {
 	Theme   string   `json:"theme,omitempty"`
 	Tabs    []Tab    `json:"tabs,omitempty"`
 	IdleS   int      `json:"idle_s,omitempty"` // back to the first tab after this many idle seconds; 0 = 90
+	Nav     string   `json:"nav,omitempty"`    // where the tab bar sits: "left" (default) or "bottom"
 	Widgets []Widget `json:"widgets"`
 }
 
