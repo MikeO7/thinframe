@@ -34,7 +34,7 @@ jobs:
         run: |
           f=target/armv7-unknown-linux-musleabihf/release/tfctl
           ls -l "$f"; [ "$(stat -c %s "$f")" -lt 2097152 ]
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: tfctl-armv7, path: tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl }
   server:
     runs-on: ubuntu-latest
