@@ -342,6 +342,15 @@ func TestScreenshot(t *testing.T) {
 	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 400 {
 		t.Fatalf("short body %d", resp.StatusCode)
 	}
+	// A failure the frame reports ends the wait at once, with the reason.
+	go func() {
+		readMsg(t, c)
+		send(t, c, map[string]any{"type": "event", "kind": "screenshot", "text": "failed: /dev/dri/card1: no CRTC is scanning out a framebuffer"})
+	}()
+	start := time.Now()
+	if _, err := s.Screenshot(context.Background(), "sim"); err == nil || !strings.Contains(err.Error(), "screen is off") || time.Since(start) > 5*time.Second {
+		t.Fatalf("failed screenshot: %v after %s", err, time.Since(start))
+	}
 	if _, err := s.Screenshot(context.Background(), "nobody"); err == nil {
 		t.Fatal("screenshot of an unknown frame")
 	}

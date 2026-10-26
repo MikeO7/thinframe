@@ -42,6 +42,14 @@ func TestDemoLayoutRenders(t *testing.T) {
 	if strings.Count(s, `<main class="page`) != len(l.Tabs) {
 		t.Errorf("want one page per tab")
 	}
+	if !strings.Contains(s, `data-tab="home" data-icon="home"`) {
+		t.Error("tabs carry no data-icon for themes")
+	}
+	l.Theme = "aurora"
+	b, _ = Render(store.Frame{ID: "demo", Config: store.DefaultConfig(), Layout: l})
+	if !strings.Contains(string(b), "html[data-mood=car]") || !strings.Contains(string(b), "/api/data/asset/inter.woff2") {
+		t.Error("aurora renders without its CSS on top of obsidian")
+	}
 	l.Nav = "bottom"
 	b, _ = Render(store.Frame{ID: "demo", Config: store.DefaultConfig(), Layout: l})
 	if !strings.Contains(string(b), `class="tabbed nav-bottom"`) {

@@ -484,6 +484,16 @@
   // Drawn after the tab bar has picked the first page, so hidden tabs start dirty.
   function drawAll() { widgets.forEach(draw); }
 
+  // Part of the day, for themes that light the page by it (aurora's Home). Checked every 5 min.
+  const root = document.documentElement;
+  root.dataset.mood = root.dataset.mood || 'home';
+  const daypart = () => {
+    const h = new Date().getHours();
+    root.dataset.daypart = h >= 5 && h < 8 ? 'dawn' : h >= 8 && h < 17 ? 'day' : h >= 17 && h < 20 ? 'dusk' : 'night';
+  };
+  daypart();
+  setInterval(daypart, 300000);
+
   // ---- tabs -------------------------------------------------------------------------------
   const grid = document.getElementById('grid');
   let idleT;
@@ -497,6 +507,9 @@
       if (mine) parent = s.dataset.for;
     });
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === (parent || id)));
+    // Themes colour the page by the tab's icon (a fixed set, unlike tab ids).
+    const on = document.querySelector('.tab.on');
+    document.documentElement.dataset.mood = (on && on.dataset.icon) || 'home';
     dirty.forEach(sec => { if (visible(sec)) draw(sec); });
   }
   if (grid && grid.classList.contains('tabbed')) {

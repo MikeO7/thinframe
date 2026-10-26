@@ -107,6 +107,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = json.Unmarshal(data, &ev)
 			_, _ = s.Store.Update(id, func(f *store.Frame) { store.AddEvent(f, "frame:"+ev.Kind, ev.Text) })
+			if ev.Kind == "screenshot" {
+				s.shotFailed(id, ev.Text)
+			}
 		}
 	}
 }
