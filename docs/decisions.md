@@ -708,3 +708,25 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
 - A static SVG noise layer at 7 % opacity breaks up gradient banding. Cards get a corner sheen
   and a 1 px top edge in the tab's accent; bars, the energy "now" bar and status dots carry a
   small fixed glow in the accent colour; the Home clock has a soft glow behind it.
+
+## Cameras and the doorbell (UniFi Protect) (2026-10-26)
+- The owner uses UniFi Protect. The server reads it through Protect's official Integration API
+  (API key, `X-API-KEY`): `GET /v1/cameras`, `GET /v1/cameras/{id}/snapshot`, and the
+  `subscribe/events` websocket for rings. Paths and message shapes from the uiprotect library
+  [D]; [U] on the owner's console until a ring is logged. No new dependency: the websocket client
+  is `coder/websocket`, already used for the frame socket.
+- Snapshots, not video. The frame's WebKit cannot play RTSP(S), and a 640-wide JPEG every few
+  seconds is cheap for the A33 to decode. Each picture is decoded off screen and swapped in;
+  one request per picture in flight. The server shares one snapshot fetch per camera per second
+  between frames.
+- The page plane is public (no token), so the server only serves cameras a `cameras` widget on
+  some layout lists (or all, when the widget lists none) and doorbells that rang in the last
+  day. Anyone on the LAN who can open a dashboard can see those cameras, as they can see the
+  dashboard itself.
+- A ring: every page gets `{"doorbell":{id,camera,name,age_s}}` and pops the camera over the
+  page for 90 s (a dismissed ring stays dismissed across reloads, kept in localStorage). An off
+  screen has a stopped browser, so every connected frame also gets `wake`: the screen comes on
+  for 2 minutes like a touch, then the schedule and the light decide again. A plain `screen on`
+  would hold until the next schedule change, all night. The page the wake reloads gets the ring
+  from the replay on connect. [U] time from ring to picture on the frame: cog restarts on wake.
+- Protect's public events carry no face names, so "who is it" is the live picture.

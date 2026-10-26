@@ -275,6 +275,8 @@ func rows() []row {
 		{method: "GET", path: "/api/data/asset/x.svg", class: public, ok: 400},
 		{pattern: "GET /fonts/{name}", method: "GET", path: "/fonts/manrope.woff2", class: public, ok: 200},
 		{method: "GET", path: "/fonts/..%2Fwidgets.go", class: public, ok: 404},
+		// Not configured in this matrix (no PROTECT_URL): public, and 404.
+		{pattern: "GET /api/data/camera/{id}", method: "GET", path: "/api/data/camera/c1", class: public, ok: 404},
 		{method: "GET", path: "/api/data/asset/..%2Fframes%2Fkitchen.json", class: public, ok: 400},
 		{pattern: "POST /api/frames/{id}/beacon", method: "POST", path: "/api/frames/kitchen/beacon", class: public, ok: 204, body: `{"latency_ms":12}`, ctype: "text/plain"},
 		{pattern: "POST /api/frames/{id}/alive", method: "POST", path: "/api/frames/kitchen/alive", class: public, ok: 204},

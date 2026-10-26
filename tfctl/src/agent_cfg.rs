@@ -198,6 +198,12 @@ impl Agent {
                     _ => Err(io::Error::other("screen: value must be on|off")),
                 }
             }
+            "wake" => {
+                let secs = v
+                    .field_string("seconds")
+                    .and_then(|s| s.parse::<u64>().ok());
+                self.send(KioskCmd::Wake(secs.unwrap_or(120).clamp(10, 600)))
+            }
             "update-software" => {
                 // The respawn that follows would orphan the system update mid-dd.
                 if self.busy.load(Ordering::SeqCst) {
@@ -515,13 +521,25 @@ mod tests {
         let screen = json::parse(r#"{"value":"off"}"#).unwrap();
         assert!(a.action("screen", &screen).is_ok());
         assert!(a.action("restart-kiosk", &Value::obj()).is_ok());
+        assert!(a
+            .action("wake", &json::parse(r#"{"seconds":"5"}"#).unwrap())
+            .is_ok());
+        assert!(a.action("wake", &Value::obj()).is_ok());
         assert!(a.action("update-system", &Value::obj()).is_err());
         assert!(a.action("update-software", &Value::obj()).is_err());
         assert!(a.action("bogus", &Value::obj()).is_err());
         // Acked at once; capture (no DRM here) fails later as an event, not as the ack.
         assert!(a.action("screenshot", &Value::obj()).is_ok());
         let got: Vec<_> = rx.try_iter().collect();
-        assert_eq!(got, vec![KioskCmd::Screen(false), KioskCmd::Restart]);
+        assert_eq!(
+            got,
+            vec![
+                KioskCmd::Screen(false),
+                KioskCmd::Restart,
+                KioskCmd::Wake(10),
+                KioskCmd::Wake(120)
+            ]
+        );
         let h = a.hello().to_string();
         assert!(h.starts_with(r#"{"type":"hello","frame_id":"k","#));
         assert!(h.contains(r#""page_version":"1""#));

@@ -28,6 +28,9 @@ pub enum KioskCmd {
     SetUrl(String),
     SetRotation(u8),
     Screen(bool),
+    /// Turn an off screen on for this many seconds, like a touch (a doorbell ring); then the
+    /// schedule and the light decide again. An on screen stays as it is.
+    Wake(u64),
     Brightness(u8),
     Schedule(String, String),
     /// Stop cog and return from `supervise`: a new tfctl was installed, init respawns us.
@@ -494,6 +497,16 @@ impl Kiosk {
                 }
             }
             KioskCmd::Screen(on) => self.set_screen(on),
+            KioskCmd::Wake(secs) => {
+                let until = Instant::now() + Duration::from_secs(secs);
+                if !SCREEN_ON.load(Ordering::SeqCst) {
+                    eprintln!("tfctl: wake: screen on for {secs} s");
+                    self.set_screen(true);
+                    self.wake_until = Some(until);
+                } else if self.wake_until.is_some_and(|t| t < until) {
+                    self.wake_until = Some(until);
+                }
+            }
             KioskCmd::Brightness(b) => {
                 self.brightness = b;
                 if SCREEN_ON.load(Ordering::SeqCst) {

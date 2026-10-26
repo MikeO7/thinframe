@@ -64,6 +64,7 @@
     msg: '<path d="M4 5h16v11H9l-5 4z"/>',
     bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
     person: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
     cam: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>',
     leaf: '<path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15zM5 19l7-7"/>',
     dot: '<circle cx="12" cy="12" r="3"/>',
@@ -419,6 +420,21 @@
       }
       b.append(l);
     },
+    cameras(sec, d, p) {
+      const b = body(sec), cams = arr(d.cameras);
+      sec.querySelector('.live').hidden = !cams.length;
+      if (d.error) { empty(b, 'Cameras unavailable'); return; }
+      if (!cams.length) { empty(b, d.cameras ? 'No cameras match' : 'No camera data yet'); return; }
+      const g = h('div', 'cams n' + Math.min(cams.length, 9));
+      for (const c of cams) {
+        const t = h('div', 'cam' + (c.online ? '' : ' offline')), cap = h('div', 'cap');
+        t.dataset.cam = c.id; t.dataset.name = c.name;
+        cap.append(h('span', 'dot' + (c.online ? '' : ' off')), h('span', 'ellip', c.name + (c.online ? '' : ' · offline')));
+        t.append(cap); g.append(t);
+      }
+      b.append(g);
+      camTick(sec, true);
+    },
     services(sec, d, p) {
       const b = body(sec), cs = arr(d.containers), host = d.host || {};
       if (!d.containers) { empty(b); return; }
@@ -556,6 +572,68 @@
     });
   }
 
+  // ---- cameras and the doorbell (UniFi Protect, server/internal/api/cameras.go) ------------
+  // Snapshots, not video. A new picture is decoded off screen and swapped in when ready, one
+  // request per picture in flight, so a slow camera never queues requests.
+  function loadCam(holder, id) {
+    if (holder._busy) return;
+    holder._busy = true;
+    const n = new Image();
+    n.alt = '';
+    n.onload = () => { holder._busy = false; holder.classList.remove('stale'); const o = holder.querySelector('img'); if (o) o.replaceWith(n); else holder.prepend(n); };
+    n.onerror = () => { holder._busy = false; holder.classList.add('stale'); };
+    n.src = '/api/data/camera/' + encodeURIComponent(id) + '?t=' + Date.now();
+  }
+  function camTick(sec, force) {
+    const every = Math.max(2, num(props(sec).interval_s) || 4) * 1000, now = Date.now();
+    if (!force && now - (sec._camAt || 0) < every) return;
+    sec._camAt = now;
+    sec.querySelectorAll('.cam').forEach(t => loadCam(t, t.dataset.cam));
+  }
+  const camSecs = Array.from(document.querySelectorAll('.w-cameras'));
+  const view = { el: null };
+  if (camSecs.length) setInterval(() => { if (!view.el) camSecs.forEach(s => { if (visible(s)) camTick(s); }); }, 1000);
+
+  // One camera over the whole page: a tapped camera, or the doorbell when it rings.
+  function openView(o) {
+    closeView();
+    const el = h('div', 'camview' + (o.ring ? ' cv-ring' : '')), pic = h('div', 'cv-pic'), top = h('div', 'cv-top'), pill = h('div', 'cv-pill');
+    pill.append(icon(o.ring ? 'bell' : 'cam'), h('span', '', o.name));
+    top.append(pill, h('span', 'cv-live', 'Live'));
+    const foot = h('div', 'cv-foot'), txt = h('div', 'cv-txt');
+    txt.append(h('div', 'cv-title', o.ring ? 'Someone\u2019s at the door' : o.name), h('div', 'cv-sub', o.sub || 'Tap anywhere to close'));
+    foot.append(txt, h('div', 'cv-btn', o.ring ? 'Dismiss' : 'Close'));
+    el.append(pic, top, foot);
+    el.addEventListener('click', () => { if (o.ring) dismissed(o.ringId, true); closeView(); });
+    document.body.append(el);
+    const tick = () => loadCam(pic, o.id);
+    tick();
+    Object.assign(view, { el, ringId: o.ringId || '', timer: setInterval(tick, o.ring ? 1000 : 1500), end: setTimeout(closeView, (o.secs || 60) * 1000) });
+    dispatchEvent(new Event('tf-activity'));
+  }
+  function closeView() {
+    if (!view.el) return;
+    clearInterval(view.timer); clearTimeout(view.end);
+    view.el.remove(); view.el = null;
+  }
+  addEventListener('click', e => { const t = e.target.closest('.cam'); if (t) openView({ id: t.dataset.cam, name: t.dataset.name, secs: 120 }); });
+  // A dismissed ring stays dismissed across the reload a waking screen does.
+  function dismissed(id, set) {
+    try {
+      const l = JSON.parse(localStorage.getItem('tf-rings') || '[]');
+      if (!set) return l.includes(id);
+      localStorage.setItem('tf-rings', JSON.stringify(l.concat(id).slice(-20)));
+    } catch (e) { /* no storage: may show again after a reload */ }
+    return false;
+  }
+  function ring(d) {
+    const age = Number(d.age_s) || 0;
+    if (!d.camera || age > 90 || dismissed(d.id) || (view.el && view.ringId === d.id)) return;
+    openView({ id: d.camera, name: d.name || 'Doorbell', ring: true, ringId: d.id, secs: Math.max(20, 90 - age),
+      sub: (d.name || 'Doorbell') + ' \u00b7 ' + (age < 60 ? 'just now' : Math.round(age / 60) + ' min ago') });
+  }
+  TF.ring = ring; // tests and the MCP preview
+
   function connect() {
     const es = new EventSource('/api/stream/' + encodeURIComponent(TF.frame) + (appFrames.length ? '?apps=1' : ''));
     es.onmessage = ev => {
@@ -564,6 +642,7 @@
       if (m.reload || (m.page_version && m.page_version !== TF.pageVersion)) { location.reload(); return; }
       if (m.source || m.app_state || m.app_event) { toApps(m); return; }
       if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) f.src = f.src; }); return; }
+      if (m.doorbell) { ring(m.doorbell); return; }
       if (!m.widget) return;
       const sec = document.getElementById('w-' + m.widget);
       if (!sec) return;

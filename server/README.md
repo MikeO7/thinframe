@@ -33,6 +33,13 @@ The page never calls a third party. The server fetches, caches for 10 minutes, a
 | `GET /api/data/photo/next?frame=<id>` | `PHOTOS_DIR` | `PHOTOS_DIR` |
 | `GET /api/data/weather` | open-meteo (no key) | `WEATHER_LAT`, `WEATHER_LON` |
 | `GET /api/data/calendar` | public `.ics` feed, no RRULE expansion | `CALENDAR_ICS_URL` (times in `TZ`) |
+| `GET /api/data/camera/<id>` | UniFi Protect snapshot (JPEG), only cameras a `cameras` widget shows or a doorbell that rang | `PROTECT_URL`, `PROTECT_API_KEY`, `PROTECT_INSECURE=1` for the console's self-signed certificate |
+
+**Cameras and the doorbell.** Make an API key in Protect (Settings, Control Plane, Integrations).
+The `cameras` widget shows snapshots every `interval_s` (default 4 s); a tap opens one camera over
+the page. A doorbell ring needs no widget: every page shows the doorbell camera live for 90 s,
+and every connected frame gets a `wake` action (an off screen on for 2 minutes, like a touch;
+needs a tfctl with `wake`, installed with `update-software`; older frames ignore it).
 
 An unconfigured adapter answers 404. A failed fetch keeps showing the last good data.
 The control socket's `hello` reply carries `time_unix`, `tz` (`$TZ`, else `/etc/localtime`, else UTC)

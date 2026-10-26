@@ -37,6 +37,7 @@ type Options struct {
 	Weather    WeatherSource  // may be nil
 	Fahrenheit bool           // weather temperatures in °F (WEATHER_UNITS=f)
 	Calendar   CalendarSource // may be nil
+	Protect    Protect        // UniFi Protect cameras and doorbell; may be nil
 	Version    string
 	PageStale  time.Duration // hung-page timeout; 0 = 3 minutes
 	Reports    string        // where frame reports are kept; "" = <data>/reports next to the store
@@ -74,6 +75,8 @@ type Server struct {
 	pollRun  pollRun
 	pollTick time.Duration
 	shots    shotWaiters
+	// ring: the last doorbell press and which doorbells rang (cameras.go).
+	ring ringState
 	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
 	// does not wait for hijacked connections, so a process that exits right after Shutdown
 	// could cut the "disconnected" event short; Drain waits for them.
@@ -136,6 +139,7 @@ func (s *Server) Routes() http.Handler {
 	fn("GET /api/data/calendar", s.handleDataCalendar)
 	fn("GET /api/data/asset/{name}", s.handleAsset)
 	fn("GET /fonts/{name}", s.handleFont)
+	fn("GET /api/data/camera/{id}", s.handleCamera)
 	fn("POST /api/frames/{id}/beacon", s.handleBeacon)
 	fn("POST /api/frames/{id}/alive", s.handleAlive)
 	// Apps (apps.go): sandboxed documents and the public endpoints their SDK calls. Like the
@@ -436,7 +440,7 @@ func (s *Server) SetLayout(id string, l store.Layout) (store.Frame, error) {
 }
 
 // ValidActions lists what a frame understands.
-var ValidActions = []string{"reboot", "restart-kiosk", "reload-page", "screen", "update-software", "update-system", "rollback", "screenshot", "bench", "report"}
+var ValidActions = []string{"reboot", "restart-kiosk", "reload-page", "screen", "update-software", "update-system", "rollback", "screenshot", "bench", "report", "wake"}
 
 // Act queues an action and pushes it if the frame is online.
 func (s *Server) Act(id, name string, args map[string]string) (store.Action, error) {
@@ -520,6 +524,8 @@ func normalizeArgs(name string, args map[string]string) map[string]string {
 		switch name {
 		case "screen":
 			args["state"] = v
+		case "wake":
+			args["seconds"] = v
 		}
 	}
 	return args
