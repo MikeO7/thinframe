@@ -55,6 +55,8 @@ USB host configures the gadget, so a user-space write to it waits forever on a w
 ## SSH key only, user `frame`, no sudo at all
 Dropbear, key-only. tfctl runs as root for DRM, backlight, clock and updates; there is nothing else to escalate to. Host key generated once into `image/secrets/` so re-flashing a card
 does not change the fingerprint.
+Exception: a `DEBUG=1` card (bench only, never released) also takes root over SSH with the same keys
+(`/root/.ssh` -> `/etc/dropbear`, dropbear without `-w`; post-build.sh), to iterate at the desk.
 
 ## Content as a local file by default
 `file:///var/lib/thinframe/www/index.html`. No web server needed on the frame. Set
