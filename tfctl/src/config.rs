@@ -16,6 +16,9 @@ pub struct Config {
     /// quarter turns 0..3
     pub rotation: u8,
     pub extra_args: Vec<String>,
+    /// COG_ENV="NAME=value ...": extra environment for cog and WebKit, over the defaults in
+    /// kiosk.rs (for trying a WebKit setting without a new tfctl).
+    pub cog_env: Vec<(String, String)>,
     pub user: String,
     /// https://github.com/<owner>/thinframe/archive/refs/heads/main.tar.gz
     pub repo_tarball: String,
@@ -63,6 +66,7 @@ impl Default for Config {
             renderer: "gles".into(),
             rotation: 3,
             extra_args: vec![],
+            cog_env: vec![],
             user: "frame".into(),
             repo_tarball: concat!(
                 "https://github.com/MikeO7/thinframe/",
@@ -176,6 +180,16 @@ pub fn parse(text: &str) -> Config {
     cfg.extra_args = get("COG_EXTRA_ARGS", "")
         .split_whitespace()
         .map(String::from)
+        .collect();
+    cfg.cog_env = get("COG_ENV", "")
+        .split_whitespace()
+        .filter_map(|kv| kv.split_once('='))
+        .filter(|(k, _)| {
+            !k.is_empty()
+                && k.bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        })
+        .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
     if let Some(r) = kv.get("COG_ROTATION").and_then(|v| v.parse::<u8>().ok()) {
         if r < 4 {
@@ -463,6 +477,14 @@ mod tests {
         assert_eq!(c.url, "http://a/");
         assert_eq!(c.rotation, 1);
         assert_eq!(c.extra_args, vec!["--a", "--b"]);
+        let c = parse("COG_ENV=\"WEBKIT_SHOW_FPS=1 bad=x A_1=2=3 =y\"\n");
+        assert_eq!(
+            c.cog_env,
+            vec![
+                ("WEBKIT_SHOW_FPS".to_string(), "1".to_string()),
+                ("A_1".to_string(), "2=3".to_string())
+            ]
+        );
         assert_eq!(c.platform, "drm");
     }
 

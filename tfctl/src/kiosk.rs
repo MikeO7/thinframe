@@ -75,10 +75,12 @@ fn reap_group(pgid: u32) {
 /// The dashboard's dark background (server page.css `--bg`).
 const BG_COLOR: &str = "#0b0d10";
 /// WebKit's own memory limit for the WebProcess (cog `--web-mem-limit`, MiB). Above a third of it
-/// WebKit drops caches, above half it collects hard (cog's default thresholds). The README budget
-/// is 300 MB with the page up; this keeps the page well inside it. No kill threshold: a hung
-/// page is the server watchdog's job (restart-kiosk).
-const WEB_MEM_LIMIT_MIB: u32 = 256;
+/// WebKit drops caches, above half it collects hard (cog's default thresholds). At 256 the page
+/// (about 100 MB) sat above the third, so WebKit threw away decoded pictures and painted tiles
+/// every 30 s ("Memory pressure relief" in the log) and painted them again on the next tab
+/// switch [V 2026-10-26]. 512 puts the third at 170 MB; the frame has 1 GB and nothing else big.
+/// No kill threshold: a hung page is the server watchdog's job (restart-kiosk).
+const WEB_MEM_LIMIT_MIB: u32 = 512;
 /// Mesa's compiled shaders, kept across cog restarts and boots (see command()).
 const SHADER_CACHE: &str = "/data/thinframe/shaders";
 
@@ -155,6 +157,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     crate::prewarm::start();
     crate::boot::save_seed_when_ready();
     crate::wifitrace::start();
+    crate::gpuwatch::start(tx.clone());
     if cfg.server_url.is_empty() {
         // Flashed without a server: find one on the LAN, then carry on as if it was set.
         let (cfg, tx) = (cfg.clone(), tx.clone());
@@ -273,6 +276,7 @@ pub struct Kiosk {
     renderer: String,
     rotation: u8,
     extra_args: Vec<String>,
+    cog_env: Vec<(String, String)>,
     user: String,
     brightness: u8,
     screen_off: String,
@@ -326,6 +330,7 @@ impl Kiosk {
             renderer: cfg.renderer.clone(),
             rotation: cfg.rotation,
             extra_args: cfg.extra_args.clone(),
+            cog_env: cfg.cog_env.clone(),
             user: cfg.user.clone(),
             brightness: cfg.brightness,
             screen_off: cfg.screen_off.clone(),
@@ -414,6 +419,16 @@ impl Kiosk {
         if Path::new(SHADER_CACHE).parent().is_some_and(Path::is_dir) {
             c.env("MESA_SHADER_CACHE_DIR", SHADER_CACHE)
                 .env("MESA_SHADER_CACHE_MAX_SIZE", "32M");
+        }
+        // Paint every tile on the GPU. WPE's default "hybrid" mode paints a tile on the CPU when
+        // a CPU worker is free and on the GPU otherwise, so neighbouring tiles, and one tile from
+        // one redraw to the next, came from two rasterizers whose text, gradients and pictures
+        // differ slightly: seams at the 512 px tile edges and content that jumped while a touch
+        // redrew the page. GPU-only measured as fast as hybrid on the frame; CPU-only was 2x
+        // slower (docs/decisions.md "Touch first").
+        c.env("WEBKIT_SKIA_CPU_PAINTING_THREADS", "0");
+        for (k, v) in &self.cog_env {
+            c.env(k, v);
         }
         if crate::dbg::on() {
             c.env("G_MESSAGES_DEBUG", "all");
@@ -931,12 +946,30 @@ mod tests {
                 "--platform=drm",
                 "--platform-params=renderer=gles,rotation=1",
                 "--bg-color=#0b0d10",
-                "--web-mem-limit=256",
+                "--web-mem-limit=512",
                 "--x",
                 "http://s/frame/k"
             ]
         );
         assert!(c.get_envs().any(|(k, _)| k == "LIBSEAT_BACKEND"));
+        let env = |c: &Command, name: &str| {
+            c.get_envs()
+                .filter(|(k, _)| *k == name)
+                .last()
+                .and_then(|(_, v)| v.map(|v| v.to_str().unwrap().to_string()))
+        };
+        assert_eq!(
+            env(&c, "WEBKIT_SKIA_CPU_PAINTING_THREADS").as_deref(),
+            Some("0")
+        );
+        // COG_ENV comes last, so it can undo a default.
+        cfg.cog_env = vec![("WEBKIT_SKIA_CPU_PAINTING_THREADS".into(), "2".into())];
+        let c = Kiosk::new(&cfg).command();
+        assert_eq!(
+            env(&c, "WEBKIT_SKIA_CPU_PAINTING_THREADS").as_deref(),
+            Some("2")
+        );
+        cfg.cog_env = vec![];
         cfg.platform = "wl".into();
         let c = Kiosk::new(&cfg).command();
         assert_eq!(c.get_program(), "cage");
