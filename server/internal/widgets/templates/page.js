@@ -12,12 +12,19 @@
     return pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
-  function tickClock() {
+  function paintClock() {
     const d = new Date();
-    document.querySelectorAll('.clock-time').forEach(e => e.textContent = hm(d, e.dataset.h12 === 'true'));
-    document.querySelectorAll('.clock-date').forEach(e => e.textContent =
+    // Before 2024 the frame's clock is not set yet (a power cut at boot: no RTC battery): show no
+    // time rather than a wrong one. tickClock paints it within a minute of the clock being set.
+    const set = d.getFullYear() >= 2024;
+    document.querySelectorAll('.clock-time').forEach(e => e.textContent = set ? hm(d, e.dataset.h12 === 'true') : '--:--');
+    document.querySelectorAll('.clock-date').forEach(e => e.textContent = !set ? '' :
       d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }));
     rerenderTimed();
+    return d;
+  }
+  function tickClock() {
+    const d = paintClock();
     setTimeout(tickClock, 60000 - (d.getSeconds() * 1000 + d.getMilliseconds()) + 50);
   }
 
@@ -727,8 +734,9 @@
   }
   TF.gesture = gesture;
 
+  let stream;
   function connect() {
-    const es = new EventSource('/api/stream/' + encodeURIComponent(TF.frame) + (appFrames.length ? '?apps=1' : ''));
+    const es = stream = new EventSource('/api/stream/' + encodeURIComponent(TF.frame) + (appFrames.length ? '?apps=1' : ''));
     es.onmessage = ev => {
       TF.perf.msgs = (TF.perf.msgs || 0) + 1;
       let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -752,7 +760,10 @@
       }
       if (R[sec.dataset.type]) { state[sec.id] = Object.assign(state[sec.id] || {}, m.data || {}); draw(sec); }
     };
-    es.onerror = () => { TF.perf.reconnects = (TF.perf.reconnects || 0) + 1; es.close(); setTimeout(connect, 5000); };
+    es.onerror = () => {
+      TF.perf.reconnects = (TF.perf.reconnects || 0) + 1; es.close();
+      if (stream === es) setTimeout(connect, 5000);
+    };
   }
   connect();
 
@@ -773,10 +784,36 @@
     }));
   }, { passive: true });
 
+  // How long this load took, once, for `tfctl bench`-style checks of boot and reload speed.
+  addEventListener('load', () => setTimeout(() => {
+    const n = performance.getEntriesByType('navigation')[0];
+    const p = performance.getEntriesByName('first-contentful-paint')[0];
+    if (!n) return;
+    navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/beacon', JSON.stringify({ load: {
+      response_ms: Math.round(n.responseEnd), dom_ms: Math.round(n.domContentLoadedEventEnd),
+      paint_ms: p ? Math.round(p.startTime) : 0, load_ms: Math.round(n.loadEventEnd || performance.now()) } }));
+  }, 0));
+
   // Liveness for the server's hung-page check (api/watchdog.go): stops if this WebProcess hangs.
   const alive = () => navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/alive', '');
   alive();
   setInterval(alive, 30000);
+
+  // A dark room or the schedule turns the screen off by pausing this whole page (SIGSTOP, tfctl
+  // kiosk), and a wake resumes it as it was: the picture is there at once. A 1 s timer that fires
+  // far too late is the sign. The stream is stale or dead by then: open a new one now (it replays
+  // every source) rather than wait for its error and 5 s more.
+  let beat = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    if (now - beat > 10000) {
+      TF.perf.resumes = (TF.perf.resumes || 0) + 1;
+      paintClock(); daypart(); alive();
+      const old = stream; stream = null; if (old) old.close();
+      connect();
+    }
+    beat = now;
+  }, 1000);
 
   let toastT;
   window.toast = t => { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2500); };

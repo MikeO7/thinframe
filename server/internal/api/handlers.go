@@ -182,14 +182,23 @@ func (s *Server) handlePostAction(w http.ResponseWriter, r *http.Request) {
 // Only known frames are updated; the store keeps the last MaxTouchSamples.
 func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		LatencyMS   int    `json:"latency_ms"`
-		PaintedAtMS int64  `json:"painted_at_ms"`
-		Widget      string `json:"widget"`
+		LatencyMS   int             `json:"latency_ms"`
+		PaintedAtMS int64           `json:"painted_at_ms"`
+		Widget      string          `json:"widget"`
+		Load        *store.PageLoad `json:"load"`
 	}
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in)
 	if _, big := errors.AsType[*http.MaxBytesError](err); big {
 		http.Error(w, "beacon too large", http.StatusRequestEntityTooLarge)
 		return
+	}
+	if l := in.Load; l != nil && l.LoadMS > 0 && l.LoadMS < 600000 {
+		if _, err := s.Store.Get(r.PathValue("id")); err == nil {
+			_, _ = s.Store.Update(r.PathValue("id"), func(f *store.Frame) {
+				f.PageLoad = &store.PageLoad{ResponseMS: l.ResponseMS, DOMMS: l.DOMMS, PaintMS: l.PaintMS,
+					LoadMS: l.LoadMS, At: time.Now().UTC()}
+			})
+		}
 	}
 	if in.LatencyMS > 0 && in.LatencyMS < 10000 {
 		if _, err := s.Store.Get(r.PathValue("id")); err == nil {

@@ -86,6 +86,9 @@ pub fn start() {
     let r = std::thread::Builder::new()
         .name("prewarm".into())
         .spawn(|| {
+            // Bulk reads at the lowest I/O priority: cog's own faults and the network daemons
+            // come first (speed::use_bfq).
+            crate::sys::low_io_priority_this_thread();
             let t = std::time::Instant::now();
             let mut buf = vec![0u8; 1 << 20];
             let mut total = 0u64;

@@ -247,7 +247,15 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         let p = d.join("backdrop.png");
         let cfg = crate::config::Config::default();
-        let got = crate::splash::write_backdrop(&cfg, p.to_str().unwrap()).unwrap();
+        // A cache miss draws in the background: None now, the file a few seconds later.
+        let mut got = crate::splash::write_backdrop(&cfg, p.to_str().unwrap()).unwrap();
+        for _ in 0..600 {
+            if got.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            got = crate::splash::write_backdrop(&cfg, p.to_str().unwrap()).unwrap();
+        }
         assert_eq!(got.as_deref(), p.to_str());
         let img = crate::png::decode(&fs::read(&p).unwrap()).unwrap();
         assert_eq!((img.w, img.h), (1280, 800), "rotation 3: landscape");

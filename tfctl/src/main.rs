@@ -44,6 +44,7 @@ mod kiosk;
 mod light;
 mod logmirror;
 mod logstamp;
+mod offline;
 mod pair;
 mod png;
 mod prewarm;
@@ -60,6 +61,7 @@ mod seventies;
 mod sha1;
 mod sha256;
 mod slot;
+mod speed;
 mod splash;
 mod status;
 mod statuspage;
@@ -102,6 +104,8 @@ fn main() -> ExitCode {
     // `boot fsck` runs from inittab before /data (where /etc/thinframe.conf points) is mounted;
     // it needs no config, so a config error must not stop the check or the device links.
     if args.first().is_some_and(|a| a == "boot") && args.get(1).is_some_and(|a| a == "fsck") {
+        speed::load_wifi_early();
+        speed::use_bfq();
         if let Err(e) = boot::fsck_data() {
             eprintln!("tfctl: boot: fsck: {e}");
             return ExitCode::from(1);

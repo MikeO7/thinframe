@@ -265,6 +265,10 @@ pub trait Radio: Send + Sync {
     /// There is a Wi-Fi interface at all (not on the Mac, not in a QEMU without hwsim).
     fn present(&self) -> bool;
     fn connected(&self) -> bool;
+    /// Joined to an access point (link up), with or without an address yet.
+    fn associated(&self) -> bool {
+        false
+    }
     /// Ask for a fresh scan, wait for it, return what is in range.
     fn scan(&self) -> Vec<Net>;
     /// Join `ssid` (passphrase for psk, None for open); the error is what to show.
@@ -353,6 +357,12 @@ impl Radio for Iwctl {
     /// forth [V 2026-10-22]. iwctl also once said "not connected" over a working link.
     fn connected(&self) -> bool {
         has_ipv4(STATION)
+    }
+
+    /// The kernel's link state: "up" once iwd's join (and its key handshake) is done.
+    fn associated(&self) -> bool {
+        fs::read_to_string(Path::new("/sys/class/net").join(STATION).join("operstate"))
+            .is_ok_and(|s| s.trim() == "up")
     }
 
     fn scan(&self) -> Vec<Net> {
