@@ -13,12 +13,11 @@ use crate::kiosk::{KioskCmd, SCREEN_ON};
 use crate::update::{self, Artifacts, Paths};
 use crate::{status, sys, sysupdate, ws};
 use std::io;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HEARTBEAT: Duration = Duration::from_secs(60);
@@ -687,30 +686,9 @@ pub fn valid_tz(tz: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"/_+-,.:<>".contains(&b))
 }
 
-/// Seconds since the epoch at 2024-01-01: a hello with an earlier time is not a clock.
-const CLOCK_MIN: i64 = 1_704_067_200;
-
-/// `date -s @N` (busybox); only when off by more than 2 s. No NTP on the frame.
+/// The server's hello carries the time (clock.rs keeps the RTC and NTP).
 fn set_clock(t: i64) {
-    if t < CLOCK_MIN {
-        eprintln!("tfctl: agent: ignoring time_unix {t}");
-        return;
-    }
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    if (t - now).abs() <= 2 {
-        return;
-    }
-    match Command::new("date").arg("-s").arg(format!("@{t}")).output() {
-        Ok(o) if o.status.success() => eprintln!("tfctl: agent: clock set to {t}"),
-        Ok(o) => eprintln!(
-            "tfctl: agent: date -s: {}",
-            String::from_utf8_lossy(&o.stderr).trim()
-        ),
-        Err(e) => eprintln!("tfctl: agent: date -s: {e}"),
-    }
+    crate::clock::set(t, "server");
 }
 
 #[cfg(test)]

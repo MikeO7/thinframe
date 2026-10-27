@@ -82,6 +82,27 @@ const PLAIN_CSS: &str = "html,body{margin:0;height:100%;overflow:hidden;backgrou
     align-items:center;text-align:center}\
     h1{margin:0 0 .3em;font-size:44px;font-weight:600}p{margin:.2em 0;color:#9aa4af}";
 
+/// A Settings button on every status page (Wi-Fi, server, restart): posts to tfctl's Settings
+/// (settings.rs), in the top window, not this iframe. A 5 s hold anywhere does the same.
+const SETTINGS_FORM: &str = "<form method=\"post\" action=\"http://127.0.0.1:8092/settings/open\" \
+    target=\"_top\"><button type=\"submit\"><svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z\"/></svg>Settings</button></form>";
+/// The button, shaped like the dashboard's pills: frosted light on the light splashes (dawn,
+/// seventies), dark glass on the dark ones.
+const SETTINGS_CSS: &str = "form{position:fixed;right:3.4vw;bottom:5vh;margin:0}\
+    button{display:flex;align-items:center;gap:1.2vh;font:3vh Poppins,'DejaVu Sans',sans-serif;\
+    padding:1.7vh 2.6vw 1.7vh 2vw;border-radius:99px;border:0;color:var(--fg);background:var(--bg);\
+    box-shadow:inset 0 0 0 1px var(--edge),0 .8vh 2.4vh rgba(20,10,40,.18)}\
+    button:active{transform:scale(.96)}\
+    svg{width:3.4vh;height:3.4vh;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}";
+const SETTINGS_LIGHT: &str =
+    ":root{--fg:#2b2140;--bg:rgba(255,255,255,.62);--edge:rgba(255,255,255,.85)}";
+/// Dawn draws a frosted sheet; the button sits inside its bottom-right corner.
+const SETTINGS_DAWN: &str =
+    ":root{--fg:#2b2140;--bg:rgba(255,255,255,.62);--edge:rgba(255,255,255,.85)}\
+    form{right:7.6vw;bottom:11vh}";
+const SETTINGS_DARK: &str =
+    ":root{--fg:#eef1f7;--bg:rgba(12,14,24,.66);--edge:rgba(255,255,255,.18)}";
+
 /// The line: headline ("cannot reach http://nas:41007") plus detail lines (frame id, IP, retry),
 /// styled after `SPLASH_STYLE`.
 pub fn render_line(headline: &str, details: &[String], style: &str) -> String {
@@ -91,13 +112,21 @@ pub fn render_line(headline: &str, details: &[String], style: &str) -> String {
         .collect();
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">\
-         <meta http-equiv=\"refresh\" content=\"15\"><style>{}</style></head>\
-         <body><main><h1>{}</h1>{}</main></body></html>",
+         <meta http-equiv=\"refresh\" content=\"15\"><style>{}</style>\
+         <style>{SETTINGS_CSS}{}</style></head>\
+         <body><main><h1>{}</h1>{}</main>{SETTINGS_FORM}</body></html>",
         match style {
             "dawn" => DAWN_CSS,
             "seventies" => SEVENTIES_CSS,
             "retro" => RETRO_CSS,
             _ => PLAIN_CSS,
+        },
+        if style == "dawn" {
+            SETTINGS_DAWN
+        } else if style == "seventies" {
+            SETTINGS_LIGHT
+        } else {
+            SETTINGS_DARK
         },
         esc(headline),
         lines
@@ -188,6 +217,11 @@ mod tests {
         assert!(
             render_line("x", &[], "seventies").contains("Shrikhand-Regular.ttf"),
             "seventies uses the shipped font"
+        );
+        let url = format!("http://127.0.0.1:{}/settings/open", crate::settings::PORT);
+        assert!(
+            h.contains(&url) && h.contains("target=\"_top\""),
+            "Settings button"
         );
     }
 

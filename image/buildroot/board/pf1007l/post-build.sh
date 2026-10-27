@@ -16,6 +16,8 @@ install -d -m 0755 "$T/home/frame"
 ln -sfn /etc/dropbear "$T/home/frame/.ssh"
 # Config lives on /data; a symlink (not a file bind) so tfctl can replace it atomically.
 ln -sfn /data/etc/thinframe.conf "$T/etc/thinframe.conf"
+# The shipped defaults, for `tfctl boot` when it has to format /data fresh.
+install -D -m 0644 "$REPO/image/rootfs/etc/thinframe.conf" "$T/usr/share/thinframe/thinframe.conf"
 # dhcpcd keeps leases in /var/db; on a read-only root that is RAM.
 ln -sfn ../tmp "$T/var/db"
 

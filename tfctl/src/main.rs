@@ -28,6 +28,7 @@ mod agent_cfg;
 mod b64;
 mod bench;
 mod boot;
+mod clock;
 mod config;
 mod dawn;
 mod dawnpage;
@@ -76,7 +77,7 @@ mod fuzz;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|\
+        "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|clock|\
          wifi SSID PSK|status|screenshot FILE|light|bench [TAPS]|set KEY VALUE>"
     );
     ExitCode::from(2)
@@ -130,6 +131,7 @@ fn main() -> ExitCode {
         Some("status") => status::run(&cfg),
         Some("screenshot") if args.len() == 2 => screenshot::run(&cfg, &args[1]),
         Some("light") => light::run(),
+        Some("clock") => clock::run(),
         Some("bench") => bench::run(&cfg, &args[1..]),
         Some("set") if args.len() == 3 => config::save_overrides(&conf, &[(&args[1], &args[2])]),
         _ => return usage(),

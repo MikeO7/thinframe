@@ -91,6 +91,8 @@ pub struct Req {
     pub path: String,
     pub query: Vec<(String, String)>,
     pub host: String,
+    /// The Origin header ("" when absent): which page sent a form.
+    pub origin: String,
     pub form: Vec<(String, String)>,
 }
 
@@ -241,7 +243,7 @@ fn read_req_within(s: &TcpStream, limit: Duration) -> io::Result<Req> {
     let mut parts = line.split_whitespace();
     let method = parts.next().unwrap_or("").to_string();
     let target = parts.next().unwrap_or("/").to_string();
-    let (mut host, mut len) = (String::new(), 0usize);
+    let (mut host, mut origin, mut len) = (String::new(), String::new(), 0usize);
     let mut count = 0;
     loop {
         let mut h = String::new();
@@ -262,6 +264,7 @@ fn read_req_within(s: &TcpStream, limit: Duration) -> io::Result<Req> {
         if let Some((k, v)) = h.split_once(':') {
             match k.trim().to_ascii_lowercase().as_str() {
                 "host" => host = v.trim().to_string(),
+                "origin" => origin = v.trim().to_string(),
                 "content-length" => len = v.trim().parse().unwrap_or(0),
                 _ => {}
             }
@@ -278,6 +281,7 @@ fn read_req_within(s: &TcpStream, limit: Duration) -> io::Result<Req> {
         path: path.to_string(),
         query: form_decode(q),
         host,
+        origin,
         form: form_decode(&String::from_utf8_lossy(&body)),
     })
 }
@@ -1090,6 +1094,7 @@ mod tests {
             path: path.into(),
             query: form_decode(q),
             host: format!("127.0.0.1:{port}"),
+            origin: String::new(),
             form: form_decode(body),
         }
     }

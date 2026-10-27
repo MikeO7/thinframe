@@ -57,6 +57,9 @@ pub enum KioskCmd {
     Exit,
     /// Show Settings (settings.rs) at this path; the page on screen comes back on close.
     OpenSettings(String),
+    /// cog is already on Settings at this path (a form on the page went there): remember the
+    /// page to come back to, without loading Settings a second time.
+    SettingsShown(String),
     CloseSettings,
 }
 
@@ -158,6 +161,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     crate::boot::save_seed_when_ready();
     crate::wifitrace::start();
     crate::gpuwatch::start(tx.clone());
+    crate::clock::start();
     if cfg.server_url.is_empty() {
         // Flashed without a server: find one on the LAN, then carry on as if it was set.
         let (cfg, tx) = (cfg.clone(), tx.clone());
@@ -605,6 +609,12 @@ impl Kiosk {
                 }
                 self.go(crate::settings::url(&path));
             }
+            KioskCmd::SettingsShown(path) => {
+                if self.back_to.is_none() {
+                    self.back_to = Some(self.url.clone());
+                }
+                self.url = crate::settings::url(&path);
+            }
             KioskCmd::CloseSettings => {
                 if let Some(st) = &self.settings {
                     crate::settings::close(st);
@@ -866,6 +876,7 @@ impl Kiosk {
         self.open_inputs();
         self.start_bus();
         loop {
+            crate::watchdog::beat();
             if sys::term_requested() || self.exit {
                 eprintln!("tfctl: kiosk: stopping cog");
                 self.kill_child();
