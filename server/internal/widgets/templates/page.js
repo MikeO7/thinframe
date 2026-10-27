@@ -514,8 +514,8 @@
   // ---- tabs -------------------------------------------------------------------------------
   const grid = document.getElementById('grid');
   let idleT;
-  function show(id) {
-    document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === id));
+  // The rail first: it is small and cheap to redraw, so the touch shows in the next frame.
+  function highlight(id) {
     let parent = null;
     document.querySelectorAll('.seg').forEach(s => {
       const mine = !!s.querySelector('[data-tab="' + id + '"]');
@@ -524,17 +524,33 @@
       if (mine) parent = s.dataset.for;
     });
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === (parent || id)));
-    // Themes colour the page by the tab's icon (a fixed set, unlike tab ids).
-    const on = document.querySelector('.tab.on');
-    document.documentElement.dataset.mood = (on && on.dataset.icon) || 'home';
+  }
+  function showPage(id) {
+    document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === id));
     dirty.forEach(sec => { if (visible(sec)) draw(sec); });
   }
+  function show(id) { highlight(id); showPage(id); }
   if (grid && grid.classList.contains('tabbed')) {
     const first = document.querySelector('.page') && document.querySelector('.page').dataset.page;
+    // Themes colour a page and its tab by the tab's icon (a fixed set, unlike tab ids). The mood
+    // sits on the page and the tab, never on <html>: changing an inherited colour on a tab switch
+    // made WebKit redraw the whole screen, light layer included (~300 ms on the frame).
+    document.querySelectorAll('.tab[data-tab]').forEach(t => {
+      const mood = t.dataset.icon || 'home';
+      t.dataset.mood = mood;
+      const seg = document.querySelector('.seg[data-for="' + t.dataset.tab + '"]');
+      const ids = seg ? Array.from(seg.querySelectorAll('[data-tab]'), x => x.dataset.tab) : [t.dataset.tab];
+      ids.forEach(id => { const p = document.querySelector('.page[data-page="' + id + '"]'); if (p) p.dataset.mood = mood; });
+    });
     show(first);
-    document.querySelector('.tabs').addEventListener('click', e => {
+    // Switch on touch-down, not on release: the tab lights at once, and the page follows once
+    // that frame is out (two frames), so drawing the page cannot hold the highlight back.
+    document.querySelector('.tabs').addEventListener('pointerdown', e => {
       const t = e.target.closest('[data-tab]');
-      if (t) show(t.dataset.tab);
+      if (!t) return;
+      const id = t.dataset.tab;
+      highlight(id);
+      requestAnimationFrame(() => requestAnimationFrame(() => showPage(id)));
     });
     const idle = Math.max(10, Number(grid.dataset.idle || 90)) * 1000;
     const arm = () => { clearTimeout(idleT); idleT = setTimeout(() => show(first), idle); };
@@ -677,13 +693,14 @@
   connect();
 
   // Touch to paint: from when the input reached WebKit (e.timeStamp, or now if that is on another
-  // clock) until the frame after the highlight was drawn. painted_at_ms is the frame's wall clock
+  // clock) until the next frame was drawn. Cards do not dim on touch: any change to a card
+  // (opacity, border) made WebKit redraw it, 0.3 to 0.9 s of stalled frames per tap on the
+  // Mali-400 under Aurora [V 2026-10-26]. painted_at_ms is the frame's wall clock
   // then, so `tfctl bench` can measure from the moment it injected the tap.
   addEventListener('pointerdown', e => {
     const now = performance.now();
     const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 10000 ? e.timeStamp : now;
     const sec = e.target.closest('.w');
-    if (sec) sec.classList.add('touched');
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const end = performance.now();
       navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/beacon', JSON.stringify({
@@ -691,9 +708,6 @@
         painted_at_ms: Math.round(performance.timeOrigin + end) }));
     }));
   }, { passive: true });
-  const clear = () => widgets.forEach(w => w.classList.remove('touched'));
-  addEventListener('pointerup', clear, { passive: true });
-  addEventListener('pointercancel', clear, { passive: true });
 
   // Liveness for the server's hung-page check (api/watchdog.go): stops if this WebProcess hangs.
   const alive = () => navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/alive', '');
