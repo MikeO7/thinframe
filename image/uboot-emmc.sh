@@ -10,7 +10,7 @@ IN="$HERE/work/inputs"
 stop() { echo "STOP: $*" >&2; exit 1; }
 C=$(sed -n 's/^UBOOT_COMMIT="\([0-9a-f]*\)".*/\1/p' "$OM/image/build.sh")
 EPOCH=$(sed -n 's/^UBOOT_EPOCH=\([0-9]*\).*/\1/p' "$OM/image/build.sh")
-[ -n "$C" ] && [ -n "$EPOCH" ] || stop "cannot read UBOOT_COMMIT/UBOOT_EPOCH from ormarch"
+if [ -z "$C" ] || [ -z "$EPOCH" ]; then stop "cannot read UBOOT_COMMIT/UBOOT_EPOCH from ormarch"; fi
 SRC="$OM/image/cache/u-boot"
 [ -d "$OM/refs/photo-frame-dashboard/diagnostics/u-boot/.git" ] && SRC="$OM/refs/photo-frame-dashboard/diagnostics/u-boot"
 git -C "$SRC" cat-file -e "$C^{commit}" || stop "U-Boot $C not in $SRC (run ormarch build.sh uboot)"
