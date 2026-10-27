@@ -1,0 +1,46 @@
+/* Aurora look: glass panels over the dashboard's light (transparent page), Manrope from the
+   server. Mali-400: no blur, no filters, no animation; a press only changes a background. */
+@font-face{font-family:"Manrope";src:url("/fonts/manrope.ttf") format("truetype");font-weight:200 800;font-display:block}
+:root{--card:rgba(255,255,255,.05);--card2:rgba(255,255,255,.07);--press:rgba(255,255,255,.18);--edge:rgba(255,255,255,.085);--fg:#f7f8fc;--dim:rgba(236,239,250,.62);--ok:#3ff0b0;--warn:#ffb648;--bad:#ff5f78;--acc:#3f9dff;--acc2:#22d6f0}
+html,body{margin:0;height:100%;background:transparent;color:var(--fg);font-family:"Manrope",system-ui,sans-serif;overflow:hidden;user-select:none;-webkit-tap-highlight-color:transparent}
+#cars{display:grid;grid-template-columns:1fr 1fr;gap:18px;height:100%;box-sizing:border-box}
+.car{background:var(--card);border:1px solid var(--edge);box-shadow:inset 0 1px 0 rgba(255,255,255,.08);border-radius:28px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0;position:relative}
+.car::after{content:"";position:absolute;left:14%;right:14%;top:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--acc),transparent);opacity:.8}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.ident{flex:none}
+.model{font-weight:700;font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.18em}
+.name{font-weight:700;font-size:34px;line-height:1.1;letter-spacing:-.02em}
+.batt{text-align:right;flex:1;min-width:0}
+.pct{font-weight:300;font-size:42px;line-height:1}.pct small{font-size:20px;color:var(--dim);margin-left:2px}
+.pct.chg{color:var(--ok)}
+.bar{height:6px;border-radius:3px;background:rgba(255,255,255,.1);margin:8px 0 6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));border-radius:3px}
+.bar.chg i{background:var(--ok)}
+.sub{font-weight:500;font-size:14px;line-height:1.35;color:var(--dim)}
+.stage{position:relative;flex:1 1 auto;min-height:90px;display:grid;place-items:center}
+.stage img{max-width:92%;max-height:100%;object-fit:contain}
+.sleep{position:absolute;bottom:0;left:50%;transform:translateX(-50%);background:rgba(10,12,22,.82);border:1px solid var(--edge);padding:6px 14px;border-radius:999px;font-weight:600;font-size:13px;color:var(--warn);white-space:nowrap}
+button{font:inherit;color:var(--fg);background:var(--card2);border:1px solid rgba(255,255,255,.06);border-radius:18px;min-height:64px;touch-action:manipulation}
+button:active{background:var(--press)}
+button.busy{opacity:.55}
+button.arm{background:var(--warn);color:#111}
+button.on{background:linear-gradient(150deg,var(--acc),var(--acc2));border-color:transparent;color:#fff}
+button.alert{background:rgba(255,95,120,.28);border-color:rgba(255,95,120,.5)}
+.clim{display:grid;grid-template-columns:1fr auto;gap:10px}
+.cbtn{display:flex;align-items:center;gap:14px;padding:0 18px;min-height:70px;text-align:left}.cbtn .ctx{display:flex;flex-direction:column;align-items:flex-start;min-width:0}.cbtn .ic{line-height:0;flex:none}.cbtn .ic svg{width:30px;height:30px}
+.cbtn .cl{font-weight:700;font-size:20px}.cbtn small{font-weight:500;font-size:14px;color:var(--dim)}
+.cbtn.on small{color:rgba(255,255,255,.85)}
+.temp,.limit{display:flex;align-items:center;gap:8px}
+.sq{width:64px;min-height:64px;font-weight:400;font-size:30px;line-height:1;padding:0}
+.tv,.lv{font-weight:300;font-size:28px;min-width:64px;text-align:center}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.grid button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:72px;padding:4px}
+.grid .ic{line-height:0}.grid .t{font-weight:600;font-size:14px;white-space:nowrap}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.small{display:inline-flex;align-items:center;gap:10px;padding:0 20px;font-weight:600;font-size:15px}.small .ic{line-height:0}.small .ic svg{width:24px;height:24px}
+.grid .ic svg{width:30px;height:30px;stroke-width:1.6}
+button[data-act=sentry].on{background:rgba(255,59,78,.2);border-color:rgba(255,59,78,.55)}button[data-act=sentry].on .eye{fill:#ff3b4e}
+.lb{font-weight:600;font-size:14px;color:var(--dim);margin-right:4px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:none;background:rgba(10,12,22,.94);border:1px solid var(--edge);padding:14px 24px;border-radius:999px;font-weight:600;font-size:17px;max-width:80%;text-align:center;pointer-events:none}
+.toast.show{display:block}
+.toast.err{background:rgba(122,31,27,.95)}

@@ -27,8 +27,9 @@ Rotation: the panel is portrait. cog's drm platform takes a `rotation` platform 
 (`COG_PLATFORM_DRM_ROTATION` env or `--platform-params=rotation=N`, N in quarter turns).
 Verify the exact spelling against the installed cog version. [U]
 
-If `apk info -L cog` has no drm platform on armv7, the fallback is `cage` + `cog --platform=wl`
-and the service file already has the lines to swap in.
+If cog's drm platform ever fails on this board, the fallback is `cage` + `cog --platform=wl`
+(`COG_PLATFORM="wl"` in thinframe.conf; tfctl already knows both). Buildroot builds cog with
+the drm platform (`BR2_PACKAGE_COG_PLATFORM_DRM`) and it is what the frame runs [V].
 
 ## Kernel: Buildroot builds mainline with the ormarch patches
 Mainline needs two things this board does not have upstream: the JD9365DA panel init table and
@@ -66,10 +67,10 @@ dashboard). The page itself can fetch whatever it wants.
 ## One Rust binary for everything custom
 Shell scripts were the first draft. They pull in coreutils behaviour, fork a dozen processes
 per invocation and are hard to test. `tfctl` is a single static musl binary (opt-level z, LTO,
-panic=abort, stripped; target under 1 MB) with hand-rolled arg parsing and no crates unless a
+panic=abort, stripped; under 2 MB, CI enforces it) with hand-rolled arg parsing and no crates unless a
 task proves one necessary. It is the service entry point (spawns and supervises cog), the
-updater, the Wi-Fi helper and the status tool. The rest of the system is stock Alpine: busybox,
-OpenRC, eudev, seatd, iwd, dhcpcd, sshd.
+updater, the Wi-Fi helper and the status tool. The rest of the system is stock Buildroot: BusyBox
+(init and tools), eudev, iwd, dhcpcd, dropbear, dbus, mesa, WPE WebKit and cog.
 
 ## Nothing extra in the image
 No avahi, no dbus, no ntp daemon, no git, no package manager at all. Debug tools (evtest,
@@ -88,7 +89,7 @@ If HTML ever becomes the bottleneck, the escape hatch is a Rust renderer drawing
 DRM/GBM with GLES (no browser at all). That is a different project; note it, do not start it.
 
 ## Thin client: brains in a container, frame is a display
-The frame stays exactly what it was (Alpine + cog on DRM). What changes is where the page and
+The frame stays exactly what it was (Buildroot + cog on DRM). What changes is where the page and
 the decisions live: `frameserver`, a Go binary in a scratch Docker image, on whatever box has
 spare CPU. The frame's `tfctl agent` polls it for config and posts heartbeats. Consequences:
 
@@ -127,8 +128,8 @@ See `sim/README.md`. Tier 1 (headless WPE + native agent in a container) is the 
 building: same engine as the frame, full control loop, no hardware.
 
 ## Full OS updates: A/B root slots, driven by the container
-"Patched" means the kernel and every Alpine package, not only tfctl. The frame never runs `apk`:
-the image is immutable and replaced whole. Card layout grows from 2 to 4 partitions:
+"Patched" means the kernel and every package in the image, not only tfctl. The frame has no
+package manager: the image is immutable and replaced whole. Card layout grows from 2 to 4 partitions:
 
 | Part | Content | Why |
 |---|---|---|
@@ -160,15 +161,16 @@ Boot-state invariants (boot.cmd.patch, slot.rs, sysupdate.rs):
   partition. The data file system is grown whenever its superblock is smaller than p4, so a power cut
   between the table write and resize2fs is finished on the next boot.
 
-Why not `apk upgrade` in place: no atomicity, no rollback, drift between frames, and a half-applied
+Why not a package manager upgrading in place: no atomicity, no rollback, drift between frames, and a half-applied
 upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edge case.
 
 ## Staying patched
-- A scheduled GitHub Action rebuilds the image weekly against the current Alpine stable branch and
-  the pinned kernel, runs the QEMU boot test, and publishes `system-<date>.tar` with the container
-  image. Frames pick it up on their next poll. Alpine's security fixes reach the frame within a week.
-- Kernel: pinned to the ormarch-built 7.2.x line until TASK K1 (build the same patches on Alpine's
-  `linux-lts` via `abuild`) lands; then it tracks Alpine's kernel updates for free.
+- `.github/workflows/release.yml` can rebuild the image weekly on Buildroot's LTS branch with the
+  pinned kernel, run the QEMU boot test and publish `system-<date>.tar`. In practice the owner
+  builds images on the Mac (`image/build.sh`) and stages them on the server; frames pick a new
+  system up on their next poll and install it to the other A/B slot.
+- Kernel: pinned to the ormarch-built 7.2.x line until TASK K1 (the same patches on current
+  mainline stable) lands.
 - Dependabot/Renovate on `server/` and `tfctl/` dependencies.
 - Baseline on the frame: root fs read-only; no password login anywhere; sshd key-only, `frame` user
   only; `doas` for exactly the commands tfctl needs; iwd with WPA2/3 only; no inbound ports besides
@@ -192,7 +194,7 @@ Root `compose.yml` runs the first by default and both with `--profile sim`.
 | Mode | What runs | Speed | Tests |
 |---|---|---|---|
 | `wpe` (default) | headless WPE WebKit + native tfctl agent, screenshots to `sim/out/` | seconds | dashboard rendering, config loop, heartbeats, tfctl updates |
-| `qemu` | the real SD image under `qemu-system-arm` (orangepi-pc board, serial console, user-mode net) | ~1 min boot | OpenRC, networking, A/B system update and rollback |
+| `qemu` | the real SD image under `qemu-system-arm` (orangepi-pc board, serial console, user-mode net) | ~1 min boot | init, networking, A/B system update and rollback |
 
 Neither mode has the DSI panel or the touch controller; those two gates stay on hardware.
 
@@ -238,8 +240,8 @@ Writes that touch many frames (`update_system` with no id) require `confirm: tru
 Interaction latency is the product. Everything else in this repo exists to keep the frame idle
 when a finger is not on it, and fully available when one is.
 
-What the frame runs when the page is up: kernel, OpenRC (asleep), udev (asleep), seatd, sshd
-(asleep until a connection), iwd + dhcpcd (asleep), tfctl (one thread, wakes every 15 s for a
+What the frame runs when the page is up: kernel, BusyBox init (asleep), udev (asleep), dropbear
+(asleep until a connection), dbus-daemon, iwd + dhcpcd (asleep), tfctl (one thread, wakes every 15 s for a
 ~1 KB HTTP poll), cog's UIProcess + WebProcess + NetworkProcess. That is the whole list, and
 TASK 9's `ps` audit fails if anything else appears.
 

@@ -74,7 +74,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 ## 5. Display
 - [ ] Console appears on the panel (DTB `full`, panel module loaded by `modules-load.d`).
 - [ ] `tfctl kiosk` (tfctl/src/kiosk.rs): spawn cog, restart on exit with back-off, SIGTERM passthrough.
-- [ ] `rc-service thinframe start` shows `www/index.html` full screen, landscape.
+- [ ] `/etc/init.d/S90thinframe start` shows `www/index.html` full screen, landscape.
       Tune `COG_ROTATION` in `/etc/thinframe.conf` (expect 3, [U]).
 - [ ] Memory: `free -m` before and after the page. Budget: <60 MB before, <300 MB after. Record it.
 - Gate: photo of the page on the frame in `docs/img/`, `free -m` output in `docs/log.md`.
@@ -135,7 +135,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [ ] `scripts/flash.sh`: release download with sha256, card discovery with guards, typed confirmation,
       one sudo write + readback, `provision.txt` onto PFBOOT, eject. `--settings-only` rewrites
       provision.txt only. Reuse ormarch `image/tools/write-card.py` guard logic.
-- [x] `tfctl provision` on first boot (called from an OpenRC service before `thinframe`): read
+- [x] `tfctl provision` on first boot (run by `tfctl boot` from `S90thinframe`): read
       `/boot/provision.txt`, write iwd profile, `thinframe.conf` (SERVER_URL, FRAME_ID, FRAME_TOKEN,
       COG_ROTATION), `authorized_keys` from SSH_PUBKEY, hostname = FRAME_ID; delete the file; continue boot.
       (tfctl/src/provision.rs, `--boot-dir`; keys go to /home/frame/.ssh and /data/ssh/authorized_keys, the
@@ -155,7 +155,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       `/dev/console` is tty1 (a write to ttyGS0 waits for a USB host).
 - [ ] `tfctl splash`: open /dev/dri/card0 (dumb buffer, no GLES), fill background colour, blit a PNG
       from `/etc/thinframe/splash.png` (tiny PNG decoder, no crates) centred, draw one text line with
-      an embedded bitmap font. Runs from OpenRC `boot` runlevel right after udev, before networking.
+      an embedded bitmap font. Runs from `tfctl boot` (`S90thinframe`) right after udev, before networking.
       Hands the DRM device over when cog starts.
       (Done: background + centred text line, SPLASH_BG/SPLASH_TEXT, rotation, kiosk draws it before cog and
       holds "cog missing" if cog is absent; PNG decoder (tfctl/src/png.rs, own inflate, 8-bit non-interlaced) blends
