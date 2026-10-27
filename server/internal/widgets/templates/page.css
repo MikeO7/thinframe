@@ -4,8 +4,7 @@ html{font-size:1.25vh}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,"Noto Sans",sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none}
 #grid{display:grid;gap:2vmin;padding:2vmin;height:100vh;width:100vw}
-.w{background:var(--card);border-radius:1.5vmin;padding:2vmin;overflow:hidden;position:relative;transition:opacity .25s ease}
-.w.touched{opacity:.7}
+.w{background:var(--card);border-radius:1.5vmin;padding:2vmin;overflow:hidden;position:relative}
 .w-photo{padding:0}
 .w.w-app{padding:0;background:none}
 .w-photo img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .6s ease;will-change:opacity}

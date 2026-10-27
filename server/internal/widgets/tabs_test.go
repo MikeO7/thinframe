@@ -47,7 +47,7 @@ func TestDemoLayoutRenders(t *testing.T) {
 	}
 	l.Theme = "aurora"
 	b, _ = Render(store.Frame{ID: "demo", Config: store.DefaultConfig(), Layout: l})
-	if !strings.Contains(string(b), "html[data-mood=car]") || !strings.Contains(string(b), "/api/data/asset/inter.woff2") {
+	if !strings.Contains(string(b), "[data-mood=car]") || !strings.Contains(string(b), "/api/data/asset/inter.woff2") {
 		t.Error("aurora renders without its CSS on top of obsidian")
 	}
 	l.Nav = "bottom"

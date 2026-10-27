@@ -700,9 +700,8 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   (weights 200 to 800) embedded in the server and served at `GET /fonts/manrope.woff2`
   (public, like the page). Without it the frame falls back to DejaVu Sans. [V] renders in
   Chromium from the server; [U] WPE on the frame, check with a screenshot.
-- Motion, the first in any theme: the light layer drifts a few per cent over 5 minutes in
-  `steps(600)` (one transform update every half second, on one composited layer). No
-  continuous 60 fps animation, no animated shadows, no backdrop-filter or blend modes.
+- Motion: none since the touch work below (the drifting light was removed). No backdrop-filter
+  or blend modes.
 - No animation on a tab switch. Cards rising for 0.55 s made a switch take 150 to 1800 ms
   [V 2026-10-26, `tfctl bench 8 24,5 50,5` taps the nav rail]; an opacity fade per card or of
   the whole page cost the same (each gives WebKit a new composited layer to raster on the
@@ -710,6 +709,23 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
 - A static SVG noise layer at 7 % opacity breaks up gradient banding. Cards get a corner sheen
   and a 1 px top edge in the tab's accent; bars, the energy "now" bar and status dots carry a
   small fixed glow in the accent colour; the Home clock has a soft glow behind it.
+- Touch first (2026-10-26, owner: "touch has to be insanely responsive"). Measured on the frame
+  with `tfctl bench TAPS X,Y ...` and a page that reported every frame for 1 s after a tap [V]:
+  - Cards dimmed to 70 % on touch with a 0.25 s fade: 0.8 to 0.9 s of stalled frames per tap,
+    single frames up to 340 ms. An instant dim still 0.43 s, a border highlight 0.3 s: any change
+    to an Aurora card makes WebKit redraw it on the Mali-400. Cards no longer react visually;
+    after the change a card tap stalls nothing (next frame 20 to 50 ms).
+  - Tab switch: the tab now lights on touch-down and the page follows two frames later. The
+    mood moved from `<html>` to each page and tab (an inherited colour change redrew the whole
+    screen, ~300 ms), the light no longer drifts (the running animation cost 100 to 150 ms per
+    switch), and blurred shadows, gradient card fills and gradient-clipped numbers went (another
+    25 to 30 %). Before: up to 1.8 s. After: highlight p50 60 to 80 ms, page drawn 250 to 300 ms
+    after the touch; first visit of a tab after a reload up to ~650 ms.
+  - Tried and rejected: CPU painting (`WEBKIT_SKIA_ENABLE_CPU_RENDERING=1`, 2x slower), 4 CPU
+    painting threads or GPU-affine hybrid painting (no change), keeping hidden pages as layers
+    (opacity 0 or off-screen: WebKit drops their tiles; opacity .004 was slower).
+  - The floor, plain theme with the same page code: highlight 80 to 140 ms. Faster than that
+    needs less on the page, not CSS tricks.
 
 ## Cameras and the doorbell (UniFi Protect) (2026-10-26)
 - The owner uses UniFi Protect. The server reads it through Protect's official Integration API
