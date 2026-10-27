@@ -646,11 +646,25 @@ fn render_joined(s: &Setup, ssid: &str) -> String {
 /// first four joins failed within 1.3 s and the fifth came 73 s later [V 2026-10-22]. While a
 /// saved network is down, the agent asks for it again itself, KICK_AFTER into the outage and
 /// then every KICK_EVERY, unless the setup page is joining one the person picked.
+/// Joined but no address yet (DHCP still asking): a kick would rejoin and start DHCP over, as it
+/// did at a boot where DHCP took 7 s and the address came at 19 s [V 2026-10-27]. Then the agent
+/// waits ASSOCIATED_GRACE before it asks iwd again.
 const KICK_AFTER: Duration = Duration::from_secs(8);
 const KICK_EVERY: Duration = Duration::from_secs(20);
+const ASSOCIATED_GRACE: Duration = Duration::from_secs(30);
 
-pub fn kick_due(down_for: Duration, since_kick: Option<Duration>, joining: bool) -> bool {
-    !joining && down_for >= KICK_AFTER && since_kick.is_none_or(|t| t >= KICK_EVERY)
+pub fn kick_due(
+    down_for: Duration,
+    since_kick: Option<Duration>,
+    joining: bool,
+    associated: bool,
+) -> bool {
+    let after = if associated {
+        ASSOCIATED_GRACE
+    } else {
+        KICK_AFTER
+    };
+    !joining && down_for >= after && since_kick.is_none_or(|t| t >= KICK_EVERY)
 }
 
 const DIRECT_EVERY: Duration = Duration::from_secs(20);
@@ -741,7 +755,12 @@ impl Agent {
             .wifi_ui
             .as_ref()
             .is_some_and(|ui| lock(ui).joining.is_some());
-        if !kick_due(down_for, self.wifi_kicked.map(|t| t.elapsed()), joining) {
+        if !kick_due(
+            down_for,
+            self.wifi_kicked.map(|t| t.elapsed()),
+            joining,
+            radio.associated(),
+        ) {
             return false;
         }
         self.wifi_kicked = Some(Instant::now());
@@ -1208,15 +1227,23 @@ mod tests {
     #[test]
     fn rejoin_kicks() {
         let s = Duration::from_secs;
-        assert!(!kick_due(s(3), None, false), "iwd gets its own first tries");
-        assert!(kick_due(s(8), None, false));
         assert!(
-            !kick_due(s(30), Some(s(5)), false),
+            !kick_due(s(3), None, false, false),
+            "iwd gets its own first tries"
+        );
+        assert!(
+            !kick_due(s(12), None, false, true),
+            "joined, DHCP still asking"
+        );
+        assert!(kick_due(s(30), None, false, true));
+        assert!(kick_due(s(8), None, false, false));
+        assert!(
+            !kick_due(s(30), Some(s(5)), false, false),
             "not more than every KICK_EVERY"
         );
-        assert!(kick_due(s(30), Some(s(20)), false));
+        assert!(kick_due(s(30), Some(s(20)), false, false));
         assert!(
-            !kick_due(s(30), None, true),
+            !kick_due(s(30), None, true, false),
             "the person's own join goes first"
         );
     }

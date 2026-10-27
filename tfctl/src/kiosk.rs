@@ -151,6 +151,7 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     // Light the panel first: everything below can wait behind the picture. The prewarm starts
     // just before, since cog starts within a second (see BUS_WAIT) and wants its files.
     crate::prewarm::start();
+    crate::speed::cpu_governor(SCREEN_ON.load(Ordering::SeqCst));
     let _ = screen::set_brightness(k.backlight);
     k.show_splash("warming up");
     let st: crate::settings::Shared = Default::default();
@@ -530,6 +531,7 @@ impl Kiosk {
 
     fn set_screen(&mut self, on: bool) {
         SCREEN_ON.store(on, Ordering::SeqCst);
+        crate::speed::cpu_governor(on);
         if on {
             if let Err(e) = screen::set_brightness(self.backlight) {
                 eprintln!("tfctl: backlight: {e}");

@@ -34,6 +34,36 @@ pub fn nice_this_thread(n: i32) {
     let _ = n;
 }
 
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn syscall(num: std::ffi::c_long, ...) -> std::ffi::c_long;
+}
+
+/// Give the calling thread the lowest best-effort I/O priority (`ioprio_set`, which BFQ honours):
+/// for bulk reads that may wait, such as the prewarm.
+pub fn low_io_priority_this_thread() {
+    #[cfg(all(target_os = "linux", target_arch = "arm"))]
+    const NR_IOPRIO_SET: std::ffi::c_long = 314;
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    const NR_IOPRIO_SET: std::ffi::c_long = 30;
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    const NR_IOPRIO_SET: std::ffi::c_long = 251;
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "arm", target_arch = "aarch64", target_arch = "x86_64")
+    ))]
+    // SAFETY: ioprio_set(IOPRIO_WHO_PROCESS, 0 = this thread, BE class 2 level 7) takes no
+    // pointers; a failure only leaves the priority as it was.
+    unsafe {
+        syscall(
+            NR_IOPRIO_SET,
+            1 as std::ffi::c_int,
+            0 as std::ffi::c_int,
+            (2 << 13 | 7) as std::ffi::c_int,
+        );
+    }
+}
+
 extern "C" fn on_term(_sig: i32) {
     TERM.store(true, Ordering::SeqCst);
 }
