@@ -19,8 +19,11 @@ If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the ga
 
 ## Safety
 
-- **Never write the eMMC.** No `dd`, `sfdisk`, `mkfs` or `fastboot flash` to `/dev/mmcblk0`
-  on the frame, ever. We boot from SD only. The frame must stay recoverable by removing the card.
+- **The eMMC is written only by `tfctl emmc install`.** No `dd`, `sfdisk`, `mkfs` or
+  `fastboot flash` to the eMMC (`/dev/mmcblk2` on our kernel) by hand, ever. The install runs from
+  the card, after `tfctl emmc backup` was verified off the frame (two copies), with the owner's go
+  (given 2026-10-26, docs/decisions.md "Running from the eMMC"). A thinframe card always boots
+  before the eMMC, so the frame stays recoverable by inserting the rescue card.
 - Card writes happen only through `scripts/flash.sh`, which refuses any disk that is not a
   removable card of 4 to 64 GB with no mounted system volume.
 - No `sudo` on the Mac except inside the card writer.
