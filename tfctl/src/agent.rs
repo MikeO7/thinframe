@@ -447,18 +447,17 @@ impl Agent {
 
     /// Refresh the local status page with what we wait for and our IP (TASKS 14/15).
     pub(crate) fn write_status_page(&self) {
-        let st = crate::status::collect();
+        let ips = crate::status::ips();
         let ssid = crate::wifi::configured_ssid(std::path::Path::new(crate::wifi::IWD_DIR));
         let headline = crate::statuspage::headline(
             &self.cfg.server_url,
             ssid.as_deref(),
-            &st.ips,
+            &ips,
             self.failures,
             FALLBACK_AFTER,
         );
         let mut details = vec![format!("frame {}", self.cfg.frame_id)];
-        let lan: Vec<&String> = st
-            .ips
+        let lan: Vec<&String> = ips
             .iter()
             .filter(|ip| *ip != crate::statuspage::USB_IP)
             .collect();

@@ -302,12 +302,17 @@ func TestTouchSurvivesHeartbeat(t *testing.T) {
 		do(t, "POST", ts.URL+"/api/frames/f1/beacon", "", map[string]any{"latency_ms": ms, "painted_at_ms": 1700000000000 + ms})
 	}
 	do(t, "POST", ts.URL+"/api/frames/ghost/beacon", "", map[string]any{"latency_ms": 9})
+	do(t, "POST", ts.URL+"/api/frames/f1/beacon", "", map[string]any{"load": map[string]int{
+		"response_ms": 120, "dom_ms": 640, "paint_ms": 700, "load_ms": 1500}})
 	if _, err := s.recordHeartbeat("f1", store.Heartbeat{IP: "10.0.0.6"}); err != nil {
 		t.Fatal(err)
 	}
 	f, _ := s.Store.Get("f1")
 	if f.Touch == nil || f.Touch.LastMS != 30 || f.Touch.PaintedAtMS != 1700000000030 || f.Touch.P50() != 30 || f.Touch.Max() != 40 {
 		t.Fatalf("touch after heartbeat: %+v", f.Touch)
+	}
+	if l := f.PageLoad; l == nil || l.ResponseMS != 120 || l.DOMMS != 640 || l.PaintMS != 700 || l.LoadMS != 1500 {
+		t.Fatalf("page load after heartbeat: %+v", f.PageLoad)
 	}
 	if _, err := s.Store.Get("ghost"); err == nil {
 		t.Fatal("a beacon created an unknown frame")

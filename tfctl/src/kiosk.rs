@@ -86,13 +86,16 @@ const BG_COLOR: &str = "#0b0d10";
 const WEB_MEM_LIMIT_MIB: u32 = 512;
 /// Mesa's compiled shaders, kept across cog restarts and boots (see command()).
 const SHADER_CACHE: &str = "/data/thinframe/shaders";
+/// cog's WebKit cache and storage (`$XDG_CACHE_HOME/cog`, `$XDG_DATA_HOME/cog`), see command().
+const WEB_CACHE: &str = "/data/thinframe/web-cache";
+const WEB_DATA: &str = "/data/thinframe/web-data";
 
-/// At boot cog first waits this long for the server, under the splash (which shows the same
-/// "warming up"), and then opens the dashboard directly. Opening the status page first and
-/// switching cost a second cog start: 1.3 s to end the first and 2.5 s to load again
-/// [V 2026-10-22]. Any page the agent asks for (dashboard, Wi-Fi setup, PAIR) starts cog at once;
-/// after the hold the status page says what the frame waits for.
-const FIRST_PAGE_HOLD: Duration = Duration::from_secs(12);
+/// At boot cog starts at once on the local status page, so its 2.5 s start (WebKit's processes,
+/// GL) overlaps the wait for Wi-Fi and the server; the dashboard then opens in the same cog over
+/// the bus (`go`). Before the bus a page change was a second cog start, so boot held cog back up
+/// to 12 s for the server instead [V 2026-10-22]. A page asked for while cog is still starting
+/// (not on the bus yet) is retried for this long before cog is restarted on it.
+const BUS_WAIT: Duration = Duration::from_secs(8);
 const RESTART_DELAY: Duration = Duration::from_secs(3);
 const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 const FAST_FAIL: Duration = Duration::from_secs(60);
@@ -157,7 +160,6 @@ pub fn run(cfg: &Config) -> io::Result<()> {
         Err(e) => eprintln!("tfctl: settings: listen on {}: {e}", crate::settings::PORT),
     }
     crate::logmirror::start(LOG, crate::logmirror::DIR);
-    crate::prewarm::start();
     crate::boot::save_seed_when_ready();
     crate::wifitrace::start();
     crate::gpuwatch::start(tx.clone());
@@ -248,7 +250,7 @@ fn start_agent(cfg: &Config, tx: &mpsc::Sender<KioskCmd>, k: Option<&mut Kiosk>)
                     match k {
                         Some(k) => {
                             k.url = cfg.fallback_url.clone();
-                            k.next_spawn = Instant::now() + FIRST_PAGE_HOLD;
+                            k.next_spawn = Instant::now();
                         }
                         None => {
                             let _ = tx.send(KioskCmd::SetUrl(cfg.fallback_url.clone()));
@@ -324,6 +326,8 @@ pub struct Kiosk {
     back_to: Option<String>,
     /// The session bus cog listens on (`BUS`); None where dbus-daemon is missing.
     bus: Option<Child>,
+    /// A page asked for while cog was still starting; `go` tries it again each pass.
+    pending: Option<String>,
 }
 
 impl Kiosk {
@@ -367,6 +371,7 @@ impl Kiosk {
             settings: None,
             back_to: None,
             bus: None,
+            pending: None,
         }
     }
 
@@ -418,11 +423,15 @@ impl Kiosk {
             .env("DBUS_SESSION_BUS_ADDRESS", BUS)
             .stdin(Stdio::null());
         // Mesa keeps compiled shaders under $HOME/.cache, which is on the read-only root, so it
-        // compiled them all again at every cog start (a wake restarts cog). Only the shader
-        // cache goes to /data: WebKit's web cache stays in memory, to spare the card.
+        // compiled them all again at every cog start. WebKit's HTTP cache and storage were in
+        // memory only for the same reason (and to spare an SD card): every boot and restart
+        // fetched the fonts and app files again. Both live on /data now (eMMC); the dashboard
+        // itself is no-store, so the cache only holds the few files that may be cached.
         if Path::new(SHADER_CACHE).parent().is_some_and(Path::is_dir) {
             c.env("MESA_SHADER_CACHE_DIR", SHADER_CACHE)
-                .env("MESA_SHADER_CACHE_MAX_SIZE", "32M");
+                .env("MESA_SHADER_CACHE_MAX_SIZE", "32M")
+                .env("XDG_CACHE_HOME", WEB_CACHE)
+                .env("XDG_DATA_HOME", WEB_DATA);
         }
         // Paint every tile on the GPU. WPE's default "hybrid" mode paints a tile on the CPU when
         // a CPU worker is free and on the GPU otherwise, so neighbouring tiles, and one tile from
@@ -520,13 +529,18 @@ impl Kiosk {
             if let Err(e) = screen::set_brightness(self.backlight) {
                 eprintln!("tfctl: backlight: {e}");
             }
+            // The paused page carries on where it was: its picture is back with the backlight,
+            // and page.js sees the gap in its timers and reconnects its stream, which replays every
+            // source. A restart here cost ~7 s of splash and reload per wake [V 2026-10-27].
             if self.stopped {
                 if let Some(c) = &self.child {
                     let _ = sys::send(c.id(), sys::SIGCONT);
                 }
                 self.stopped = false;
             }
-            self.restart(); // "on restores both and reloads the page"
+            if self.child.is_none() {
+                self.next_spawn = Instant::now();
+            }
         } else {
             if let Err(e) = screen::set_brightness(0) {
                 eprintln!("tfctl: backlight: {e}");
@@ -546,6 +560,11 @@ impl Kiosk {
             // person at the screen comes first, the dashboard reloads when Settings closes.
             KioskCmd::Restart | KioskCmd::Reload if self.back_to.is_some() => {
                 eprintln!("tfctl: kiosk: Settings open, not restarting");
+            }
+            // Paused on purpose (screen off): the server's page watchdog sees the pings stop, but
+            // the page is not hung, and a restart would throw away the instant wake.
+            KioskCmd::Restart | KioskCmd::Reload if self.stopped => {
+                eprintln!("tfctl: kiosk: screen off, page paused, not restarting");
             }
             KioskCmd::Restart | KioskCmd::Reload => self.restart(),
             KioskCmd::SetUrl(u) if self.back_to.is_some() => self.back_to = Some(u),
@@ -626,14 +645,24 @@ impl Kiosk {
         }
     }
 
-    /// Show `u`: in the running cog when it answers on the bus, else by a restart.
+    /// Show `u`: in the running cog when it answers on the bus, else by a restart. A cog that
+    /// started moments ago is not on the bus yet: `u` waits (`pending`) instead of a restart.
     fn go(&mut self, u: String) {
+        self.pending = None;
         if u == self.url {
             return;
         }
         if self.open_in_place(&u) {
             eprintln!("tfctl: kiosk: opened {u} in place");
             self.url = u;
+            return;
+        }
+        if self.child.is_some()
+            && !self.stopped
+            && self.bus.is_some()
+            && self.last_spawn.elapsed() < BUS_WAIT
+        {
+            self.pending = Some(u);
             return;
         }
         self.url = u;
@@ -873,6 +902,9 @@ impl Kiosk {
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
         let _ = screen::set_brightness(self.backlight);
         self.show_splash("warming up");
+        // After the splash: its picture is a 4 MB read, which waited behind the prewarm's
+        // 464 MB on the card [V 2026-10-27: 0.9 s].
+        crate::prewarm::start();
         self.open_inputs();
         self.start_bus();
         loop {
@@ -897,6 +929,9 @@ impl Kiosk {
             if self.splash.as_ref().is_some_and(|s| s.replaced()) {
                 eprintln!("tfctl: kiosk: cog is on screen, splash released");
                 self.splash = None;
+            }
+            if let Some(u) = self.pending.take() {
+                self.go(u);
             }
             if self.child.is_none()
                 && !self.stopped
@@ -992,6 +1027,54 @@ mod tests {
             c.get_args().nth(1).unwrap(),
             "--platform-params=renderer=modeset,rotation=1"
         );
+    }
+
+    #[test]
+    fn wake_resumes_the_paused_page_and_ignores_restarts_while_off() {
+        let mut k = Kiosk::new(&Config::default());
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        let pid = k.child.as_ref().unwrap().id();
+        k.set_screen(false);
+        assert!(k.stopped);
+        k.handle(KioskCmd::Restart);
+        assert_eq!(
+            k.child.as_ref().map(Child::id),
+            Some(pid),
+            "restart while off"
+        );
+        k.set_screen(true);
+        assert!(!k.stopped);
+        assert_eq!(
+            k.child.as_ref().map(Child::id),
+            Some(pid),
+            "same cog after wake"
+        );
+        k.kill_child();
+    }
+
+    #[test]
+    fn a_page_asked_for_while_cog_starts_waits_for_the_bus() {
+        let mut k = Kiosk::new(&Config::default());
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        k.bus = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        k.last_spawn = Instant::now();
+        let (pid, was) = (k.child.as_ref().unwrap().id(), k.url.clone());
+        // No cog on this bus answers (cogctl fails or is missing): wait, do not restart.
+        k.handle(KioskCmd::SetUrl("http://server/frame/x".into()));
+        assert_eq!(k.pending.as_deref(), Some("http://server/frame/x"));
+        assert_eq!(k.url, was);
+        assert_eq!(k.child.as_ref().map(Child::id), Some(pid));
+        // Too long: restart on it.
+        k.last_spawn = Instant::now() - BUS_WAIT;
+        let u = k.pending.take().unwrap();
+        k.go(u);
+        assert!(k.pending.is_none());
+        assert_eq!(k.url, "http://server/frame/x");
+        assert!(k.child.is_none(), "restarted");
+        if let Some(mut b) = k.bus.take() {
+            let _ = b.kill();
+            let _ = b.wait();
+        }
     }
 
     #[test]

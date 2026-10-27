@@ -459,6 +459,8 @@ pub fn show(look: &Look) -> io::Result<Splash> {
             look.rotation,
         );
         thread::spawn(move || {
+            // It runs while cog starts; cog's first frame matters more than a smooth dawn.
+            sys::nice_this_thread(10);
             animate(
                 &disp,
                 &handed,

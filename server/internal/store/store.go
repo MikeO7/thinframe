@@ -69,6 +69,17 @@ type Touch struct {
 	At          time.Time `json:"at"`
 }
 
+// PageLoad is the dashboard's last load as the page timed it (Navigation and Paint Timing), in
+// ms from the start of the navigation: the network (ResponseMS), the document parsed (DOMMS), the
+// first text or picture on screen (PaintMS) and every subresource in (LoadMS).
+type PageLoad struct {
+	ResponseMS int       `json:"response_ms"`
+	DOMMS      int       `json:"dom_ms"`
+	PaintMS    int       `json:"paint_ms"`
+	LoadMS     int       `json:"load_ms"`
+	At         time.Time `json:"at"`
+}
+
 // MaxTouchSamples bounds Touch.SamplesMS.
 const MaxTouchSamples = 50
 
@@ -162,6 +173,7 @@ type Frame struct {
 	LastSeen  time.Time  `json:"last_seen"`
 	Last      *Heartbeat `json:"last_heartbeat,omitempty"`
 	Touch     *Touch     `json:"touch,omitempty"`
+	PageLoad  *PageLoad  `json:"page_load,omitempty"`
 	Pending   []Action   `json:"pending_actions"`
 	History   []Action   `json:"action_history"`
 	Events    []Event    `json:"events"`

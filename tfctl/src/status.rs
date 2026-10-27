@@ -52,13 +52,20 @@ pub fn collect() -> Status {
         st.mem_total_mb = total;
         st.mem_used_mb = used;
     }
-    // /proc only (TASK 9: no shelling out except iwctl). The USB-C link's own address goes last,
-    // so `ips[0]` (heartbeat, status page) is the LAN one.
-    st.ips = read("/proc/net/fib_trie")
+    st.ips = ips();
+    st
+}
+
+/// Our IPv4 addresses, from /proc only (TASK 9: no shelling out except iwctl). The USB-C link's
+/// own address goes last, so `ips[0]` (heartbeat, status page) is the LAN one. No iwctl here: the
+/// status page is written while iwd is still starting, and `iwctl` then sat out its whole 5 s
+/// timeout before the splash and again before the first server connect [V 2026-10-27].
+pub fn ips() -> Vec<String> {
+    let mut ips = read("/proc/net/fib_trie")
         .map(|t| parse_fib_trie(&t))
         .unwrap_or_default();
-    st.ips.sort_by_key(|ip| ip == crate::statuspage::USB_IP);
-    st
+    ips.sort_by_key(|ip| ip == crate::statuspage::USB_IP);
+    ips
 }
 
 pub fn parse_uptime(text: &str) -> Option<u64> {

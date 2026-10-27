@@ -2,8 +2,9 @@
 //! A33's CPU [V 2026-10-22: `tfctl splash --png`, user 4.07 s], and a boot drew two before cog
 //! started; from the second boot on both come from here in milliseconds.
 //!
-//! The key covers everything a picture depends on: the caller's inputs, the tfctl binary (size
-//! and mtime, so an update re-renders) and the logo file. A file is written to a temporary name,
+//! The key covers everything a picture depends on: the caller's inputs, the drawing code and its
+//! assets (TF_DRAW_HASH, build.rs: an update that does not touch them keeps its pictures) and the
+//! logo file. A file is written to a temporary name,
 //! synced and renamed, so a power cut leaves the old entry or none; a read whose length is wrong
 //! is treated as a miss. Any failure (no /data, full card) just means rendering again.
 use crate::sha256::sha256_hex;
@@ -16,7 +17,7 @@ pub const DIR: &str = "/data/thinframe/cache";
 /// Entries kept; the oldest go first. A few pictures of 4 MB at most.
 const KEEP: usize = 6;
 
-/// The cache key for `parts` plus the running binary and the logo at `logo`.
+/// The cache key for `parts` plus the drawing code and the logo at `logo`.
 pub fn key(parts: &[&str], logo: &str) -> String {
     let stamp = |p: io::Result<PathBuf>| {
         p.and_then(fs::metadata)
@@ -25,7 +26,7 @@ pub fn key(parts: &[&str], logo: &str) -> String {
     };
     let mut s = parts.join("\u{1f}");
     s.push('\u{1f}');
-    s.push_str(&stamp(std::env::current_exe()));
+    s.push_str(env!("TF_DRAW_HASH"));
     s.push('\u{1f}');
     s.push_str(&stamp(Ok(PathBuf::from(logo))));
     sha256_hex(s.as_bytes())[..32].to_string()

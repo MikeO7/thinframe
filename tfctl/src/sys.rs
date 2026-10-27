@@ -16,6 +16,24 @@ extern "C" {
     fn kill(pid: i32, sig: i32) -> i32;
 }
 
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+    fn gettid() -> i32;
+}
+
+/// Give the calling thread a lower CPU priority (nice `n`); Linux applies it to the thread alone.
+/// For work that must not slow cog's start, such as the splash animation.
+pub fn nice_this_thread(n: i32) {
+    #[cfg(target_os = "linux")]
+    // SAFETY: plain C calls on our own thread id; a failure only leaves the priority as it was.
+    unsafe {
+        setpriority(0, gettid() as u32, n);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = n;
+}
+
 extern "C" fn on_term(_sig: i32) {
     TERM.store(true, Ordering::SeqCst);
 }
