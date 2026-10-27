@@ -20,12 +20,13 @@ var files embed.FS
 
 // Fonts the themes use, served at /fonts/<name>. Manrope: SIL OFL 1.1 (fonts/OFL.txt).
 //
-//go:embed fonts/manrope.woff2 fonts/OFL.txt
+//go:embed fonts/manrope.woff2 fonts/manrope.ttf fonts/OFL.txt
 var fonts embed.FS
 
-// Font returns a bundled font file (or its licence, OFL.txt) and its Content-Type.
+// Font returns a bundled font file (or its licence, OFL.txt) and its Content-Type. Manrope comes
+// twice: the frame's WebKit is built without WOFF2 (no brotli), so it takes the TTF.
 func Font(name string) ([]byte, string, bool) {
-	types := map[string]string{"manrope.woff2": "font/woff2", "OFL.txt": "text/plain; charset=utf-8"}
+	types := map[string]string{"manrope.woff2": "font/woff2", "manrope.ttf": "font/ttf", "OFL.txt": "text/plain; charset=utf-8"}
 	ct, ok := types[name]
 	if !ok {
 		return nil, "", false
