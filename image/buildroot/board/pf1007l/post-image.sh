@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Buildroot post-image ($BINARIES_DIR = output/images). Builds PFBOOT's files (boot.scr from
-# ormarch's boot.cmd + boot.cmd.patch, per-slot extlinux, uEnv.txt), the data partition, the
+# post-build.sh, per-slot extlinux, uEnv.txt), the data partition, the
 # card image (genimage.cfg) and the OS bundle system-<ver>.tar the container ships (TASK 3).
 set -euo pipefail
 BOARD="$(cd "$(dirname "$0")" && pwd)"
@@ -20,10 +20,8 @@ rm -rf "$S" && mkdir -p "$S"
 cp "$B/zImage" "$S/zImage.a"
 cp "$B"/sun8i-a33-pf1007l-{full,min,pmic}.dtb "$IN/u-boot-pf1007l-L.bin" "$B/rootfs.ext4" "$S/"
 cp "$REPO/image/boot/uEnv.txt" "$S/"
-cp "$IN/boot.cmd" "$S/boot.cmd"
-patch -s "$S/boot.cmd" < "$BOARD/boot.cmd.patch"
-"$HOST_DIR/bin/mkimage" -C none -A arm -T script -n "thinframe A/B on ormarch build L" \
-	-d "$S/boot.cmd" "$S/boot.scr" >/dev/null
+# boot.cmd/boot.scr come from post-build.sh (the image carries them for tfctl emmc install).
+cp "$B/boot.cmd" "$B/boot.scr" "$S/"
 render() { # slot part other otherpart
 	sed -e "s|@SLOT@|$1|g; s|@PART@|$2|g; s|@OTHER@|$3|g; s|@OTHERPART@|$4|g; s|@CMDLINE@|$CMDLINE|g" \
 		"$REPO/image/boot/extlinux.conf.in" > "$S/slot-$1.conf"

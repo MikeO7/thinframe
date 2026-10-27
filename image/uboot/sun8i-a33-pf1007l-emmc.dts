@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * thinframe build "E": ormarch's build L with the eMMC (MMC2, 8-bit, as in the backup build)
+ * switched back on, for a frame that runs from the eMMC (tfctl emmc install). Everything else
+ * is build L: no Wi-Fi, no UART pins, no display. U-Boot numbers the MMC devices in bind order:
+ * mmc 0 = card, mmc 1 = eMMC; mmc_bootdev (board/sunxi/board.c) says which one booted.
+ */
+
+#include "sun8i-a33-pf1007l-linux.dts"
+
+/ {
+	model = "PF1007L Linux boot, card or eMMC (thinframe build E)";
+};
+
+&mmc2 {
+	status = "okay";
+};

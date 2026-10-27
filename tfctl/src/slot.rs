@@ -1,13 +1,17 @@
 //! A/B root slots (TASK 12, docs/decisions.md "Full OS updates"). Pure helpers: which slot is
 //! running, the `uEnv.txt` slot/tries lines U-Boot reads, and the guard that keeps `dd` away
-//! from any disk that is not our own card (MBR signature `50463037`, CLAUDE.md "Never write the
-//! eMMC").
+//! from any disk the frame did not boot from. A system on the card (MBR signature `50463037`)
+//! acts on the card and never on the eMMC; a system on the eMMC (`tfctl emmc install`,
+//! signature `50463045`) acts on the eMMC and never on a card.
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 /// MBR disk signature written by `image/build.sh assemble`; also the PARTUUID prefix.
 pub const DISK_SIG: u32 = 0x5046_3037;
+/// The same layout installed on the eMMC by `tfctl emmc install` ("PF0E"). A different
+/// signature, so a rescue card and the eMMC never share a PARTUUID.
+pub const EMMC_SIG: u32 = 0x5046_3045;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
@@ -158,32 +162,71 @@ impl UEnv {
     }
 }
 
-/// True when the 512-byte MBR carries our disk signature (bytes 440..444, little endian).
+/// The disk signature of a 512-byte MBR (bytes 440..444, little endian).
+pub fn mbr_sig(mbr: &[u8]) -> Option<u32> {
+    (mbr.len() >= 444).then(|| u32::from_le_bytes([mbr[440], mbr[441], mbr[442], mbr[443]]))
+}
+
+/// True when the MBR is one of ours: the card's or the installed eMMC's.
 pub fn mbr_is_ours(mbr: &[u8]) -> bool {
-    mbr.len() >= 444 && u32::from_le_bytes([mbr[440], mbr[441], mbr[442], mbr[443]]) == DISK_SIG
+    matches!(mbr_sig(mbr), Some(DISK_SIG | EMMC_SIG))
 }
 
-/// The whole-disk device our root lives on: the first candidate whose MBR signature is ours.
-/// Candidates default to `DISKS`; a disk that is not ours (the eMMC with Android) is never
-/// returned, so `dd` cannot reach it. Belt and braces: an MMC device that sysfs reports as
-/// eMMC (`/sys/block/<name>/device/type` = `MMC`; SD cards say `SD`) is skipped even if its
-/// MBR carries our signature, so a card image someone once wrote to the eMMC is never picked.
+/// Which of our disks the running root is on: the signature in `root=PARTUUID=<sig>-0N`.
+/// Anything else (`root=/dev/vda2` under QEMU, a cmdline we cannot read) means the card.
+pub fn root_sig(cmdline: &str) -> u32 {
+    cmdline
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("root=PARTUUID="))
+        .and_then(|u| u.split_once('-'))
+        .and_then(|(sig, _)| u32::from_str_radix(sig, 16).ok())
+        .filter(|s| *s == EMMC_SIG)
+        .unwrap_or(DISK_SIG)
+}
+
+/// True when this system runs from the eMMC.
+pub fn running_from_emmc() -> bool {
+    root_sig(&fs::read_to_string("/proc/cmdline").unwrap_or_default()) == EMMC_SIG
+}
+
+/// The whole-disk device our root lives on. Booted from the card: the first candidate with the
+/// card signature that sysfs does not report as eMMC (`/sys/block/<name>/device/type` = `MMC`;
+/// SD cards say `SD`), so the eMMC is never returned, whatever it holds, and `dd` cannot reach
+/// it. Booted from the eMMC: the eMMC with the eMMC signature, never a card.
 pub fn find_disk(candidates: &[&Path]) -> Option<std::path::PathBuf> {
-    find_disk_in(candidates, Path::new("/sys/block"))
+    find_disk_for(candidates, Path::new("/proc/cmdline"))
 }
 
-/// `find_disk` with the sysfs block directory as a parameter (tests).
-pub fn find_disk_in(candidates: &[&Path], sys_block: &Path) -> Option<std::path::PathBuf> {
+/// `find_disk` with the kernel command line read from `cmdline`.
+pub fn find_disk_for(candidates: &[&Path], cmdline: &Path) -> Option<std::path::PathBuf> {
+    let want = root_sig(&fs::read_to_string(cmdline).unwrap_or_default());
+    find_disk_in(candidates, Path::new("/sys/block"), want)
+}
+
+/// `find_disk` with the sysfs block directory and the wanted signature as parameters (tests).
+pub fn find_disk_in(
+    candidates: &[&Path],
+    sys_block: &Path,
+    want: u32,
+) -> Option<std::path::PathBuf> {
     candidates.iter().find_map(|p| {
-        if is_emmc(sys_block, p) {
+        if is_emmc(sys_block, p) != (want == EMMC_SIG) {
             return None;
         }
         let mut f = fs::File::open(p).ok()?;
         let mut mbr = [0u8; 512];
         f.seek(SeekFrom::Start(0)).ok()?;
         f.read_exact(&mut mbr).ok()?;
-        mbr_is_ours(&mbr).then(|| p.to_path_buf())
+        (mbr_sig(&mbr) == Some(want)).then(|| p.to_path_buf())
     })
+}
+
+/// The eMMC among `candidates`, by sysfs, whatever it holds.
+pub fn find_emmc(candidates: &[&Path], sys_block: &Path) -> Option<std::path::PathBuf> {
+    candidates
+        .iter()
+        .find(|p| is_emmc(sys_block, p))
+        .map(|p| p.to_path_buf())
 }
 
 /// True when sysfs says the device `disk` names is an eMMC (`device/type` reads `MMC`).
@@ -195,9 +238,9 @@ pub fn is_emmc(sys_block: &Path, disk: &Path) -> bool {
 }
 
 /// Where the card can be: the frame's SD slot (mmcblk*), or virtio-blk under `qemu -M virt` (M2).
-/// `find_disk` still takes only the one with our MBR signature. With the DTS aliases
-/// (mmc0 = SD, mmc1 = SDIO Wi-Fi, mmc2 = eMMC) the card is mmcblk0; the eMMC node is disabled
-/// in every DTB we ship, so today no eMMC block device exists at all.
+/// `find_disk` still takes only the one with the running root's signature. With the DTS
+/// aliases (mmc0 = SD, mmc1 = SDIO Wi-Fi, mmc2 = eMMC) the card is mmcblk0 and the eMMC is
+/// mmcblk2, whichever of them booted.
 pub const DISKS: [&str; 4] = ["/dev/mmcblk0", "/dev/mmcblk1", "/dev/mmcblk2", "/dev/vda"];
 
 /// `/dev/mmcblk0` + slot -> `/dev/mmcblk0p2`.
@@ -233,6 +276,16 @@ mod tests {
         assert_eq!(from_cmdline("console=tty1"), None);
         assert_eq!(Slot::A.other(), Slot::B);
         assert_eq!(Slot::B.part(), 3);
+    }
+
+    #[test]
+    fn root_signature_names_the_boot_disk() {
+        assert_eq!(root_sig("root=PARTUUID=50463037-03 ro"), DISK_SIG);
+        assert_eq!(root_sig("ro root=PARTUUID=50463045-02 quiet"), EMMC_SIG);
+        assert_eq!(root_sig("root=/dev/vda2"), DISK_SIG);
+        assert_eq!(root_sig("root=PARTUUID=deadbeef-02"), DISK_SIG);
+        assert_eq!(root_sig(""), DISK_SIG);
+        assert_eq!(from_cmdline("root=PARTUUID=50463045-03 ro"), Some(Slot::B));
     }
 
     #[test]
@@ -331,8 +384,15 @@ mod tests {
         let (emmc, sd) = (dir.join("mmcblk0"), dir.join("mmcblk1"));
         fs::write(&emmc, vec![0u8; 512]).unwrap();
         fs::write(&sd, &mbr).unwrap();
-        assert_eq!(find_disk(&[&emmc, &sd]), Some(sd.clone()));
-        assert_eq!(find_disk(&[&emmc, &dir.join("missing")]), None);
+        let none = dir.join("nosys");
+        assert_eq!(
+            find_disk_in(&[&emmc, &sd], &none, DISK_SIG),
+            Some(sd.clone())
+        );
+        assert_eq!(
+            find_disk_in(&[&emmc, &dir.join("missing")], &none, DISK_SIG),
+            None
+        );
         // An eMMC that somehow carries our signature is still never the card.
         let sys = dir.join("sys");
         fs::create_dir_all(sys.join("mmcblk0/device")).unwrap();
@@ -340,9 +400,33 @@ mod tests {
         fs::write(sys.join("mmcblk0/device/type"), "MMC\n").unwrap();
         fs::write(sys.join("mmcblk1/device/type"), "SD\n").unwrap();
         fs::write(&emmc, &mbr).unwrap();
-        assert_eq!(find_disk_in(&[&emmc, &sd], &sys), Some(sd.clone()));
-        assert_eq!(find_disk_in(&[&emmc], &sys), None);
+        assert_eq!(
+            find_disk_in(&[&emmc, &sd], &sys, DISK_SIG),
+            Some(sd.clone())
+        );
+        assert_eq!(find_disk_in(&[&emmc], &sys, DISK_SIG), None);
         assert!(is_emmc(&sys, &emmc) && !is_emmc(&sys, &sd));
+        assert_eq!(find_emmc(&[&sd, &emmc], &sys), Some(emmc.clone()));
+        // Booted from the eMMC: only the eMMC with the eMMC signature, never the card.
+        let mut emmc_mbr = mbr.clone();
+        emmc_mbr[440..444].copy_from_slice(&EMMC_SIG.to_le_bytes());
+        assert!(mbr_is_ours(&emmc_mbr));
+        assert_eq!(
+            find_disk_in(&[&sd, &emmc], &sys, EMMC_SIG),
+            None,
+            "eMMC has card sig"
+        );
+        fs::write(&emmc, &emmc_mbr).unwrap();
+        fs::write(&sd, &emmc_mbr).unwrap();
+        assert_eq!(
+            find_disk_in(&[&sd, &emmc], &sys, EMMC_SIG),
+            Some(emmc.clone())
+        );
+        assert_eq!(
+            find_disk_in(&[&sd, &emmc], &sys, DISK_SIG),
+            None,
+            "never the eMMC"
+        );
         assert!(
             !is_emmc(&sys, Path::new("/dev/vda")),
             "no sysfs entry: not eMMC"

@@ -2,7 +2,8 @@
 # Build the thinframe SD image on a Mac.
 #
 #   image/build.sh            all: inputs rootfs assemble sums
-#   image/build.sh inputs     fetch/build U-Boot, kernel, DTB, panel + Wi-Fi modules via ormarch
+#   image/build.sh inputs     fetch/build U-Boot, kernel, DTB, panel + Wi-Fi modules via ormarch;
+#                             U-Boot build E (eMMC slot) with image/uboot-emmc.sh
 #   image/build.sh rootfs     Buildroot (BR2_EXTERNAL image/buildroot) in Docker (image/br-run.sh);
 #                             its post-image.sh runs genimage -> image/out/thinframe-sd.img + system-<ver>.tar
 #   image/build.sh assemble   self-check of the card image (MBR signature, U-Boot, partitions)
@@ -62,6 +63,15 @@ step_inputs() {
 	cp "$om"/image/work/uboot/{u-boot-pf1007l-L.bin,u-boot-pf1007l-L.config,u-boot-qemu-opipc.bin,boot.cmd} "$in/"
 	cp "$om/kernel/dts/sun8i-a33-pf1007l.dts" "$om"/image/dts/sun8i-a33-pf1007l-{min,pmic,full}.dts "$in/dts/allwinner/"
 	cp "$om/kernel/patches/v$KVER/"*.patch "$in/linux-patches/"
+	# The eMMC on in the DTBs the frame boots ("full", and "pmic" for tests): read-only to the
+	# card system (slot.rs never picks it), and the root disk of an eMMC install (tfctl emmc).
+	# "min" has no PMIC regulators for it and stays card-only.
+	local d
+	for d in full pmic; do
+		printf '\n/* thinframe: eMMC on (TASKS E) */\n&mmc2 {\n\tstatus = "okay";\n};\n' \
+			>> "$in/dts/allwinner/sun8i-a33-pf1007l-$d.dts"
+	done
+	bash "$HERE/uboot-emmc.sh"
 	(cd "$in" && find . -type f | LC_ALL=C sort | xargs shasum -a 256) > "$OUT/inputs.sha256"
 	cat "$OUT/inputs.sha256"
 }
