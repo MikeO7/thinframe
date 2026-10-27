@@ -6,8 +6,8 @@
 //! - `backup`: the whole eMMC, raw, to stdout (pipe it through zstd to the Mac or the server).
 //!   Its SHA-256 goes to stderr and to `RECORD` once the last byte is out.
 //! - `install --backup-sha256 HEX [--files DIR]`: the card's layout on the eMMC with the eMMC
-//!   signature (`slot::EMMC_SIG`): boot partition, both root slots, a fresh /data with a copy of
-//!   this one, and U-Boot with an eMMC slot. Runs only from the card, only when the eMMC is
+//!   signature (`slot::EMMC_SIG`): the boot partition, the running root in both slots, a fresh
+//!   /data with a copy of this one, and U-Boot with an eMMC slot. Runs only from the card, only when the eMMC is
 //!   unmounted, the running slot is confirmed, and HEX is the hash `backup` recorded for this
 //!   eMMC (not needed when the eMMC already holds thinframe).
 //!
@@ -540,12 +540,18 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     w.write_all_at(&mbr, 0)?;
     w.sync_all()?;
 
-    // 4. Partitions 1 to 3 from the card, as they are (p1 is mounted read-only; roots are ro).
+    // 4. The boot partition from the card as it is (mounted read-only), and the running root
+    // into both slots: the card's other slot may be older than the eMMC support, and a
+    // fallback to it would come up without /data.
     let mut want = Vec::new();
     for n in 1..=3u8 {
         let (start, len) = entry(&mbr, n as usize - 1);
-        let src = File::open(slot::part_n(&card, n))?;
-        say(&format!("copying partition {n} ({} MiB)", len / 2048));
+        let from = if n == 1 { 1 } else { running.part() };
+        let src = File::open(slot::part_n(&card, from))?;
+        say(&format!(
+            "copying card partition {from} to eMMC partition {n} ({} MiB)",
+            len / 2048
+        ));
         want.push((
             start * 512,
             len * 512,
@@ -608,7 +614,8 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
 }
 
 /// The eMMC's boot partition after the raw copy: roots on the eMMC signature, the boot script
-/// that reads `mmc_bootdev`, DTBs with the eMMC on, and the running slot confirmed.
+/// that reads `mmc_bootdev`, DTBs with the eMMC on, the running kernel for both slots, and the
+/// running slot confirmed.
 fn fix_boot(mnt: &Path, files: &Path, boot_scr: &[u8], uenv: &UEnv, running: Slot) -> R<()> {
     let ext = mnt.join("extlinux");
     for e in fs::read_dir(&ext)? {
@@ -619,6 +626,12 @@ fn fix_boot(mnt: &Path, files: &Path, boot_scr: &[u8], uenv: &UEnv, running: Slo
         }
     }
     fs::write(mnt.join("boot.scr"), boot_scr)?;
+    // Both slots carry the running system (install step 4), so both get its kernel.
+    let (k, other) = (
+        format!("zImage.{}", running.name()),
+        format!("zImage.{}", running.other().name()),
+    );
+    fs::copy(mnt.join(&k), mnt.join(&other))?;
     for e in fs::read_dir(files)? {
         let p = e?.path();
         if p.extension().is_some_and(|x| x == "dtb") {
