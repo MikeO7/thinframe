@@ -811,3 +811,18 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   the backlight on: the panel's own light does not reach the sensor, so auto-brightness cannot
   chase itself.
 - Off by default; the server's frame config turns each on (MCP `set_frame_config`).
+
+## QA pass 2 (2026-10-26)
+- Every tab and button clicked on a copy of the live data (hooks pointed at a local sink): all
+  car commands reach the `car` hook, the rail, the House sub-tabs and the wave gesture switch
+  pages. The wave gesture had been broken since tabs switch on pointerdown: it sent a click.
+- Room cards look like switches, so a tap now does something: it emits `room_on` or
+  `room_off` with `{"area_id"}` (the room's `area`, else Home Assistant's default id from its
+  name). With no such hook on the server the card says "Room lights are not connected yet" and
+  nothing flips; with one, the card flips at once and the next rooms update confirms it.
+- System: themes' `.w` padding no longer pushes the services page off the grid; services are
+  chips that wrap, and with an odd number of groups the biggest takes the full row.
+- Aurora no longer lists Inter as a fallback: Chrome fetched `/api/data/asset/inter.woff2` (404)
+  for any glyph Manrope lacks. The weekly forecast fills its card; climate zones sit at the
+  bottom; the home cars spread out; an empty day in Shows says "Nothing new"; the "have it"
+  check is a green mark that no longer wraps; the toast appears without sliding.
