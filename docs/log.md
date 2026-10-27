@@ -876,3 +876,22 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
 - Card still wins (E4) [V]: reboot with the card in, `root=PARTUUID=50463037-02`; `tfctl emmc
   status`: running from card, eMMC holds thinframe.
 - Booting with no card: [U] until the owner pulls the card.
+
+## 2026-10-27 Speed (PR #147), measured from the SD card
+
+- Before [V]: kernel init 0.7 s, kiosk 2.5 s, splash 7.6 s (waited on `iwctl`), first server
+  connect 7.7 s, cog spawned 8.7 s, on screen 11.5 s, page loaded 13.2 s. Wake restarted cog
+  (about 7 s to a loaded page).
+- After, software a74dfec [V]: splash 3.8 s, cog spawned 4.1 s on the saved dashboard, server
+  connect 5.0 s, live dashboard opened in place 7.0 s, loaded 12.9 s (`/var/log/thinframe.log`
+  timeline, page_load beacon). Wake: screenshot 3 s after `frame_action wake` shows the current
+  time, no cog restart in the log.
+- `tfctl bench` tab switches [V]: p50 88 ms, max 304 ms on a first visit, 41 to 96 ms after.
+- Warm cog, A/B pages from the Mac [V]: first paint about 170 ms, load 0.4 to 0.9 s; the cars
+  iframe adds about 400 ms. A fresh cog: first paint about 1.3 s.
+- Caches dropped, cog restarted [V]: BFQ + idle prewarm 1.8 s on screen, 4.3 s loaded;
+  mq-deadline 2.7 s and 4.6 s.
+- Read-only `dd` [V]: card 19 MB/s sequential, 8.2 MB/s 4k; eMMC 73 MB/s, 17.4 MB/s. Card boot
+  is disk bound (`/proc/pressure/io` some about 4 s of the first 10 s).
+- Wi-Fi MAC differs each boot (88:00:33:77:a3:fa, :24:ed, :68:51) [V], so DHCP takes a fresh
+  lease (1.9 s idle). Needs a system image (iwd AddressOverride); not done.
