@@ -841,3 +841,18 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   frame since 79107 s, dashboard on screen (`tfctl screenshot`), cog env shows
   `WEBKIT_SKIA_CPU_PAINTING_THREADS=0`.
 - Whether the touch tearing is gone is [U] until the owner has used the frame.
+
+## 2026-10-26 Night: recovery paths, Settings everywhere, audit
+- Audit [V] (read-only, frame + Nox): root fs 0 B free of 172 MB (5 % reserved); CMA 64 MB with
+  6 to 8 MB free and three `eglSwapBuffers failed (0x3003)` during page changes; `panic_on_oops=0`;
+  RTC at 1970 (no backup battery, lost on power cuts); the eMMC is invisible to Linux; Nox host
+  backup last ran 2026-10-21 (a failed `home-nox-media.automount` stops `nox-update` before it),
+  so the thinframe data volume has no backup yet. No GPU timeouts since 78795 s.
+- #143 on the frame (tfctl 2026.10.26-86c071a, server deployed 21:53 local) [V]:
+  - Dashboard gear tapped with `tfctl bench 1 8,6`: log `SettingsShown("/settings")`, Settings on
+    screen (photos in the session). Boot/status page button tapped with `tfctl bench 1 8,89`:
+    Settings opened. A POST without our Origin: `settings: refused /settings from` in the log.
+  - `tfctl clock`: pool.ntp.org and time.google.com both answer, 1 s off; `hwclock -r -u` now
+    reads the current UTC time after the first set.
+  - `panic_on_oops` set to 1 by hand on the running frame; `tfctl boot` sets it from the next boot.
+- Next system image carries `cma=128M` and a rootfs without reserved blocks; not built yet [U].
