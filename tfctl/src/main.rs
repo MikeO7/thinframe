@@ -35,6 +35,7 @@ mod dbg;
 mod discover;
 mod drm;
 mod font;
+mod gpuwatch;
 mod http;
 mod json;
 mod kiosk;

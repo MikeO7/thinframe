@@ -722,10 +722,34 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
     25 to 30 %). Before: up to 1.8 s. After: highlight p50 60 to 80 ms, page drawn 250 to 300 ms
     after the touch; first visit of a tab after a reload up to ~650 ms.
   - Tried and rejected: CPU painting (`WEBKIT_SKIA_ENABLE_CPU_RENDERING=1`, 2x slower), 4 CPU
-    painting threads or GPU-affine hybrid painting (no change), keeping hidden pages as layers
+    painting threads or GPU-affine hybrid painting (no change; GPU-only won later, see "Painting
+    on the GPU only"), keeping hidden pages as layers
     (opacity 0 or off-screen: WebKit drops their tiles; opacity .004 was slower).
   - The floor, plain theme with the same page code: highlight 80 to 140 ms. Faster than that
     needs less on the page, not CSS tricks.
+
+## Painting on the GPU only, and GPU hangs (2026-10-26)
+- Owner: the screen "periodically tears / shakes when the touch screen is used". WPE's default
+  Skia mode is hybrid: each 512 px tile is painted on a free CPU worker or else on the GPU, so
+  neighbouring tiles, and one tile from one redraw to the next, came from two rasterizers that
+  draw text, gradients and pictures slightly differently. tfctl now starts cog with
+  `WEBKIT_SKIA_CPU_PAINTING_THREADS=0` (every tile on the GPU). Tab switch on the frame, live
+  data copy, 10 switches [V]: hybrid 300 to 800 ms, GPU-only p50 314 ms (tap to page painted
+  p50 281 ms, max 444 ms). Whether the tearing is gone is [U] until the owner has used it.
+- `--web-mem-limit` 256 to 512 MiB. At 256 the page (~100 MB) sat above WebKit's one-third
+  threshold, so it purged decoded pictures and tiles every ~25 s ("Memory pressure relief", 41
+  times in 1,000 s) and repainted them on the next touch: the "periodic" part. At 512: none in
+  the first 250 s [V]. The frame has 1 GB.
+- `COG_ENV="NAME=value ..."` in `/etc/thinframe.conf` (or `/data/etc`) adds or overrides cog's
+  environment, to try a WebKit knob without a new tfctl. Local only: the server cannot set it.
+- GPU hang guard (`gpuwatch.rs`). Killing cog mid-frame gave the Mali-400 an MMU page fault;
+  lima's reset then failed on every job ("pp0 job timeout" / "bus stop timeout" every 10 s) and
+  the screen stayed black for 11 minutes while the page itself ran, so the server watchdog saw
+  it alive [V dmesg 78129 to 78795 s]. A new cog cleared it. tfctl now reads `/dev/kmsg` and
+  restarts the kiosk on the second lima job timeout within 30 s, at most once per 2 minutes.
+- Rejected: pinning the GPU at 384 MHz (devfreq `min_freq`): no change to tap latency.
+  Removing the Aurora background layers: 60 ms less paint, same total. Keeping hidden pages
+  as layers (z-index, transform, opacity stacking): WebKit repaints on each, see "Touch first".
 
 ## Cameras and the doorbell (UniFi Protect) (2026-10-26)
 - The owner uses UniFi Protect. The server reads it through Protect's official Integration API
