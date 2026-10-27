@@ -4,6 +4,8 @@
 //! screen until cog was started again [V 2026-10-26, dmesg 78129 s to 78795 s]. This thread reads
 //! the kernel log and restarts the kiosk on the second job timeout within HANG_WINDOW, at most
 //! once per COOLDOWN. A single timeout is left alone: lima usually recovers from one.
+//! That night the hang outlasted two cog restarts, so the guard escalates: a hang again within
+//! ESCALATE of its own restart reboots the frame (a GPU reset at power-on always works).
 use crate::kiosk::KioskCmd;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -14,6 +16,14 @@ use std::time::{Duration, Instant};
 const KMSG: &str = "/dev/kmsg";
 const HANG_WINDOW: Duration = Duration::from_secs(30);
 const COOLDOWN: Duration = Duration::from_secs(120);
+const ESCALATE: Duration = Duration::from_secs(600);
+
+#[derive(Debug, PartialEq)]
+enum Act {
+    Nothing,
+    Restart,
+    Reboot,
+}
 
 /// Is this kernel log record a lima job timeout?
 fn is_timeout(rec: &str) -> bool {
@@ -29,20 +39,23 @@ struct Hang {
 }
 
 impl Hang {
-    fn timeout(&mut self, now: Instant) -> bool {
+    fn timeout(&mut self, now: Instant) -> Act {
         let repeat = self
             .last_timeout
             .is_some_and(|t| now.duration_since(t) <= HANG_WINDOW);
         self.last_timeout = Some(now);
-        let cooled = self
-            .last_restart
-            .is_none_or(|t| now.duration_since(t) >= COOLDOWN);
-        if repeat && cooled {
-            self.last_restart = Some(now);
-            self.last_timeout = None;
-            return true;
+        if !repeat {
+            return Act::Nothing;
         }
-        false
+        match self.last_restart {
+            Some(t) if now.duration_since(t) < COOLDOWN => Act::Nothing,
+            Some(t) if now.duration_since(t) < ESCALATE => Act::Reboot,
+            _ => {
+                self.last_restart = Some(now);
+                self.last_timeout = None;
+                Act::Restart
+            }
+        }
     }
 }
 
@@ -69,9 +82,24 @@ pub fn start(tx: Sender<KioskCmd>) {
                     // EPIPE: records were overwritten before we read them; the next read goes on.
                     Err(_) => thread::sleep(Duration::from_millis(100)),
                     Ok(_) => {
-                        if is_timeout(&rec) && hang.timeout(Instant::now()) {
-                            eprintln!("tfctl: gpuwatch: GPU jobs time out, restarting the kiosk");
-                            if tx.send(KioskCmd::Restart).is_err() {
+                        if !is_timeout(&rec) {
+                            continue;
+                        }
+                        match hang.timeout(Instant::now()) {
+                            Act::Nothing => {}
+                            Act::Restart => {
+                                eprintln!(
+                                    "tfctl: gpuwatch: GPU jobs time out, restarting the kiosk"
+                                );
+                                if tx.send(KioskCmd::Restart).is_err() {
+                                    return;
+                                }
+                            }
+                            Act::Reboot => {
+                                eprintln!(
+                                    "tfctl: gpuwatch: GPU still hung after a restart, rebooting"
+                                );
+                                crate::sysupdate::reboot_soon();
                                 return;
                             }
                         }
@@ -97,16 +125,33 @@ mod tests {
     }
 
     #[test]
-    fn restarts_on_the_second_timeout_then_cools_down() {
+    fn restarts_on_the_second_timeout_then_reboots_if_it_comes_back() {
         let t0 = Instant::now();
         let s = |n: u64| t0 + Duration::from_secs(n);
         let mut h = Hang::default();
-        assert!(!h.timeout(s(0)), "one timeout is left alone");
-        assert!(!h.timeout(s(60)), "too far apart");
-        assert!(h.timeout(s(70)), "second within the window");
-        assert!(!h.timeout(s(80)));
-        assert!(!h.timeout(s(90)), "cooling down");
-        assert!(!h.timeout(s(190)));
-        assert!(h.timeout(s(200)), "cooled down");
+        assert_eq!(h.timeout(s(0)), Act::Nothing, "one timeout is left alone");
+        assert_eq!(h.timeout(s(60)), Act::Nothing, "too far apart");
+        assert_eq!(h.timeout(s(70)), Act::Restart, "second within the window");
+        assert_eq!(h.timeout(s(80)), Act::Nothing);
+        assert_eq!(
+            h.timeout(s(90)),
+            Act::Nothing,
+            "the restart gets its chance"
+        );
+        assert_eq!(h.timeout(s(200)), Act::Nothing);
+        assert_eq!(
+            h.timeout(s(210)),
+            Act::Reboot,
+            "still hung after the restart"
+        );
+        let mut h = Hang::default();
+        h.timeout(s(0));
+        assert_eq!(h.timeout(s(10)), Act::Restart);
+        h.timeout(s(1000));
+        assert_eq!(
+            h.timeout(s(1010)),
+            Act::Restart,
+            "a new hang much later restarts again"
+        );
     }
 }

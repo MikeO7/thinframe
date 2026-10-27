@@ -852,3 +852,43 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   for any glyph Manrope lacks. The weekly forecast fills its card; climate zones sit at the
   bottom; the home cars spread out; an empty day in Shows says "Nothing new"; the "have it"
   check is a green mark that no longer wraps; the toast appears without sliding.
+
+## Recovery from anything (2026-10-26)
+Owner: "allow recovery from any part of the system", and later run from the eMMC with no card.
+Every layer now has a way back that needs no computer where one is possible.
+
+| Fails | What brings it back |
+|---|---|
+| Wi-Fi password changed, router gone | Wi-Fi setup opens by itself after 45 s without the saved network; Settings → Wi-Fi any time |
+| Server down, moved, renamed | Status page says so; LAN search; Settings → Server: find on the network or type an address |
+| Pairing lost (token mismatch) | 401 clears the token; the frame shows a pairing code |
+| Someone wants to start over | Settings → Reset: forgets Wi-Fi, server and pairing (config saved first), restarts |
+| How to reach Settings | Gear at the bottom of the dashboard rail; Settings button on the boot/status screen; a 5 s hold anywhere |
+| A page tries to misuse Settings | Any page may open it (once per 10 s); every other Settings form must come from Settings itself (Origin check) |
+| No server for the clock | SNTP (pool.ntp.org, time.google.com) at start and daily; the RTC is written whenever the time is set and the kernel reads it at boot |
+| GPU hang (lima job timeouts) | Kiosk restart on the second timeout in 30 s; still hung within 10 min of that restart: reboot |
+| Kernel oops | `panic_on_oops=1` (set by `tfctl boot`) + `panic=10`: reboot |
+| tfctl's loop stuck | Hardware watchdog is petted only while the kiosk loop beats (120 s), so the SoC resets |
+| tfctl crashes or bad tfctl update | init respawns; two fast crashes after an update put `tfctl.prev` back |
+| Bad system update | U-Boot tries count down to the other slot; a slot that never reaches the server is rebooted after 10 min |
+| /data corrupt | `e2fsck -p`, then `-y`; still not mounting and either no ext4 superblock or errors left uncorrected: formatted fresh with the shipped config, frame starts like new. Never on a read error, never on another disk |
+| Root slot full | Updates are atomic renames; RESBLKS=0 frees the reserved 5 % in the next image (the 190 MB image gate stays) |
+| Display memory | CMA 64 → 128 MB (`cma=128M`) in the next image: 4 screen buffers of 4 MB plus WebKit's left 6 MB free and `eglSwapBuffers` failed with EGL_BAD_ALLOC during page changes [V 2026-10-26] |
+| Everything above fails | Pull the card (today) / insert a rescue card (eMMC, see below); USB-C link 192.168.7.2 with SSH |
+
+Not done yet: a recovery screen drawn by tfctl itself when cog cannot start at all (today the
+splash stays up), reading the power key, and a serial login on the USB console.
+
+### Before the eMMC can be the only system (TASKS section E)
+Audit of the running frame, 2026-10-26 [V]: Linux does not see the eMMC (`mmc@1c11000` is
+disabled in every DTB); U-Boot "L" is built without an eMMC slot (`MMC_SUNXI_SLOT_EXTRA=-1`);
+`boot.cmd` loads from `mmc 0:1`; extlinux roots by the card's MBR signature (`50463037-0N`);
+`slot::find_disk` skips eMMC on purpose; the touch firmware is on /boot of the card and in the
+image. In order, each step reversible until E2:
+1. Test DTB with the eMMC controller on, booted from the card: read size and the Android
+   partition table from /sys only.
+2. E1 full eMMC backup to the server (we have only a 2 GiB partial dump) with sha256.
+3. E4 prove a rescue card wins over the eMMC at power-on (Allwinner BROM order is SD first [D]).
+4. U-Boot with the eMMC slot, `boot.cmd` taking the boot device as a variable, the eMMC's own
+   disk signature, `find_disk` accepting our signature on eMMC, touch firmware copied to /data.
+5. E2 install, owner's explicit go only: it erases Android. E3 FEL/USB-disk recovery written up.

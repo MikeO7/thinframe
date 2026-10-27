@@ -60,9 +60,10 @@ fn step(name: &str, r: io::Result<()>) {
 /// tmpfs anyway), dmesg keeps it for the whole boot, and the report (report.rs) carries dmesg.
 pub fn note(line: &str) {
     eprintln!("tfctl: boot: {line}");
+    // One write per record: /dev/kmsg makes each write() a line, and writeln! may write in parts.
     if let Ok(mut k) = fs::OpenOptions::new().write(true).open("/dev/kmsg") {
         use std::io::Write;
-        let _ = writeln!(k, "<6>tfctl: boot: {line}");
+        let _ = k.write_all(format!("<6>tfctl: boot: {line}\n").as_bytes());
     }
 }
 
@@ -108,16 +109,108 @@ pub fn run(conf: &str) -> io::Result<()> {
         let _ = fs::DirBuilder::new().recursive(true).mode(mode).create(d);
     }
     note(&power_line(Path::new("/sys/class/power_supply")));
+    // An oops leaves the kernel half alive (a driver thread dead, the screen frozen); reboot
+    // instead (panic=10 on the command line). Here, not in extlinux: it reaches frames now.
+    step(
+        "panic on oops",
+        fs::write("/proc/sys/kernel/panic_on_oops", "1"),
+    );
     if Path::new("/boot").join(provision::FILE).exists() {
         step("provision", provision_rw());
     }
+    step("data", ensure_data());
     step("grow data", grow_data());
-    let cfg = config::load(conf)?;
+    let cfg = config::load(conf).unwrap_or_default();
     if provision::valid_hostname(&cfg.frame_id) {
         step("hostname", sh("hostname", &[&cfg.frame_id]));
     }
     step("touch firmware", touchfw::ensure());
     Ok(())
+}
+
+/// The shipped thinframe.conf (post-build.sh), seed for a fresh /data.
+const DEFAULT_CONF: &str = "/usr/share/thinframe/thinframe.conf";
+/// What fstab's bind mounts and the config symlink need on /data (post-image.sh makes the same).
+const DATA_DIRS: [&str; 4] = ["/data/etc", "/data/iwd", "/data/thinframe", "/data/ssh"];
+
+/// Whether something is mounted on `point` in /proc/mounts.
+pub fn mounted_at(mounts: &str, point: &str) -> bool {
+    mounts
+        .lines()
+        .any(|l| l.split_whitespace().nth(1) == Some(point))
+}
+
+/// The ext4 magic (0xEF53) at byte 1080: the superblock starts at 1024, s_magic at offset 56.
+fn has_ext4_magic(head: &[u8]) -> bool {
+    head.get(1080..1082) == Some(&[0x53, 0xef][..])
+}
+
+/// Format only a data partition that is provably beyond repair: readable (a card throwing read
+/// errors keeps what it has), and either no ext4 superblock at all or one `e2fsck -y` still
+/// reports uncorrected (exit bit 4) while the mount keeps failing.
+fn should_format(readable: bool, ext4: bool, fsck_code: Option<i32>) -> bool {
+    readable && (!ext4 || fsck_code.is_some_and(|c| c >= 0 && c & 4 != 0))
+}
+
+/// Last resort when /data still does not mount after `tfctl boot fsck`: format it fresh, seed
+/// the shipped config and redo the bind mounts. Without it the frame had no config, no Wi-Fi
+/// profiles, nowhere to save new ones and no way back on the screen. After it, the frame starts
+/// like a new one: Wi-Fi setup on screen, the server found on the network, a pairing code;
+/// dropbear makes a new host key; touch firmware also lives in the image or on /boot. The
+/// device is checked again here: p4 of the disk with our MBR signature (never the eMMC), not
+/// mounted anywhere.
+fn ensure_data() -> io::Result<()> {
+    if mounted_at(&fs::read_to_string("/proc/mounts")?, "/data") {
+        return Ok(());
+    }
+    if sh("mount", &["/data"]).is_ok() {
+        return sh("mount", &["-a"]);
+    }
+    let cands = slot::DISKS.map(Path::new);
+    let disk = slot::find_disk(&cands).ok_or_else(|| io::Error::other("no thinframe disk"))?;
+    let p4 = slot::part_n(&disk, 4);
+    if fs::canonicalize("/dev/thinframe-data").ok().as_deref() != Some(p4.as_path()) {
+        return Err(io::Error::other(
+            "/dev/thinframe-data is not our p4; not formatting",
+        ));
+    }
+    let dev = p4.to_string_lossy().to_string();
+    if is_mounted(&fs::read_to_string("/proc/mounts")?, &dev) {
+        return Err(io::Error::other(format!(
+            "{dev} is mounted elsewhere; not formatting"
+        )));
+    }
+    let mut head = [0u8; 2048];
+    let readable = fs::File::open(&p4)
+        .and_then(|f| f.read_exact_at(&mut head, 0))
+        .is_ok();
+    let ext4 = has_ext4_magic(&head);
+    let mut code = None;
+    if readable && ext4 {
+        let c = e2fsck("-y", &dev)?;
+        note(&format!("data: mount failed; e2fsck -y {dev}: exit {c}"));
+        if sh("mount", &["/data"]).is_ok() {
+            return sh("mount", &["-a"]);
+        }
+        code = Some(c);
+    }
+    if !should_format(readable, ext4, code) {
+        return Err(io::Error::other(format!(
+            "{dev} does not mount (readable {readable}, ext4 {ext4}, e2fsck {code:?}); not formatting"
+        )));
+    }
+    note(&format!("/data is beyond repair; formatting {dev} fresh"));
+    sh("mkfs.ext4", &["-F", "-q", "-L", "data", &dev])?;
+    sh("mount", &["/data"])?;
+    for d in DATA_DIRS {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o755)
+            .create(d)?;
+    }
+    let seed = fs::read(DEFAULT_CONF).unwrap_or_default();
+    fs::write("/data/etc/thinframe.conf", seed)?;
+    sh("mount", &["-a"])
 }
 
 /// `tfctl boot fsck`: check the data partition before `mount -a` mounts it. Never fails the boot:
@@ -346,6 +439,38 @@ mod tests {
         m[510] = 0x55;
         m[511] = 0xaa;
         m
+    }
+
+    #[test]
+    fn formats_only_a_readable_partition_beyond_repair() {
+        assert!(should_format(true, false, None), "no file system at all");
+        assert!(should_format(true, true, Some(4)), "e2fsck left errors");
+        assert!(should_format(true, true, Some(12)));
+        assert!(
+            !should_format(false, false, None),
+            "read errors: keep what is there"
+        );
+        assert!(
+            !should_format(true, true, Some(1)),
+            "fixed, mount failed for another reason"
+        );
+        assert!(!should_format(true, true, Some(8)), "e2fsck could not run");
+        assert!(!should_format(true, true, Some(-1)), "e2fsck killed");
+        assert!(!should_format(true, true, None));
+        let mut sb = [0u8; 2048];
+        assert!(!has_ext4_magic(&sb));
+        sb[1080] = 0x53;
+        sb[1081] = 0xef;
+        assert!(has_ext4_magic(&sb));
+        assert!(!has_ext4_magic(&sb[..1000]));
+    }
+
+    #[test]
+    fn finds_what_is_mounted_where() {
+        let m = "/dev/root / ext4 ro 0 0\n/dev/thinframe-data /data ext4 rw 0 0\n";
+        assert!(mounted_at(m, "/data"));
+        assert!(!mounted_at(m, "/boot"));
+        assert!(!mounted_at("/dev/x /data2 ext4 rw 0 0\n", "/data"));
     }
 
     #[test]

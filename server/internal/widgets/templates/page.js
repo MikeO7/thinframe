@@ -719,7 +719,7 @@
   function gesture(g) {
     if (g !== 'wave') return;
     if (view.el) { if (view.ringId) dismissed(view.ringId, true); closeView(); return; }
-    const tabs = Array.from(document.querySelectorAll('.tab'));
+    const tabs = Array.from(document.querySelectorAll('.tab[data-tab]'));
     if (!tabs.length) return;
     const i = tabs.findIndex(t => t.classList.contains('on'));
     show(tabs[(i + 1) % tabs.length].dataset.tab);
