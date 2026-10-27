@@ -68,9 +68,9 @@
     cam: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/>',
     leaf: '<path d="M5 19C5 9 11 4 20 4c0 9-5 15-15 15zM5 19l7-7"/>',
     dot: '<circle cx="12" cy="12" r="3"/>',
-    frunk: '<path d="M3 17.5V14M9 14l3-4h4.5l3 3.5 1.5.5v3.5"/><path d="M9 14 3.8 10.2"/><path d="M3 17.5h2M9 17.5h6M19 17.5h2"/><circle cx="7" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/>',
-    trunk: '<path d="M21 17.5V14M15 14l-3-4H7.5l-3 3.5L3 14v3.5"/><path d="M15 14l5.2-3.8"/><path d="M3 17.5h2M9 17.5h6M19 17.5h2"/><circle cx="7" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/>',
-    plug: '<path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v4"/>',
+    frunk: '<path d="M2.5 16.5v-2.3c0-.5.4-.9.9-.9h5L11 9.6c.4-.5 1-.8 1.6-.8h3.3c.7 0 1.4.3 1.8.9l2.2 2.8c.9.3 1.6 1.1 1.6 2.1v1.9"/><path d="M8.4 13.3 3.6 9.9"/><path d="M8.9 16.5h6.2"/><circle cx="7" cy="16.5" r="1.9"/><circle cx="17" cy="16.5" r="1.9"/>',
+    trunk: '<path d="M2.5 16.5v-1.9c0-1 .7-1.8 1.6-2.1l4.3-1L11 8.9c.4-.4 1-.6 1.6-.6h4.3"/><path d="M16.9 8.3 21.4 6"/><path d="M19.5 12.4h.9c.6 0 1.1.5 1.1 1.1v3"/><path d="M8.9 16.5h6.2"/><circle cx="7" cy="16.5" r="1.9"/><circle cx="17" cy="16.5" r="1.9"/>',
+    plug: '<path d="M8 3v4M13 3v4"/><path d="M5.5 7h10v3.5a5 5 0 0 1-10 0z"/><path d="M10.5 15.5v2a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3V8.5"/>',
     sun: '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>',
     partsun: '<path d="M9 3v1.6M3.6 9H2M4.8 4.8l1.1 1.1M13.2 4.8l-1.1 1.1"/><path d="M5.6 11.5A3.6 3.6 0 0 1 12.3 7.6"/><path d="M8 20h10a3.5 3.5 0 0 0 .4-7 5 5 0 0 0-9.6-.8A3.9 3.9 0 0 0 8 20z"/>',
     cloud: '<path d="M7 19h10.5a4 4 0 0 0 .5-8 6 6 0 0 0-11.4-1A4.5 4.5 0 0 0 7 19z"/>',
@@ -156,6 +156,8 @@
     b.append(i); return b;
   }
   function arr(v) { return Array.isArray(v) ? v : []; }
+  // Home Assistant's default area id for a name: "Living Room" -> "living_room".
+  function slug(v) { return String(v || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''); }
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
   // merge static entries from props with live ones from data, matched by id or name.
   function merge(stat, live) {
@@ -339,6 +341,7 @@
       const g = h('div', 'rgrid');
       for (const r of rooms.slice(0, 9)) {
         const t = h('div', 'room' + (r.on ? ' lit' : ''));
+        t.dataset.room = r.name || ''; t.dataset.area = r.area || slug(r.name); t.dataset.on = r.on ? '1' : '';
         const top = h('div', 'between'); top.append(h('span', 'rn ellip', r.name), h('span', 'sw' + (r.on ? ' on' : ''))); t.append(top);
         const ln = h('div', 'ln'); ln.append(icon('bulb'), h('span', '', r.on ? (r.lights || 'On') : 'Off')); t.append(ln);
         if (r.on && num(r.brightness) !== null) t.append(bar(r.brightness));
@@ -429,8 +432,13 @@
         for (const x of up.filter(x => String(x.date).slice(0, 10) === key)) {
           const parts = String(x.sub || '').split(' · '), ti = parts.findIndex(q => /^\d{1,2}:\d{2}/.test(q));
           if (ti > 0) parts.unshift(parts.splice(ti, 1)[0]);
-          const e = h('div', 'ep'); e.append(h('div', 't', x.title), h('small', '', parts.join(' · '))); c.append(e);
+          const got = parts.indexOf('\u2713');
+          if (got >= 0) parts.splice(got, 1);
+          const e = h('div', 'ep'), sm = h('small', '', parts.join(' · '));
+          if (got >= 0) sm.append(h('span', 'got', '\u2713'));
+          e.append(h('div', 't', x.title), sm); c.append(e);
         }
+        if (c.children.length === 1) c.append(h('div', 'none', 'Nothing new'));
         w.append(c);
       }
       b.append(w);
@@ -489,6 +497,11 @@
       for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].items.length) groups.splice(i, 1);
       const rest = cs.filter(c => !used.has(c.name)); if (rest.length) groups.push({ name: groups.length ? 'Other' : 'Containers', items: rest });
       if (groups.length === 1) gs.style.gridTemplateColumns = '1fr';
+      // An odd count leaves one panel a whole row: give it to the biggest group, first.
+      if (groups.length > 1 && groups.length % 2) {
+        const big = groups.reduce((m, g, i) => g.items.length > groups[m].items.length ? i : m, 0);
+        groups.unshift(groups.splice(big, 1)[0]);
+      }
       for (const gr of groups) {
         const pn = h('div', 'panel'), top = h('div', 'between');
         const ok = gr.items.filter(c => c.state === 'healthy' || c.state === 'running').length;
@@ -503,6 +516,7 @@
         }
         pn.append(l); gs.append(pn);
       }
+      if (groups.length > 1 && groups.length % 2) gs.firstChild.style.gridColumn = 'span 2';
       g.append(hp, gs); b.append(g);
       gs.querySelectorAll('.sv').forEach(l => fit(l, '.tile'));
     }
@@ -593,6 +607,24 @@
   tickClock();
   // Car and home controls are display-only for now: say so instead of doing nothing.
   addEventListener('click', e => { if (e.target.closest('[data-act]')) window.toast('Controls are not connected yet'); });
+  // A room's switch: the hook room_on or room_off gets {"area_id"} (Home Assistant's light
+  // service takes it as it is). Without such a hook on the server, say so; nothing flips.
+  addEventListener('click', e => {
+    const t = e.target.closest('.room[data-room]');
+    if (!t || t._busy || !t.dataset.area) return;
+    const on = !t.dataset.on, sec = t.closest('.w'), name = t.dataset.room;
+    t._busy = true;
+    fetch('/api/frames/' + encodeURIComponent(TF.frame) + '/emit', { method: 'POST',
+      body: JSON.stringify({ name: on ? 'room_on' : 'room_off', data: { area_id: t.dataset.area } }) })
+      .then(r => r.json()).then(res => {
+        if (!res.status) { window.toast('Room lights are not connected yet'); return; }
+        if (!res.ok) { window.toast(name + ': ' + (res.error || 'failed')); return; }
+        // Show it now; the next rooms update brings the real state.
+        const st = state[sec.id] = state[sec.id] || {}, list = merge(props(sec).rooms, st.rooms);
+        const r = list.find(x => x.name === name);
+        if (r) { r.on = on; r.lights = on ? 'On' : 'Off'; if (!on) r.brightness = null; st.rooms = list; sec._last = {}; draw(sec); }
+      }, () => window.toast('No answer from the server')).finally(() => { t._busy = false; });
+  });
 
   // App widgets: sandboxed iframes running the app SDK (server/internal/api/appsdk.js). They
   // reach the server through this page, so the page keeps the only event stream.
@@ -690,7 +722,7 @@
     const tabs = Array.from(document.querySelectorAll('.tab'));
     if (!tabs.length) return;
     const i = tabs.findIndex(t => t.classList.contains('on'));
-    tabs[(i + 1) % tabs.length].click();
+    show(tabs[(i + 1) % tabs.length].dataset.tab);
     dispatchEvent(new Event('tf-activity'));
   }
   TF.gesture = gesture;
