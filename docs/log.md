@@ -856,3 +856,23 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
     reads the current UTC time after the first set.
   - `panic_on_oops` set to 1 by hand on the running frame; `tfctl boot` sets it from the next boot.
 - Next system image carries `cma=128M` and a rootfs without reserved blocks; not built yet [U].
+
+## 2026-10-27 thinframe installed on the eMMC (TASKS E, #145)
+- Backup [V]: `tfctl emmc backup` over SSH, three reads equal, 15,758,000,128 bytes, sha256
+  ad866fb8c6d8220798a76c1802fea61cf4f12d533ef3411ed8266308d465fc29. Kept as zstd with boot0/boot1
+  on the Mac (`~/Documents/scratch/photo-frame-dashboard/backups/pf1007-emmc-full/`) and on Nox
+  (`~/docker/apps/thinframe/backups/office-emmc-2026-10-26/`), both re-hashed. The 2 GiB dump of
+  Oct 18 differs in 12 chunks (Android wrote after it); both are kept.
+- U-Boot build E (`image/uboot-emmc.sh`) = build L + MMC2; build L reproduces the card's U-Boot
+  (d12cb373) [V]. E: 353d56e6. QEMU test 18/18 with system 2026.10.27-6081cbf9-debug.
+- First install on the frame stopped at `mount: Resource busy`: the O_EXCL whole-disk hold blocked
+  the partition mount. The eMMC was left without boot code, so nothing could boot from it. Fixed
+  in 38c3ba5 (drop the hold before mounting, reopen for the U-Boot write) [V].
+- Second install, software 2026.10.27-38c3ba5: exit 0, then an independent read-only check [V]:
+  U-Boot at 8 KiB = the image's (353d56e6); PARTITION_CONFIG 0x00; boot0 code absent; p1 to p4
+  present (p4 13,025,280 KiB); extlinux roots PARTUUID 50463045-02/-03; uEnv slot=a tries=0;
+  boot.scr and DTB equal the image's; zImage.a = zImage.b = the card's; /data copy holds
+  thinframe.conf, the token, the iwd PSK and SSH keys; `e2fsck -n` clean on p2 and p4.
+- Card still wins (E4) [V]: reboot with the card in, `root=PARTUUID=50463037-02`; `tfctl emmc
+  status`: running from card, eMMC holds thinframe.
+- Booting with no card: [U] until the owner pulls the card.
