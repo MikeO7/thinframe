@@ -774,6 +774,24 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   logged and left out; the widget says "calendar unavailable" only when every feed fails with
   nothing cached. `webcal://` is read as `https://`.
 
+## Private calendars: CalDAV for iCloud, the secret iCal address for Google (2026-10-26)
+- The owner wants a calendar on the frame without making it public. iCloud has no private feed
+  link: Share Calendar's public link is readable by anyone who has it [D]. So the server reads
+  iCloud the way a phone does, over CalDAV (RFC 4791) with an app-specific password. Google
+  calendars have a "secret address in iCal format", which `CALENDAR_ICS_URL` already reads; its
+  CalDAV needs OAuth, which would mean a Google Cloud project and a consent screen for no gain.
+- `caldav.go`, standard library only (net/http, encoding/xml): PROPFIND the principal, its
+  calendar-home-set, the calendars in it (event calendars only), then one calendar-query REPORT
+  per calendar for a day back to 62 days ahead. Each event's calendar-data goes through
+  `ParseICS` and the same recurrence expansion as the feeds, so both paths behave alike. Same
+  10-minute cache and backoff (`refresher`). CalDAV and the feeds merge in `Calendars`.
+- Redirects are followed by hand. Go's client turns a redirected PROPFIND into a GET and drops
+  the Authorization header on another host. The password is sent only to the configured host or
+  hosts under its parent domain (iCloud answers from `pNN-caldav.icloud.com`), and to an IP
+  address only exactly; never to a host a redirect or an href names outside that.
+- The password lives only in the server's env file (mode 600 on Nox). The widget shows event
+  times and titles only, as it does for feeds.
+
 ## More from the light sensor: wave, motion, auto-brightness (2026-10-26)
 - The owner asked for "a motion sensor". The PF1007L has one analog light sensor (LRADC0, 6 bits;
   light.rs), no PIR or proximity part. tfctl now reads it 10 times a second (it was once a

@@ -20,6 +20,10 @@
 //	PROTECT_INSECURE  1 = accept the console's self-signed certificate
 //	CALENDAR_ICS_URL  enable the calendar widget from public .ics feeds (https:// or webcal://);
 //	              several URLs separated by spaces, commas or newlines are merged; repeating events expand
+//	CALDAV_USER   with CALDAV_PASSWORD: read private calendars over CalDAV (iCloud: Apple ID and an
+//	              app-specific password); merged with the feeds
+//	CALDAV_URL    CalDAV server (default https://caldav.icloud.com)
+//	CALDAV_CALENDARS calendar names to show, comma separated (default all)
 //	TZ            frames receive this time zone
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
 //	SERVICES_SSH  ssh destination whose `docker ps` feeds the source "services" (key auth only)
@@ -80,13 +84,10 @@ func main() {
 		opts.Photos = ph
 		log.Printf("photos: %s", dir)
 	}
-	if urls := api.FeedURLs(os.Getenv("CALENDAR_ICS_URL")); len(urls) > 0 {
-		loc, err := time.LoadLocation(env("TZ", "UTC"))
-		if err != nil {
-			loc = time.UTC
-		}
-		opts.Calendar = api.ICSFeeds(urls, loc)
-		log.Printf("calendar: %d ics feed(s) enabled", len(urls))
+	if cal := calendars(); len(cal) == 1 {
+		opts.Calendar = cal[0]
+	} else if len(cal) > 1 {
+		opts.Calendar = cal
 	}
 	if u, k := os.Getenv("PROTECT_URL"), os.Getenv("PROTECT_API_KEY"); u != "" && k != "" {
 		opts.Protect = protect.New(u, k, os.Getenv("PROTECT_INSECURE") == "1")
@@ -180,4 +181,29 @@ func newHTTPServer(addr string, h http.Handler) *http.Server {
 		BaseContext: func(net.Listener) context.Context { return base }}
 	hs.RegisterOnShutdown(cancel)
 	return hs
+}
+
+// calendars are the .ics feeds and the CalDAV account the env names, times in TZ.
+func calendars() api.Calendars {
+	loc, err := time.LoadLocation(env("TZ", "UTC"))
+	if err != nil {
+		loc = time.UTC
+	}
+	var cs api.Calendars
+	if urls := api.FeedURLs(os.Getenv("CALENDAR_ICS_URL")); len(urls) > 0 {
+		cs = append(cs, api.ICSFeeds(urls, loc))
+		log.Printf("calendar: %d ics feed(s) enabled", len(urls))
+	}
+	if u, p := os.Getenv("CALDAV_USER"), os.Getenv("CALDAV_PASSWORD"); u != "" && p != "" {
+		var names []string
+		for n := range strings.SplitSeq(os.Getenv("CALDAV_CALENDARS"), ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				names = append(names, n)
+			}
+		}
+		base := env("CALDAV_URL", "https://caldav.icloud.com")
+		cs = append(cs, &api.CalDAV{URL: base, User: u, Pass: p, Names: names, Loc: loc})
+		log.Printf("calendar: caldav %s enabled (%d calendar name(s))", base, len(names))
+	}
+	return cs
 }

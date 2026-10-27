@@ -32,7 +32,7 @@ The page never calls a third party. The server fetches, caches for 10 minutes, a
 |---|---|---|
 | `GET /api/data/photo/next?frame=<id>` | `PHOTOS_DIR` | `PHOTOS_DIR` |
 | `GET /api/data/weather` | open-meteo (no key) | `WEATHER_LAT`, `WEATHER_LON` |
-| `GET /api/data/calendar` | public `.ics` feeds (`https://` or `webcal://`), repeating events expanded, several feeds merged | `CALENDAR_ICS_URL`: one or more URLs separated by spaces, commas or newlines (times in `TZ`) |
+| `GET /api/data/calendar` | `.ics` feeds (`https://` or `webcal://`) and private calendars over CalDAV (iCloud), repeating events expanded, all merged | `CALENDAR_ICS_URL`: one or more URLs separated by spaces, commas or newlines; `CALDAV_USER`, `CALDAV_PASSWORD`, optional `CALDAV_CALENDARS`, `CALDAV_URL` (times in `TZ`) |
 | `GET /api/data/camera/<id>` | UniFi Protect snapshot (JPEG), only cameras a `cameras` widget shows or a doorbell that rang | `PROTECT_URL`, `PROTECT_API_KEY`, `PROTECT_INSECURE=1` for the console's self-signed certificate |
 
 **Calendars.** Repeating events (daily, weekly, monthly, yearly; "every 2nd Tuesday", "last
@@ -40,14 +40,30 @@ Friday", skipped and moved dates) show for the next 60 days, at the same local t
 A feed that fails is logged and the others still show. What is supported: docs/decisions.md
 "Calendar recurrence".
 
-An Apple (iCloud) family calendar [D]: in Calendar on the Mac, right-click the calendar in the
-sidebar, choose Share Calendar, tick Public Calendar, and copy the `webcal://` link it shows. Put
-it in `CALENDAR_ICS_URL`; for several calendars, put several links separated by spaces:
+A private iCloud calendar, without publishing it: the server signs in over CalDAV the way an
+iPhone does. Make an app-specific password at account.apple.com (Sign-In and Security,
+App-Specific Passwords; it can be revoked there at any time and cannot open the Apple ID
+settings), then put these in the server's env file, never in Git:
 
-    CALENDAR_ICS_URL="webcal://p52-caldav.icloud.com/published/2/AAA webcal://p52-caldav.icloud.com/published/2/BBB"
+    CALDAV_USER=you@icloud.com
+    CALDAV_PASSWORD=abcd-efgh-ijkl-mnop
+    CALDAV_CALENDARS=Family,Work        # optional: names as in Calendar; default all
 
-Anyone with the link can read the calendar, so treat it like a password. iCloud refreshes a
-published calendar on its own schedule, so a change can take a while to reach the frame [D].
+`CALDAV_URL` defaults to `https://caldav.icloud.com`; Fastmail, Nextcloud and other CalDAV
+servers work with their URL. Reminders lists are skipped. Changes show within 10 minutes. The
+password is sent only to the configured host and its sibling hosts (iCloud keeps each account on
+a `pNN-caldav.icloud.com` host), never where a redirect points elsewhere. [U] against the owner's
+account: tested against a fake server shaped like iCloud's answers.
+
+A Google calendar, also private: in Google Calendar on the web, Settings, the calendar under
+"Settings for my calendars", Integrate calendar, copy "Secret address in iCal format". Put it in
+`CALENDAR_ICS_URL` (several links separated by spaces). Only someone with the link can read it,
+and Reset there makes a new one; treat it like a password [D]. Google needs OAuth for CalDAV, so
+the secret address is the simpler way in.
+
+A public iCloud calendar link (Share Calendar, Public Calendar, the `webcal://` link) also works
+in `CALENDAR_ICS_URL`, but anyone with it can read the calendar, and iCloud refreshes it on its
+own schedule [D]. CalDAV is private and current.
 
 **Cameras and the doorbell.** Make an API key in Protect (Settings, Control Plane, Integrations).
 The `cameras` widget shows snapshots every `interval_s` (default 4 s); a tap opens one camera over
