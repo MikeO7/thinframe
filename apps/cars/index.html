@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main id="cars"></main>
+<div id="toast" class="toast"></div>
+<template id="tpl">
+  <section class="car">
+    <header>
+      <div class="ident">
+        <div class="model"></div>
+        <div class="name"></div>
+      </div>
+      <div class="batt">
+        <div class="pct"><span class="pv">--</span><small>%</small></div>
+        <div class="bar"><i></i></div>
+        <div class="sub"></div>
+      </div>
+    </header>
+    <div class="stage"><img alt=""><div class="sleep" hidden>Asleep · a command wakes it (about 20 s)</div></div>
+    <div class="clim">
+      <button class="cbtn" data-act="climate"><span class="ic"></span><span class="ctx"><span class="cl">Climate</span><small class="cn">Off</small></span></button>
+      <div class="temp">
+        <button class="sq" data-act="tdown">−</button>
+        <b class="tv">--°</b>
+        <button class="sq" data-act="tup">+</button>
+      </div>
+    </div>
+    <div class="grid">
+      <button data-act="lock"><span class="ic"></span><span class="t">Lock</span></button>
+      <button data-act="frunk"><span class="ic"></span><span class="t">Frunk</span></button>
+      <button data-act="trunk"><span class="ic"></span><span class="t">Trunk</span></button>
+      <button data-act="port"><span class="ic"></span><span class="t">Charge port</span></button>
+      <button data-act="charge"><span class="ic"></span><span class="t">Charging</span></button>
+      <button data-act="sentry"><span class="ic"></span><span class="t">Sentry</span></button>
+    </div>
+    <div class="row">
+      <button data-act="flash" class="small"><span class="ic"></span>Flash lights</button>
+      <div class="limit">
+        <span class="lb">Limit</span>
+        <button class="sq" data-act="ldown">−</button>
+        <b class="lv">--%</b>
+        <button class="sq" data-act="lup">+</button>
+      </div>
+    </div>
+  </section>
+</template>
+<script src="app.js"></script>
+</body>
+</html>

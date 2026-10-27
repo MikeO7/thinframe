@@ -7,18 +7,30 @@ RAM go to rendering the dashboard and nothing else.
 The frame boots from microSD, joins Wi-Fi, accepts SSH, and shows one HTML page
 full screen with working touch. The page, its data and the per-frame settings
 come from the container (`server/`). The container also carries the frame's entire
-operating system as an A/B update bundle: a weekly Buildroot rebuild on its LTS branch
-keeps every frame patched with automatic rollback. The card is written once.
+operating system as an A/B update bundle, built from the pinned Buildroot tree and installed
+with automatic rollback. The card is written once.
 The container speaks MCP, so Claude can manage frames in plain language. The display stack is a single
 process: `cog` (WPE WebKit) drawing directly on DRM/KMS. No X, no Wayland
 compositor.
 
-Status: **built and tested off the frame, not yet on it.** The server, `tfctl` and the
-Buildroot card image are done. The image boots in QEMU (`-M orangepi-pc`: provisioning, A/B
-update and rollback), and the sim container renders the dashboard. Nothing has run on the
-PF1007L panel yet. `TASKS.md` lists what is left (sections 4 to 8 and 13 need the frame),
-with a gate after each step. `docs/log.md` has the evidence for every checked gate.
-`CLAUDE.md` has the rules for whoever (or whatever) finishes it.
+Status: **running on a PF1007L every day.** One frame (the office) boots the Buildroot card,
+shows the dashboard from a `frameserver` container and takes software and system updates from
+it. The image also boots in QEMU (`-M orangepi-pc`: provisioning, A/B update and rollback), and
+the sim container renders the dashboard in CI. `TASKS.md` still has open hardware gates that
+were never written up with evidence; `docs/log.md` has the evidence for every checked one.
+`CLAUDE.md` has the rules for working on it.
+
+## What the frame shows
+
+A dashboard with a nav rail: **Home** (clock, weather, today's calendar, cars, house summary),
+**Cars** (Tesla status and controls), **House** (rooms, climate, doors, lights from Home
+Assistant), **Cameras** (UniFi Protect snapshots and doorbell), **Shows** (new episodes) and
+**System** (the server's containers). The layout is per frame and edited over MCP or `/admin`.
+After 90 s without a touch the frame goes back to Home; a dark room turns the screen off and a
+touch or a wave in front of the light sensor wakes it. Calendars come from ICS links or, for a
+private iCloud calendar, CalDAV with an app-specific password. Anything else is an app: HTML
+that Claude writes and installs with the MCP `put_app` tool (the Cars page is one; its source
+is in `apps/`). Buttons call server-side hooks (Home Assistant, Tesla), never the frame.
 
 ## Why this exists
 
@@ -75,8 +87,9 @@ Control : one outbound WebSocket from tfctl; server pushes, frame acks. No inbou
 Access  : dropbear, key only, user `frame`
 Display : cog --platform=drm, launched and supervised by tfctl
 Content : SERVER_URL/frame/FRAME_ID from frameserver; local www/ only as offline fallback
-Tooling : `tfctl`, one static Rust binary (musl, <1 MB): kiosk supervisor, update, wifi, status
-Update  : `tfctl update` = fetch main tarball (no git on the frame) + apply overlay + restart
+Tooling : `tfctl`, one static Rust binary (musl, ~1.1 MB, CI fails above 2 MB): kiosk, agent, update, wifi, light sensor, splash
+Update  : software = new `tfctl` from the server, rolled back after two fast crashes;
+          system = whole root image written to the other A/B slot, rolled back if it does not boot
 ```
 
 ## Containers
@@ -110,7 +123,7 @@ TASKS.md, and the only one CI enforces is the tfctl size.
 | CPU idle with the page up | under 5 % |
 | Processes awake on touch | cog's WebProcess only. tfctl sleeps, no cron, no logging daemon |
 
-## Quick start (once TASKS.md is done)
+## Quick start
 
 1. Server: `docker compose up -d` on any box with Docker.
 2. Card: `curl -fsSL https://raw.githubusercontent.com/MikeO7/thinframe/main/scripts/flash.sh | bash`
@@ -136,7 +149,8 @@ Change the dashboard: edit the frame's layout in `/admin` (or via MCP); widget t
 | `image/build.sh` | Builds the SD image in Docker (Buildroot external tree in `image/buildroot/`) |
 | `image/boot/` | extlinux.conf and uEnv.txt templates for the FAT partition |
 | `image/rootfs/` | Root overlay applied by Buildroot (`BR2_ROOTFS_OVERLAY`) |
-| `www/` | The page the frame shows |
+| `www/` | Offline fallback page on the card (the dashboard itself comes from the server) |
+| `apps/` | Source of the MCP apps installed on the server (`put_app`), e.g. the Cars page |
 | `tfctl/` | Rust: the only custom code on the frame |
 | `server/` | Go: the brains. Dockerfile builds a scratch image |
 | `sim/` | Simulated frame container: headless WPE + agent, or QEMU of the real image |
