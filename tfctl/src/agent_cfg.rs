@@ -87,6 +87,7 @@ impl Agent {
                 let _ = self.send(KioskCmd::Reload);
             }
             self.cfg.page_version = p;
+            self.save_page();
         }
         // Splash (TASK 15): stored now, drawn from the next start of the kiosk. Empty = keep.
         if let Some(t) = v

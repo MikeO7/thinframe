@@ -252,14 +252,14 @@ fn start_agent(cfg: &Config, tx: &mpsc::Sender<KioskCmd>, k: Option<&mut Kiosk>)
             Ok(mut a) => {
                 // Written before cog starts, so cog opens on "joining…"/"reaching…" (TASK 15).
                 if !cfg.fallback_url.is_empty() {
-                    a.start_on_status_page();
+                    let first = a.start_on_status_page();
                     match k {
                         Some(k) => {
-                            k.url = cfg.fallback_url.clone();
+                            k.url = first;
                             k.next_spawn = Instant::now();
                         }
                         None => {
-                            let _ = tx.send(KioskCmd::SetUrl(cfg.fallback_url.clone()));
+                            let _ = tx.send(KioskCmd::SetUrl(first));
                         }
                     }
                 }

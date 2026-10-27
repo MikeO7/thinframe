@@ -44,6 +44,7 @@ mod kiosk;
 mod light;
 mod logmirror;
 mod logstamp;
+mod offline;
 mod pair;
 mod png;
 mod prewarm;

@@ -285,6 +285,9 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", ct)
+	// A theme font among the assets must also load into the frame's saved dashboard, which
+	// opens from a file:// URL at boot (tfctl offline.rs).
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "max-age=3600")
 	http.ServeContent(w, r, name, st.ModTime(), f)

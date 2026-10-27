@@ -14,8 +14,11 @@
 
   function paintClock() {
     const d = new Date();
-    document.querySelectorAll('.clock-time').forEach(e => e.textContent = hm(d, e.dataset.h12 === 'true'));
-    document.querySelectorAll('.clock-date').forEach(e => e.textContent =
+    // Before 2024 the frame's clock is not set yet (a power cut at boot: no RTC battery): show no
+    // time rather than a wrong one. tickClock paints it within a minute of the clock being set.
+    const set = d.getFullYear() >= 2024;
+    document.querySelectorAll('.clock-time').forEach(e => e.textContent = set ? hm(d, e.dataset.h12 === 'true') : '--:--');
+    document.querySelectorAll('.clock-date').forEach(e => e.textContent = !set ? '' :
       d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }));
     rerenderTimed();
     return d;

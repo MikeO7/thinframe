@@ -20,6 +20,9 @@ use std::time::{Duration, Instant};
 pub const PORT: u16 = 8091;
 /// How long a configured network gets to come up before the setup page offers another.
 pub const GRACE: Duration = Duration::from_secs(45);
+/// At boot the saved dashboard (offline.rs) stays up this long without Wi-Fi; then the status
+/// page says what the frame waits for, until GRACE brings the Wi-Fi setup.
+const CACHED_HOLD: Duration = Duration::from_secs(10);
 const RESCAN: Duration = Duration::from_secs(20);
 const STEP: Duration = Duration::from_secs(2);
 /// While waiting for an address: one `ip` call each time, and the server is tried the moment
@@ -808,6 +811,12 @@ impl Agent {
 
     /// One round of waiting for Wi-Fi; returns how long to sleep.
     pub(crate) fn wifi_step(&mut self) -> Duration {
+        if self
+            .wifi_down_since
+            .is_some_and(|t| t.elapsed() >= CACHED_HOLD)
+        {
+            self.leave_cached("no Wi-Fi");
+        }
         if !self.wifi_setup {
             let due = self.status_written.is_none_or(|t| t.elapsed() >= STEP);
             if self.on_fallback && due {

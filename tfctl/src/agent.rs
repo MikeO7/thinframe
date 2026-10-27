@@ -87,6 +87,7 @@ pub fn serve(mut a: Agent) -> io::Result<()> {
                     Err(e) => eprintln!("tfctl: agent: socket: {e}"),
                 }
                 c.close();
+                a.saved_page = false;
                 // A session that held for a while earns a quick reconnect; a server that
                 // accepts and drops us right away does not.
                 if started.elapsed() >= STABLE_SESSION {
@@ -124,6 +125,10 @@ pub struct Agent {
     pub(crate) conf_path: String,
     failures: u32,
     pub(crate) on_fallback: bool,
+    /// cog shows the saved dashboard (offline.rs) while the agent waits for the server.
+    pub(crate) on_cached: bool,
+    /// The saved dashboard was refreshed during this connection to the server.
+    saved_page: bool,
     /// Latest `software_version`, `system_version` and `artifacts` from the server config.
     pub(crate) software_version: String,
     pub(crate) system_version: String,
@@ -181,6 +186,8 @@ impl Agent {
             conf_path: conf_path.to_string(),
             failures: 0,
             on_fallback: false,
+            on_cached: false,
+            saved_page: false,
             software_version: String::new(),
             system_version: String::new(),
             artifacts: Artifacts::default(),
@@ -416,22 +423,55 @@ impl Agent {
         self.last_contact = Some(Instant::now());
         if self.on_fallback {
             self.on_fallback = false;
+            self.on_cached = false;
             eprintln!("tfctl: agent: server answered, showing the dashboard");
             let _ = self.send(KioskCmd::SetUrl(self.cfg.url.clone()));
+        }
+        if !self.saved_page {
+            self.saved_page = true;
+            self.save_page();
+        }
+    }
+
+    /// Keep the dashboard as it is now for the next boot (offline.rs).
+    pub(crate) fn save_page(&self) {
+        crate::offline::save_in_background(
+            self.cfg.url.clone(),
+            self.cfg.server_url.clone(),
+            self.cfg.token.clone(),
+        );
+    }
+
+    /// From the saved dashboard to the status page, which says what the frame waits for.
+    pub(crate) fn leave_cached(&mut self, why: &str) {
+        if self.on_cached && !self.cfg.fallback_url.is_empty() {
+            self.on_cached = false;
+            eprintln!("tfctl: agent: {why}, showing the status page");
+            self.write_status_page();
+            let _ = self.send(KioskCmd::SetUrl(self.cfg.fallback_url.clone()));
         }
     }
 
     /// Boot (TASK 15): the kiosk opens on the local status page, not on a dashboard that cannot
     /// load yet; the first answer from the server switches to the dashboard (`server_ok`).
-    pub(crate) fn start_on_status_page(&mut self) {
-        if !self.cfg.fallback_url.is_empty() {
-            self.on_fallback = true;
-            self.write_status_page();
+    /// The first page for cog: the saved dashboard when there is one, else the status page.
+    pub(crate) fn start_on_status_page(&mut self) -> String {
+        self.on_fallback = true;
+        self.write_status_page();
+        match crate::offline::url() {
+            Some(u) if !self.cfg.server_url.is_empty() => {
+                self.on_cached = true;
+                u
+            }
+            _ => self.cfg.fallback_url.clone(),
         }
     }
 
     pub(crate) fn server_failed(&mut self) {
         self.failures += 1;
+        if self.on_fallback && self.failures >= FALLBACK_AFTER {
+            self.leave_cached("no answer from the server");
+        }
         if self.on_fallback {
             self.write_status_page();
         } else if self.failures >= FALLBACK_AFTER && !self.cfg.fallback_url.is_empty() {
