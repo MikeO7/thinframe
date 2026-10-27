@@ -334,7 +334,8 @@ daemon on the frame. Without a server the clock is wrong and the fallback page s
 Config gains `brightness` (0 to 100) and `schedule`: `{"off":"23:00","on":"06:30","days":"mon-sun"}`
 evaluated on the frame in local time, so it works through a server outage. Off means backlight 0
 via `/sys/class/backlight/*/brightness` and cog paused (SIGSTOP) so the CPU idles; on restores
-both and reloads the page. The server can override with the `screen` action (`on|off`) and
+the backlight and resumes cog (SIGCONT) on the page it showed; the page reconnects its stream
+by itself (docs/decisions.md "Speed"). The server can override with the `screen` action (`on|off`) and
 a frame reports `screen_state` in heartbeats. Touch during off turns the screen on for 60 s.
 
 The light sensor (docs/hardware.md) also turns the screen off: median of 5 one-second readings
@@ -935,3 +936,39 @@ never a half system.
 | Rescue card lost | Flash a new one on the Mac with `scripts/flash.sh` |
 | No card works | FEL over USB-C from the Mac (`sunxi-fel`, ormarch docs) |
 | Back to Android | From the card: the image to `/dev/mmcblk2`, `boot0.bin` to `mmcblk2boot0`, PARTITION_CONFIG 0x48 [U: not tested, it needs a second frame] |
+
+## Speed (2026-10-27)
+
+Measured on the frame from the SD card [V]: kernel init 0.7 s, then the kiosk waited on `iwctl`
+(5 s timeout) before the splash, cog started only after the first server connect, every wake
+restarted cog (7 s to a loaded page), and a page version change restarted it too. A fresh cog
+paints its first frame in about 1.3 s; a warm one in about 0.17 s. So:
+
+- **Nothing blocks the splash.** The status page lists IPs from `/proc/net/fib_trie`, no `iwctl`.
+  A render cache miss never blocks: an animated splash shows its background at once and stores
+  its first frame; the status backdrop renders on a niced background thread. The cache key is a
+  hash of the drawing sources (`build.rs`), so a software update no longer invalidates it.
+- **cog starts at boot**, on the last dashboard the frame saved (`/data/thinframe/dashboard.html`
+  with a `<base>` to the server, written after each connect and page version change), else on
+  the status page. The live page then replaces it with `cogctl open`, in place. With no Wi-Fi
+  for 10 s or no server after 3 tries the cached page gives way to the status page.
+- **In place, not restarts.** Page version changes `cogctl reload`; wake sends SIGCONT and the
+  page's resume detector (a gap over 10 s in a 1 s timer) repaints the clock and reconnects.
+  Restarts asked for while the screen is off are dropped.
+- **Wi-Fi early.** `tfctl boot fsck` (the first sysinit line) starts `modprobe aic8800_fdrv`
+  in the background, so the firmware loads while udev settles. No rejoin kick while associated
+  (DHCP is running) for 30 s.
+- **I/O.** BFQ on every MMC queue; the cache prewarm runs at the lowest best-effort I/O
+  priority. Dropped caches, cog restart: BFQ 1.8 s to paint and 4.3 s loaded, mq-deadline 2.7 s
+  and 4.6 s [V].
+- **CPU.** `performance` governor while the screen is on, `schedutil` while off.
+- **WebKit keeps its HTTP cache** in `/data/thinframe/web-cache` (`XDG_CACHE_HOME`); fonts and
+  assets send `Access-Control-Allow-Origin: *` so the saved page can use them.
+- **Measured from the page.** It beacons `load` timings (response, DOM, first paint, load), kept
+  as the frame's `page_load`.
+
+Tab switches were already fast (p50 88 ms, max 304 ms on a first visit) [V]. Boot from the card
+is disk bound (IO pressure about 4 s of the first 10); the eMMC reads 4x faster sequentially
+[V], so the next boot measurements are from the eMMC. Not done, needs a system image: a fixed
+Wi-Fi MAC (the aic8800 picks a random one each boot, so DHCP never reuses a lease) and a
+persistent dhcpcd lease directory.
