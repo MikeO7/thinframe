@@ -819,3 +819,25 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   the 32 GB card. Backups on the Mac: only a 2 GiB partial dump of this frame's eMMC
   (`~/Documents/scratch/photo-frame-dashboard/backups/pf1007-emmc`, 34 chunks); the full verified
   image in ormarch E042 is upstream's unit. TASKS section E stays unstarted until the owner's go.
+
+## 2026-10-26 Evening: QA pass 2, tearing, tab speed, GPU hang
+- QA pass 2 (#139) on a copy of the live data with hooks pointed at a local sink [V]: every car
+  button reached the `car` hook; rail, House sub-tabs and wave gesture switched pages; room cards
+  emit `room_on`/`room_off`. Merged as 493f1de, server deployed to Nox 21:04 local.
+- Cars app v4 installed (`put_app cars`, Tesla-style icons); source now in `apps/cars/` (#141).
+  Work tab removed and `idle_s` 90 on the office layout (server data, not Git).
+- Tab switch timing, `tfctl bench 6` on four rail points twice, page-reported tap -> painted [V]:
+  hybrid painting (WPE default) 300 to 800 ms; `WEBKIT_SKIA_CPU_PAINTING_THREADS=0` p50 314 ms,
+  max 440 ms (bench: tap -> paint p50 281 ms, max 350 ms). Without the Aurora background layers
+  p50 280 ms (f1 paint 238 -> 175 ms): not worth the look.
+- Memory pressure: at `--web-mem-limit=256` the log had "Memory pressure relief" 41 times between
+  77000 and 78000 s uptime; at 512, none between 79107 and 79353 s [V].
+- GPU hang [V dmesg]: at 78129.6 s, while tfctl restarted cog, `ppmmu0 page fault at 0xe70a100`,
+  then `pp0 job timeout` / `pp0 bus stop timeout` every 10 s (65 in total) until the cog started at
+  78793 s; screenshots were black and first paint took 95 s, while the page reported alive. A new
+  cog cleared it; no timeouts since. tfctl 2026.10.26-gpu2 (#140) restarts the kiosk on two lima
+  job timeouts within 30 s. The first GPU-only test build (gpu1) was blamed for the black screen
+  and rolled back; it was this hang. gpu2 = GPU-only painting + 512 MiB + the guard: on Nox and the
+  frame since 79107 s, dashboard on screen (`tfctl screenshot`), cog env shows
+  `WEBKIT_SKIA_CPU_PAINTING_THREADS=0`.
+- Whether the touch tearing is gone is [U] until the owner has used the frame.
