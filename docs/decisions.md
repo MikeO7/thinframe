@@ -359,7 +359,8 @@ then the dashboard takes over. Console output is routed away from the panel enti
 Running from SD is the only configuration where recovery is "remove the card". It stays the
 default until A/B updates have proven themselves. Installing to the eMMC (TASKS section E) removes
 the card and the vendor software entirely; recovery then needs a rescue card or FEL over USB, and
-a verified eMMC backup is a hard prerequisite so the frame can be returned to stock.
+a verified eMMC backup is a hard prerequisite so the frame can be returned to stock. Done on
+2026-10-26: "Running from the eMMC" below.
 
 ## One-press pairing
 Typing a server token into the flash script was the hardest step of onboarding. Now the token is
@@ -874,21 +875,63 @@ Every layer now has a way back that needs no computer where one is possible.
 | /data corrupt | `e2fsck -p`, then `-y`; still not mounting and either no ext4 superblock or errors left uncorrected: formatted fresh with the shipped config, frame starts like new. Never on a read error, never on another disk |
 | Root slot full | Updates are atomic renames; RESBLKS=0 frees the reserved 5 % in the next image (the 190 MB image gate stays) |
 | Display memory | CMA 64 → 128 MB (`cma=128M`) in the next image: 4 screen buffers of 4 MB plus WebKit's left 6 MB free and `eglSwapBuffers` failed with EGL_BAD_ALLOC during page changes [V 2026-10-26] |
-| Everything above fails | Pull the card (today) / insert a rescue card (eMMC, see below); USB-C link 192.168.7.2 with SSH |
+| Everything above fails | Pull the card (card system) / insert the rescue card (eMMC system, see below); USB-C link 192.168.7.2 with SSH |
 
 Not done yet: a recovery screen drawn by tfctl itself when cog cannot start at all (today the
 splash stays up), reading the power key, and a serial login on the USB console.
 
-### Before the eMMC can be the only system (TASKS section E)
-Audit of the running frame, 2026-10-26 [V]: Linux does not see the eMMC (`mmc@1c11000` is
-disabled in every DTB); U-Boot "L" is built without an eMMC slot (`MMC_SUNXI_SLOT_EXTRA=-1`);
-`boot.cmd` loads from `mmc 0:1`; extlinux roots by the card's MBR signature (`50463037-0N`);
-`slot::find_disk` skips eMMC on purpose; the touch firmware is on /boot of the card and in the
-image. In order, each step reversible until E2:
-1. Test DTB with the eMMC controller on, booted from the card: read size and the Android
-   partition table from /sys only.
-2. E1 full eMMC backup to the server (we have only a 2 GiB partial dump) with sha256.
-3. E4 prove a rescue card wins over the eMMC at power-on (Allwinner BROM order is SD first [D]).
-4. U-Boot with the eMMC slot, `boot.cmd` taking the boot device as a variable, the eMMC's own
-   disk signature, `find_disk` accepting our signature on eMMC, touch firmware copied to /data.
-5. E2 install, owner's explicit go only: it erases Android. E3 FEL/USB-disk recovery written up.
+### Running from the eMMC (TASKS section E, 2026-10-26)
+Owner: "Prepare the system to become the main OS and no SD. Once you are comfortable that it's
+all solid and recoverable, do it." The card the frame is installed from stays the rescue card.
+
+**Why a card always wins.** The A33 boot ROM tries the card before the eMMC [D, ormarch E017];
+this frame booted its card for weeks while Android's boot0 sat on the eMMC [V]. So with a
+thinframe card inserted the eMMC is never started, whatever it holds.
+
+**The eMMC** [V 2026-10-26, `/sys/block/mmcblk2`, debugfs `ios` and `ext_csd`]: "016G92",
+manfid 0x11, 10/2014, 30,777,344 sectors (15,758,000,128 bytes), 8-bit DDR52 under Linux with no
+errors over two full reads. The vendor set EXT_CSD PARTITION_CONFIG 0x48 (boot from boot0,
+BOOT_ACK on) and BOOT_BUS_CONDITIONS 0x01, and boot0 holds a copy of Android's boot0; boot1 is
+empty. U-Boot's sunxi SPL says the boot ROM tries such a boot partition before the user area.
+
+**Backup** [V]: `sha256sum /dev/mmcblk2` on the frame (read 1), then `zstd -1` streamed to the
+Mac and hashed after decompression (read 2): equal (`ad866fb8c6d8…`), 549 MB compressed, with
+boot0/boot1 dumps. Copies on the Mac (`~/Documents/scratch/photo-frame-dashboard/backups/
+pf1007-emmc-full/`) and on Nox (`~/docker/apps/thinframe/backups/office-emmc-2026-10-26/`),
+mode 600, outside Git (the image can hold account data). The 2 GiB dump of Oct 18 differs in
+12 of 32 chunks, from Android's boot partition on: Android changed after it. `tfctl emmc
+backup` (raw to stdout, hash to stderr and `/data/thinframe/emmc-backup`) does it in one pass.
+
+**Which disk is which.** The eMMC gets the card's layout with its own MBR signature `50463045`
+("PF0E"), so its PARTUUIDs never clash with a card's. `slot::find_disk` follows the signature of
+the running root: booted from the card it never returns the eMMC (as before, sysfs
+`device/type` MMC is skipped); booted from the eMMC it returns only the eMMC. Every writer
+(`tfctl boot`, update, sysupdate) goes through it. Kernel aliases keep the card at mmcblk0 and
+the eMMC at mmcblk2.
+
+**Boot chain.** U-Boot build E (`image/uboot-emmc.sh`) is ormarch's build L from the same tree
+and container (build L reproduces the card's bootloader byte for byte, `d12cb373…` [V]) with
+`MMC_SUNXI_SLOT_EXTRA=2`, the eMMC node on in its DTS, and a boot command that loads `boot.scr`
+from `mmc ${mmc_bootdev}:1` (`board/sunxi/board.c`: 0 = card, 1 = eMMC; its DT aliases `mmc1`
+to the eMMC). The script stops if the config differs from build L in anything else (the
+fastboot default device follows the slot; fastboot never runs). One `boot.scr` serves both:
+every `mmc 0:1` reads `${pf_dev}`, which is `mmc_bootdev` or 0. The kernel DTBs `full` and
+`pmic` have the eMMC on; `min` stays card-only.
+
+**Install** (`tfctl emmc install --backup-sha256 HEX`): only from the card, the eMMC opened
+`O_EXCL`, the running slot confirmed, HEX equal to the recorded backup. Order: clear the vendor
+eGON at 8 KiB; PARTITION_CONFIG to 0 (read back) and boot0's header cleared, so the boot ROM
+reads the user area as on any A33 with a fresh eMMC; the MBR; p1 to p3 copied from the card and
+read back by hash with the page cache dropped; on p1 the extlinux roots move to `50463045`,
+`boot.scr` and the DTBs come from the image, uEnv names the running slot with tries 0;
+`mkfs.ext4` p4 and a copy of /data; U-Boot last, read back. Until that last write the eMMC has
+no boot code, so a cut or an error midway leaves a frame that starts from the card (or FEL),
+never a half system.
+
+| Fails | Way back |
+|---|---|
+| eMMC system does not start | Insert the rescue card and power on: the card wins |
+| eMMC system broken later | Rescue card, then `tfctl emmc install` again (no backup needed over thinframe) |
+| Rescue card lost | Flash a new one on the Mac with `scripts/flash.sh` |
+| No card works | FEL over USB-C from the Mac (`sunxi-fel`, ormarch docs) |
+| Back to Android | From the card: the image to `/dev/mmcblk2`, `boot0.bin` to `mmcblk2boot0`, PARTITION_CONFIG 0x48 [U: not tested, it needs a second frame] |

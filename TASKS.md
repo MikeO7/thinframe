@@ -296,15 +296,23 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: touch→response under 50 ms, 60 fps in a 10 s swipe test, idle CPU under 5 %, logged in docs/log.md.
 
 ## E. Install to internal storage (later; needs an explicit go from the owner)
-- [ ] E1 `tfctl backup-emmc`: stream the whole eMMC over the control socket or USB to the server
+- [x] E1 `tfctl backup-emmc`: stream the whole eMMC over the control socket or USB to the server
       (`/data/backups/<frame>-emmc.img.zst`), verify sha256. Refuses to continue without it.
-- [ ] E2 `tfctl install-emmc`: write U-Boot to the eMMC boot offset, create the same 4-partition
+      (Done as `tfctl emmc backup` (stdout, over SSH) + `tfctl emmc install --backup-sha256`: the
+      install refuses unless the hash matches the record. 2026-10-26: three reads equal, ad866fb8...,
+      kept on the Mac and on Nox; decisions.md "Running from the eMMC".)
+- [x] E2 `tfctl install-emmc`: write U-Boot to the eMMC boot offset, create the same 4-partition
       layout, copy the active slot and data partition, update `extlinux`/`uEnv` for mmcblk0 vs mmcblk1
       naming, verify, print "remove the card and reboot".
+      (`tfctl emmc install`, tfctl/src/emmc.rs; U-Boot build E from image/uboot-emmc.sh. Roots are
+      found by MBR signature 50463045, not by device name. 2026-10-27 on the frame: exit 0, then an
+      independent check of U-Boot, PARTITION_CONFIG, partitions, boot files and fsck.)
 - [ ] E3 FEL recovery doc: sunxi-tools on the Mac, `sunxi-fel` + the SD image to boot without a card,
       and how to restore the backup to return to Android.
-- [ ] E4 Boot order check: with a card inserted the card still wins (boot ROM order), so a rescue card
+      (Recovery table in decisions.md "Running from the eMMC"; FEL and the Android restore are [U].)
+- [x] E4 Boot order check: with a card inserted the card still wins (boot ROM order), so a rescue card
       always works.
+      (2026-10-27: eMMC installed, card in, reboot: root=PARTUUID=50463037-02, the card.)
 - Gate: frame boots thinframe with no card; rescue card boots; backup restores Android on a test unit.
 
 ## 9. Polish (optional, after everything above)

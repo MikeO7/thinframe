@@ -27,6 +27,35 @@ rm -f "$T"/etc/init.d/S01syslogd "$T"/etc/init.d/S02klogd "$T"/etc/init.d/S*seed
 # iwd, dhcpcd, dropbear run under init's respawn (inittab), not Buildroot's start-once scripts.
 rm -f "$T"/etc/init.d/S40iwd "$T"/etc/init.d/S41dhcpcd "$T"/etc/init.d/S50dropbear
 
+# Boot files for an eMMC install (tfctl emmc install, TASKS E) and for PFBOOT (post-image.sh):
+# ormarch's boot.cmd + boot.cmd.patch, with every "mmc 0:1" reading the device U-Boot booted
+# from (board/sunxi/board.c mmc_bootdev: 0 = card, build L; 1 = eMMC, build E); U-Boot build E
+# (image/uboot-emmc.sh); the DTBs, which have the eMMC on.
+SH="$T/usr/share/thinframe/boot"
+rm -rf "$SH" && install -d "$SH"
+cp "$WORK/inputs/boot.cmd" "$BINARIES_DIR/boot.cmd"
+patch -s "$BINARIES_DIR/boot.cmd" < "$(dirname "$0")/boot.cmd.patch"
+# shellcheck disable=SC2016 # ${pf_dev} and ${mmc_bootdev} are U-Boot's, not the shell's
+sed -i -e 's/mmc 0:1/mmc ${pf_dev}:1/g' \
+	-e 's/^# This script writes only to .*/# This script writes only to partition 1 of the device it booted from (pf_dev)./' \
+	-e '/^setenv pf_script L1$/a\
+setenv pf_dev ${mmc_bootdev}\
+if test -z "${pf_dev}"; then setenv pf_dev 0; fi' "$BINARIES_DIR/boot.cmd"
+if grep -q 'mmc 0:1' "$BINARIES_DIR/boot.cmd" || ! grep -q '^setenv pf_dev' "$BINARIES_DIR/boot.cmd"; then
+	echo "post-build: boot.cmd device rewrite failed" >&2; exit 1
+fi
+"$HOST_DIR/bin/mkimage" -C none -A arm -T script -n "thinframe A/B, card or eMMC" \
+	-d "$BINARIES_DIR/boot.cmd" "$BINARIES_DIR/boot.scr" >/dev/null
+install -m 0644 "$BINARIES_DIR/boot.scr" "$SH/boot.scr"
+if [ "${VARIANT:-}" != qemu ]; then
+	install -m 0644 "$WORK/inputs/u-boot-pf1007l-E.bin" "$SH/u-boot-emmc.bin"
+	for d in full pmic; do
+		f="$BINARIES_DIR/sun8i-a33-pf1007l-$d.dtb"
+		[ -f "$f" ] || { echo "post-build: $f missing" >&2; exit 1; }
+		install -m 0644 "$f" "$SH/"
+	done
+fi
+
 # Offline fallback page (the dashboard itself comes from frameserver).
 rm -rf "$T/var/lib/thinframe/www" && cp -a "$REPO/www" "$T/var/lib/thinframe/www"
 

@@ -59,6 +59,16 @@ docker run --rm -i \
 				echo "buildroot: $p built without $b, rebuilding it"; make -s -C "$BR" O=$O $p-dirclean
 			fi
 		done
+		# Nor the kernel when only its device trees changed (image/work/inputs/dts, CUSTOM_DTS_DIR):
+		# the eMMC-on DTBs came out stale, eMMC still off (2026-10-26).
+		k=$O/.thinframe-dts.sha
+		h=$(find /src/image/work/inputs/dts -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
+		if [ "$(cat "$k" 2>/dev/null)" != "$h" ]; then
+			if ls -d $O/build/linux-[0-9]* >/dev/null 2>&1; then
+				echo "buildroot: device trees changed, rebuilding linux"; make -s -C "$BR" O=$O linux-clean-for-rebuild
+			fi
+			echo "$h" > "$k"
+		fi
 		# WebKit: ~4.5 GB per compile job. GeneratedSerializers.cpp alone OOM-killed cc1plus at 5 jobs
 		# in 16 GB (8 jobs failed earlier too); GitHub runners have 16 GB as well.
 		if [ -z "$JOBS" ]; then

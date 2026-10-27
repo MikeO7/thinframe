@@ -5,8 +5,8 @@
 //! kernel, and the start that takes it to 0 boots the other slot: tries=3 gives the new slot
 //! two starts (tries left 2, then 1). The agent's first connect on the new slot writes `tries=0`.
 //!
-//! Safety: `dd` only ever targets a partition of the disk whose MBR carries our signature
-//! (`slot::find_disk`), never the eMMC. `uEnv.txt` is rewritten only after the rootfs and
+//! Safety: `dd` only ever targets a partition of the disk the system booted from, found by the
+//! MBR signature of its root (`slot::find_disk`): from the card, never the eMMC. `uEnv.txt` is rewritten only after the rootfs and
 //! kernel are in place, so a failed download or write leaves the running slot untouched.
 use crate::config::Config;
 use crate::slot::{self, Slot, UEnv};
@@ -97,10 +97,11 @@ pub fn write_rootfs(src: &Path, dev: &Path, fsync: bool) -> io::Result<()> {
     Ok(())
 }
 
-/// The card's whole-disk device, found by our MBR signature. Never the eMMC.
+/// The whole-disk device this system booted from, found by its MBR signature (`slot::find_disk`):
+/// booted from the card, never the eMMC; booted from the eMMC, never a card.
 fn card(p: &Paths) -> io::Result<PathBuf> {
     let disks: Vec<&Path> = p.disks.iter().map(PathBuf::as_path).collect();
-    slot::find_disk(&disks).ok_or_else(|| {
+    slot::find_disk_for(&disks, &p.cmdline).ok_or_else(|| {
         io::Error::other("no disk with the thinframe MBR signature; refusing to write")
     })
 }
