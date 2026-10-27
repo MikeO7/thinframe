@@ -148,6 +148,11 @@ pub fn run(cfg: &Config) -> io::Result<()> {
     }
     let (tx, rx) = mpsc::channel();
     let mut k = Kiosk::new(cfg);
+    // Light the panel first: everything below can wait behind the picture. The prewarm starts
+    // just before, since cog starts within a second (see BUS_WAIT) and wants its files.
+    crate::prewarm::start();
+    let _ = screen::set_brightness(k.backlight);
+    k.show_splash("warming up");
     let st: crate::settings::Shared = Default::default();
     match crate::settings::start(
         st.clone(),
@@ -566,6 +571,11 @@ impl Kiosk {
             KioskCmd::Restart | KioskCmd::Reload if self.stopped => {
                 eprintln!("tfctl: kiosk: screen off, page paused, not restarting");
             }
+            // A reload in the running cog keeps WebKit warm: first paint ~0.2 s instead of the
+            // 1.3 s of a new cog [V 2026-10-27].
+            KioskCmd::Reload if self.cogctl(&["reload"]) => {
+                eprintln!("tfctl: kiosk: reloaded in place");
+            }
             KioskCmd::Restart | KioskCmd::Reload => self.restart(),
             KioskCmd::SetUrl(u) if self.back_to.is_some() => self.back_to = Some(u),
             KioskCmd::SetUrl(u) => self.go(u),
@@ -670,6 +680,11 @@ impl Kiosk {
     }
 
     fn open_in_place(&mut self, u: &str) -> bool {
+        self.cogctl(&["open", u])
+    }
+
+    /// `cogctl ARGS` against the running cog on our bus; false when it cannot be done there.
+    fn cogctl(&mut self, args: &[&str]) -> bool {
         if self.child.is_none() || self.stopped || self.bus.is_none() {
             return false;
         }
@@ -682,7 +697,7 @@ impl Kiosk {
             return false;
         }
         let child = Command::new("cogctl")
-            .args(["open", u])
+            .args(args)
             .env("DBUS_SESSION_BUS_ADDRESS", BUS)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -900,11 +915,6 @@ impl Kiosk {
     }
 
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
-        let _ = screen::set_brightness(self.backlight);
-        self.show_splash("warming up");
-        // After the splash: its picture is a 4 MB read, which waited behind the prewarm's
-        // 464 MB on the card [V 2026-10-27: 0.9 s].
-        crate::prewarm::start();
         self.open_inputs();
         self.start_bus();
         loop {

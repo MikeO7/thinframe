@@ -40,21 +40,34 @@ pub fn get_or_make(
     len: Option<usize>,
     make: impl FnOnce() -> Vec<u8>,
 ) -> Vec<u8> {
-    let path = dir.join(format!("{key}.bin"));
-    if let Ok(b) = fs::read(&path) {
-        if !b.is_empty() && len.is_none_or(|n| b.len() == n) {
-            // Fresh again, so pruning keeps what boot uses.
-            if let Ok(f) = fs::File::options().append(true).open(&path) {
-                let _ = f.set_modified(SystemTime::now());
-            }
-            return b;
-        }
+    if let Some(b) = get(dir, key, len) {
+        return b;
     }
     let b = make();
-    if let Err(e) = store(dir, &path, &b) {
+    put(dir, key, &b);
+    b
+}
+
+/// The bytes stored under `key` when there are `len` of them (None: any length).
+pub fn get(dir: &Path, key: &str, len: Option<usize>) -> Option<Vec<u8>> {
+    let path = dir.join(format!("{key}.bin"));
+    let b = fs::read(&path).ok()?;
+    if b.is_empty() || len.is_some_and(|n| b.len() != n) {
+        return None;
+    }
+    // Fresh again, so pruning keeps what boot uses.
+    if let Ok(f) = fs::File::options().append(true).open(&path) {
+        let _ = f.set_modified(SystemTime::now());
+    }
+    Some(b)
+}
+
+/// Keep `b` under `key` for next time; a failure is logged and otherwise ignored.
+pub fn put(dir: &Path, key: &str, b: &[u8]) {
+    let path = dir.join(format!("{key}.bin"));
+    if let Err(e) = store(dir, &path, b) {
         eprintln!("tfctl: render cache: {}: {e}", path.display());
     }
-    b
 }
 
 fn store(dir: &Path, path: &Path, b: &[u8]) -> io::Result<()> {

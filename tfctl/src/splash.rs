@@ -352,15 +352,15 @@ pub fn render(look: &Look, w: usize, h: usize) -> Canvas {
     c
 }
 
-/// `render`, from the render cache when this exact picture was drawn on an earlier boot.
-fn render_cached(look: &Look, w: usize, h: usize) -> Canvas {
+/// The render cache key of the splash `look` on a `w` x `h` panel.
+fn splash_key(look: &Look, w: usize, h: usize) -> String {
     let (wh, bg, rot) = (
         format!("{w}x{h}"),
         look.bg.to_string(),
         look.rotation.to_string(),
     );
     let ip = look.ip.as_deref().unwrap_or("");
-    let key = rendercache::key(
+    rendercache::key(
         &[
             "splash",
             look.style,
@@ -372,7 +372,12 @@ fn render_cached(look: &Look, w: usize, h: usize) -> Canvas {
             &wh,
         ],
         &logo_path(),
-    );
+    )
+}
+
+/// `render`, from the render cache when this exact picture was drawn on an earlier boot.
+fn render_cached(look: &Look, w: usize, h: usize) -> Canvas {
+    let key = splash_key(look, w, h);
     let b = rendercache::get_or_make(Path::new(rendercache::DIR), &key, Some(w * h * 4), || {
         rendercache::to_bytes(&render(look, w, h).px)
     });
@@ -396,39 +401,74 @@ pub fn write_page_backdrop(cfg: &Config, path: &str) -> io::Result<Option<String
     backdrop(cfg, path, false)
 }
 
+/// One backdrop drawn in the background at a time (see `backdrop`).
+static BACKDROP_BUSY: AtomicBool = AtomicBool::new(false);
+
+/// The backdrop file at `path`, from the render cache. A miss (first boot, a new look) draws for
+/// ~4 s; that happens in the background and this returns None, so the status page goes up at once
+/// without the picture and carries it from its next write. Drawn in line, the miss held the
+/// splash and the agent's first connect back 4.5 s [V 2026-10-27].
 fn backdrop(cfg: &Config, path: &str, titled: bool) -> io::Result<Option<String>> {
     if cfg.splash_style == "plain" {
         return Ok(None);
     }
-    if !Path::new(path).exists() {
-        let (lw, lh) = Canvas::new(800, 1280, 0).logical(cfg.rotation);
-        let title = if titled || cfg.splash_style != "dawn" {
-            cfg.splash_text.as_str()
-        } else {
-            ""
-        };
-        let rot = cfg.rotation.to_string();
-        let key = rendercache::key(
-            &["backdrop", &cfg.splash_style, title, &cfg.splash_text, &rot],
-            &logo_path(),
+    if Path::new(path).exists() {
+        return Ok(Some(path.to_string()));
+    }
+    let title = if titled || cfg.splash_style != "dawn" {
+        cfg.splash_text.clone()
+    } else {
+        String::new()
+    };
+    let rot = cfg.rotation.to_string();
+    let key = rendercache::key(
+        &[
+            "backdrop",
+            &cfg.splash_style,
+            &title,
+            &cfg.splash_text,
+            &rot,
+        ],
+        &logo_path(),
+    );
+    if let Some(png) = rendercache::get(Path::new(rendercache::DIR), &key, None) {
+        write_atomic(path, &png)?;
+        return Ok(Some(path.to_string()));
+    }
+    if !BACKDROP_BUSY.swap(true, Ordering::SeqCst) {
+        let (style, text, rotation, path) = (
+            cfg.splash_style.clone(),
+            cfg.splash_text.clone(),
+            cfg.rotation,
+            path.to_string(),
         );
-        let png = rendercache::get_or_make(Path::new(rendercache::DIR), &key, None, || {
-            let px = if let Some(scene) = Scene::new(&cfg.splash_style, lw, lh, title, "", None) {
+        thread::spawn(move || {
+            sys::nice_this_thread(10);
+            let (lw, lh) = Canvas::new(800, 1280, 0).logical(rotation);
+            let px = if let Some(scene) = Scene::new(&style, lw, lh, &title, "", None) {
                 let mut l = vec![0; lw * lh];
                 scene.frame(0, &mut l);
                 l
             } else {
                 let mut l = Canvas::new(lw, lh, 0);
-                retro::draw(&mut l, &cfg.splash_text, "", load_logo().as_ref());
+                retro::draw(&mut l, &text, "", load_logo().as_ref());
                 l.px
             };
-            png::encode_rgb(lw, lh, &px)
+            let png = png::encode_rgb(lw, lh, &px);
+            rendercache::put(Path::new(rendercache::DIR), &key, &png);
+            if let Err(e) = write_atomic(&path, &png) {
+                eprintln!("tfctl: splash: backdrop {path}: {e}");
+            }
+            BACKDROP_BUSY.store(false, Ordering::SeqCst);
         });
-        let tmp = format!("{path}.tmp");
-        std::fs::write(&tmp, png)?;
-        std::fs::rename(&tmp, path)?;
     }
-    Ok(Some(path.to_string()))
+    Ok(None)
+}
+
+fn write_atomic(path: &str, b: &[u8]) -> io::Result<()> {
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, b)?;
+    std::fs::rename(&tmp, path)
 }
 
 /// Time between seventies frames; the A33 draws one in well under this budget [U].
@@ -437,7 +477,23 @@ const FRAME: Duration = Duration::from_millis(100);
 pub fn show(look: &Look) -> io::Result<Splash> {
     let mut d = open_display()?;
     let (w, h) = (d.mode_size.width as usize, d.mode_size.height as usize);
-    let c = render_cached(look, w, h);
+    let animated = matches!(look.style, "dawn" | "seventies");
+    let key = splash_key(look, w, h);
+    // A miss draws for ~4 s (first boot, a new look). Animated, the background goes up at once
+    // and the animation's first frame brings the picture and fills the cache; a still splash is
+    // drawn here.
+    let (c, fill) = match rendercache::get(Path::new(rendercache::DIR), &key, Some(w * h * 4)) {
+        Some(b) => (
+            Canvas {
+                w,
+                h,
+                px: rendercache::from_bytes(&b),
+            },
+            None,
+        ),
+        None if animated => (Canvas::new(w, h, look.bg), Some(key)),
+        None => (render_cached(look, w, h), None),
+    };
     d.write(&c.px);
     d.commit()?;
     eprintln!(
@@ -449,7 +505,7 @@ pub fn show(look: &Look) -> io::Result<Splash> {
         Arc::new(AtomicBool::new(false)),
         Arc::new(AtomicBool::new(false)),
     );
-    let anim = matches!(look.style, "dawn" | "seventies").then(|| {
+    let anim = animated.then(|| {
         let (disp, handed, stop) = (display.clone(), handed_over.clone(), stop.clone());
         let (style, title, status, ip, rot) = (
             look.style.to_string(),
@@ -469,6 +525,7 @@ pub fn show(look: &Look) -> io::Result<Splash> {
                 rot,
                 (&style, &title, &status),
                 ip,
+                fill,
             )
         })
     });
@@ -491,6 +548,7 @@ fn animate(
     rot: u8,
     (style, title, status): (&str, &str, &str),
     mut ip: Option<String>,
+    mut fill: Option<String>,
 ) {
     let mut c = Canvas::new(w, h, 0);
     let (lw, lh) = c.logical(rot);
@@ -528,6 +586,14 @@ fn animate(
                 break;
             }
             d.write(&c.px);
+        }
+        // The first frame is the picture the cache missed (`show`): keep it for the next start.
+        if let Some(key) = fill.take() {
+            rendercache::put(
+                Path::new(rendercache::DIR),
+                &key,
+                &rendercache::to_bytes(&c.px),
+            );
         }
         busy += t0.elapsed();
         frames += 1;
