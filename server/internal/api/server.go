@@ -65,6 +65,8 @@ type Server struct {
 	// src: pushed data sources (sources.go); assets: DATA_DIR/assets.
 	src    *sourceSet
 	assets string
+	// img: remote pictures from sources, shrunk and cached (images.go).
+	img *imgCache
 	// data: DATA_DIR. apps: MCP-written web apps (apps.go); events: their emits and rate
 	// limits; hooks and polls: outside APIs (hooks.go); shots: screenshot waiters (shots.go).
 	data     string
@@ -95,6 +97,7 @@ func New(st *store.Store, opts Options) *Server {
 		s.opts.Reports = filepath.Join(data, "reports")
 	}
 	s.src, s.assets = loadSources(filepath.Join(data, "sources")), filepath.Join(data, "assets")
+	s.img = newImgCache()
 	s.data, s.apps = data, apps.Open(filepath.Join(data, "apps"))
 	s.hooks, s.polls = loadSet[Hook](filepath.Join(data, "hooks.json")), loadSet[Poll](filepath.Join(data, "polls.json"))
 	s.pollRun = pollRun{last: map[string]PollStatus{}, busy: map[string]bool{}}
@@ -138,6 +141,7 @@ func (s *Server) Routes() http.Handler {
 	fn("GET /api/data/weather", s.handleDataWeather)
 	fn("GET /api/data/calendar", s.handleDataCalendar)
 	fn("GET /api/data/asset/{name}", s.handleAsset)
+	fn("GET /api/data/img", s.handleImage)
 	fn("GET /fonts/{name}", s.handleFont)
 	fn("GET /api/data/camera/{id}", s.handleCamera)
 	fn("POST /api/frames/{id}/beacon", s.handleBeacon)

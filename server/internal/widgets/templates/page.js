@@ -113,17 +113,33 @@
     c.setAttribute('class', 'ic ' + (cls || '') + ' i-' + k);
     return c;
   }
-  function src(v) {
+  // Remote pictures come through the server, shrunk to about the width shown (api/images.go):
+  // a full-size poster costs the A33 seconds and tens of MB to decode.
+  function src(v, w) {
     if (typeof v !== 'string') return '';
-    if (/^https?:\/\//.test(v)) return v;
+    if (/^https?:\/\//.test(v)) return '/api/data/img?w=' + (w || 640) + '&u=' + encodeURIComponent(v);
     if (/^asset:[A-Za-z0-9._-]+$/.test(v)) return '/api/data/asset/' + encodeURIComponent(v.slice(6));
     return '';
   }
-  function img(v, cls) {
-    const u = src(v);
+  function img(v, cls, w) {
+    const u = src(v, w);
     if (!u) return null;
-    const i = h('img', cls); i.alt = ''; i.src = u; i.onerror = () => { i.style.visibility = 'hidden'; };
+    const i = h('img', cls); i.alt = ''; i.decoding = 'async'; i.src = u; i.onerror = () => { i.remove(); };
     return i;
+  }
+  // Drop items from the end of box until it fits, and say how many: a list cut in half mid-row
+  // looks broken. Needs the box laid out, so call it at the end of a draw (draws are visible).
+  function fit(box, sel) {
+    const items = () => box.querySelectorAll(':scope > ' + sel);
+    const over = () => box.scrollHeight > box.clientHeight + 1;
+    let hid = 0, more = null;
+    while (over()) {
+      const l = items();
+      if (l.length <= 1) break;
+      l[l.length - 1].remove(); hid++;
+      if (!more) { more = h('div', 'more'); box.append(more); }
+      more.textContent = '+' + hid + ' more';
+    }
   }
   function st(s) { return ['ok', 'warn', 'bad', 'off'].includes(s) ? s : ''; }
   function badge(sec, b) {
@@ -161,7 +177,15 @@
     if (value !== undefined && value !== null && value !== '') t.append(h('span', 'v' + (state ? ' s-' + st(state) : ''), value));
     return t;
   }
-  function empty(b, text) { b.closest('.w').classList.add('nodata'); b.append(h('div', 'empty', text || 'No data yet')); }
+  // An empty card says what it waits for: plain words first, the owner's hint small below.
+  function empty(b, text, hint) {
+    const sec = b.closest('.w'), src = props(sec).source;
+    sec.classList.add('nodata');
+    const e = h('div', 'empty'); e.append(h('div', '', text || 'Nothing to show yet'));
+    hint = hint || (src && !text ? 'Waiting for the \u201c' + src + '\u201d source' : '');
+    if (hint) e.append(h('small', '', hint));
+    b.append(e);
+  }
   // Hero badge from a services feed when nothing else sets one: "22 / 22 containers healthy".
   function health(d, p) {
     if (!p.health || !Array.isArray(d.containers)) return null;
@@ -332,7 +356,10 @@
       const b = body(sec), z = arr(d.zones);
       if (!z.length) { empty(b); return; }
       const m = h('div', 'zone-main'); m.append(h('div', 'big', z[0].temp || '—'));
-      const t = h('div', 'dim', [z[0].name, z[0].target ? 'set ' + z[0].target : '', z[0].action].filter(Boolean).join(' · '));
+      // Two short lines instead of one that wraps at a random word.
+      const t = h('div', 'dim zone-sub');
+      t.append(h('div', '', [z[0].name, z[0].target ? 'set ' + z[0].target : ''].filter(Boolean).join(' · ')));
+      if (z[0].action) t.append(h('div', '', String(z[0].action).replace(/^./, c => c.toUpperCase())));
       t.style.fontSize = '1.5rem'; m.append(t); b.append(m);
       const zs = h('div', 'zones');
       for (const x of z.slice(1)) zs.append(tile(x.name, [x.temp, x.target ? 'set ' + x.target : '', x.action].filter(Boolean).join(' · ')));
@@ -385,7 +412,7 @@
         const a = arr(d.added).slice(0, num(p.max) || 6);
         if (!a.length) { empty(b); return; }
         const g = h('div', 'adds'); g.style.gridTemplateColumns = 'repeat(' + a.length + ',1fr)';
-        for (const x of a) { const c = h('div', 'ad'), i = img(x.image); if (i) c.append(i); c.append(h('div', 'ellip', x.title), h('small', '', x.when || '')); g.append(c); }
+        for (const x of a) { const c = h('div', 'ad'), i = img(x.image, '', 320); if (i) c.append(i); c.append(h('div', 'ellip', x.title), h('small', '', x.when || '')); g.append(c); }
         b.append(g); return;
       }
       const up = arr(d.upcoming);
@@ -398,13 +425,16 @@
         const c = h('div', 'day' + (k === 0 ? ' today' : '')), dh = h('div', 'dh');
         dh.append(h('span', '', k === 0 ? 'Today' : day.toLocaleDateString(undefined, { weekday: 'short' })), h('b', '', day.getDate()));
         c.append(dh);
+        // Seven narrow columns: no poster, the title on up to two lines, the time first.
         for (const x of up.filter(x => String(x.date).slice(0, 10) === key)) {
-          const e = h('div', 'ep'), i = img(x.image); if (i) e.append(i);
-          const t = h('div'); t.style.minWidth = 0; t.append(h('div', 't ellip', x.title), h('small', 'ellip', x.sub || '')); e.append(t); c.append(e);
+          const parts = String(x.sub || '').split(' · '), ti = parts.findIndex(q => /^\d{1,2}:\d{2}/.test(q));
+          if (ti > 0) parts.unshift(parts.splice(ti, 1)[0]);
+          const e = h('div', 'ep'); e.append(h('div', 't', x.title), h('small', '', parts.join(' · '))); c.append(e);
         }
         w.append(c);
       }
       b.append(w);
+      w.querySelectorAll('.day').forEach(c => fit(c, '.ep'));
     },
     worldclock(sec, d, p) {
       const b = body(sec), l = h('div', 'wc'), now = new Date();
@@ -423,7 +453,7 @@
     cameras(sec, d, p) {
       const b = body(sec), cams = arr(d.cameras);
       sec.querySelector('.live').hidden = !cams.length;
-      if (d.setup) { empty(b, 'Cameras need setting up: PROTECT_URL and PROTECT_API_KEY on the server'); return; }
+      if (d.setup) { empty(b, 'Cameras are not connected yet', 'Set PROTECT_URL and PROTECT_API_KEY on the server'); return; }
       if (d.error) { empty(b, 'Cameras unavailable'); return; }
       if (!cams.length) { empty(b, d.cameras ? 'No cameras match' : 'No camera data yet'); return; }
       const g = h('div', 'cams n' + Math.min(cams.length, 9));
@@ -463,8 +493,9 @@
         const pn = h('div', 'panel'), top = h('div', 'between');
         const ok = gr.items.filter(c => c.state === 'healthy' || c.state === 'running').length;
         top.append(h('div', 'label', gr.name), h('span', 'faint note', ok + ' / ' + gr.items.length)); pn.append(top);
-        const l = h('div', 'sv');
-        for (const c of gr.items) {
+        const l = h('div', 'sv'), rank = c => ({ unhealthy: 0, exited: 0, starting: 1 })[c.state] ?? 2;
+        // Problems first, so a "+N more" never hides one.
+        for (const c of gr.items.slice().sort((a, b) => rank(a) - rank(b))) {
           const t = h('div', 'tile'), s = { healthy: 'ok', running: 'ok', starting: 'warn', unhealthy: 'bad', exited: 'bad' }[c.state] || 'off';
           t.append(h('span', 'dot ' + (s === 'ok' ? '' : s)), h('span', 'ellip', c.name));
           if (c.note) t.append(h('small', 'faint ellip', c.note));
@@ -473,6 +504,7 @@
         pn.append(l); gs.append(pn);
       }
       g.append(hp, gs); b.append(g);
+      gs.querySelectorAll('.sv').forEach(l => fit(l, '.tile'));
     }
   };
 

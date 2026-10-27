@@ -272,6 +272,7 @@ func rows() []row {
 		{pattern: "GET /api/data/weather", method: "GET", path: "/api/data/weather", class: public, ok: 200},
 		{pattern: "GET /api/data/calendar", method: "GET", path: "/api/data/calendar", class: public, ok: 200},
 		{pattern: "GET /api/data/asset/{name}", method: "GET", path: "/api/data/asset/car.png", class: public, ok: 200},
+		{pattern: "GET /api/data/img", method: "GET", path: "/api/data/img?u=https://example.com/x.jpg&w=96", class: public, ok: 404},
 		{method: "GET", path: "/api/data/asset/x.svg", class: public, ok: 400},
 		{pattern: "GET /fonts/{name}", method: "GET", path: "/fonts/manrope.woff2", class: public, ok: 200},
 		{method: "GET", path: "/fonts/..%2Fwidgets.go", class: public, ok: 404},

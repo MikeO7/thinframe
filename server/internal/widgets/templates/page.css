@@ -31,12 +31,12 @@ iframe{border:0;width:100%;height:100%}
 .seg{display:none;padding:.4rem;border-radius:99rem;background:var(--chip);font-size:1.3rem;margin:0 .4rem}
 .seg.show{display:flex}.seg span{padding:.8rem 1.4rem;border-radius:99rem;color:var(--dim)}.seg span.on{background:var(--fg);color:var(--bg)}
 /* nav left (default): a rail down the left edge, icon over label; the grid gets the full height */
-.nav-left .page{padding:2.8rem 2.8rem 2.8rem 12.6rem}
-.nav-left .tabs{left:2.2rem;top:50%;bottom:auto;transform:translateY(-50%);flex-direction:column;gap:.4rem;padding:.6rem;border-radius:2.6rem;width:8.4rem}
-.nav-left .tab{flex-direction:column;gap:.5rem;padding:1.1rem 0;width:100%;border-radius:2rem;font-size:1.2rem;justify-content:center}
-.nav-left .tab svg{width:2.4rem;height:2.4rem}
-.nav-left .seg{flex-direction:column;margin:.2rem 0 .6rem;border-radius:1.6rem;width:100%;font-size:1.15rem;text-align:center}
-.nav-left .seg span{padding:.8rem .2rem;border-radius:1.2rem;white-space:normal}
+.nav-left .page{padding:2.8rem 2.8rem 2.8rem 16.4rem}
+.nav-left .tabs{left:2.4rem;top:2.8rem;bottom:2.8rem;transform:none;flex-direction:column;gap:.6rem;padding:.8rem;border-radius:3rem;width:11.2rem}
+.nav-left .tab{flex:1 1 0;min-height:0;max-height:13rem;flex-direction:column;gap:.7rem;padding:0;width:100%;border-radius:2.4rem;font-size:1.4rem;justify-content:center}
+.nav-left .tab svg{width:3rem;height:3rem}
+.nav-left .seg{flex:none;flex-direction:column;margin:0;border-radius:2rem;width:100%;font-size:1.3rem;text-align:center}
+.nav-left .seg span{padding:1.2rem .4rem;border-radius:1.6rem;white-space:normal;line-height:1.25}
 /* ---- shared parts ---- */
 .label{font-size:1.5rem;font-weight:600;color:var(--dim);margin-bottom:1.2rem}
 .between{display:flex;justify-content:space-between;align-items:center;gap:1rem;min-width:0}.between>*{min-width:0}
@@ -52,7 +52,8 @@ iframe{border:0;width:100%;height:100%}
 .tile .t{flex:1;min-width:0}.tile small{display:block;color:var(--faint);font-size:1.2rem;margin-top:.2rem}
 .tile .v{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;flex:none}.tile>.t{flex:1;min-width:0}
 .big{font-weight:300;letter-spacing:-.04em;line-height:.95}
-.empty{color:var(--faint);font-size:1.5rem;margin:auto;text-align:center}
+.empty{color:var(--faint);font-size:1.5rem;margin:auto;text-align:center;line-height:1.4}.empty small{display:block;font-size:1.2rem;opacity:.75;margin-top:.6rem}
+.zone-sub{line-height:1.35}
 .w .body{display:flex;flex-direction:column;flex:1;min-height:0}
 .w-hero,.w-agenda,.w-rooms,.w-climate,.w-list,.w-tiles,.w-worldclock,.w-energy,.w-shows,.w-cars,.w-services{display:flex;flex-direction:column}
 .ellip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -138,11 +139,12 @@ iframe{border:0;width:100%;height:100%}
 .ax{display:flex;justify-content:space-between;font-size:1.1rem;color:var(--faint);margin-top:.6rem}
 /* shows */
 .week{display:grid;grid-template-columns:repeat(7,1fr);gap:1rem;flex:1;min-height:0}
-.day{border-radius:1.6rem;padding:1rem;background:var(--chip);display:flex;flex-direction:column;gap:.8rem;min-width:0;border:1px solid transparent}
+.day{border-radius:1.6rem;padding:1rem;background:var(--chip);display:flex;flex-direction:column;gap:1rem;min-width:0;min-height:0;overflow:hidden;border:1px solid transparent}
 .day.today{border-color:var(--accent)}
 .dh{display:flex;justify-content:space-between;align-items:baseline;font-size:1.3rem;color:var(--dim)}.dh b{font-size:2rem;font-weight:400;color:var(--fg)}
 .ep{display:flex;gap:.8rem;align-items:center;min-width:0}.ep img{width:3.4rem;height:5rem;object-fit:cover;border-radius:.6rem;flex:none}
-.ep .t{font-size:1.4rem}.ep small,.ad small{display:block;font-size:1.2rem;color:var(--faint);margin-top:.2rem}
+.ep .t{font-size:1.4rem;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}.ep{flex-direction:column;align-items:stretch;gap:0}
+.more{font-size:1.2rem;color:var(--faint);padding:.2rem .4rem;flex:none}.ep small,.ad small{display:block;font-size:1.2rem;color:var(--faint);margin-top:.2rem}
 .adds{display:grid;grid-template-rows:1fr;gap:1.6rem;flex:1;min-height:0}
 .ad{min-width:0;min-height:0;display:flex;flex-direction:column;font-size:1.4rem}.ad img{width:100%;flex:1;height:0;min-height:0;object-fit:cover;border-radius:1.2rem;margin-bottom:.8rem}
 /* world clock */
