@@ -567,8 +567,10 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     }
     say("partitions 1 to 3 read back equal");
 
-    // 5. The kernel's view of the new table, then the boot partition's files for the eMMC.
+    // 5. The kernel's view of the new table, then the boot partition's files for the eMMC. Our
+    // exclusive hold on the whole disk would make the partition mounts fail (EBUSY): let go.
     reread_partitions(&w)?;
+    drop(w);
     let (ep1, ep4) = (slot::part_n(&emmc, 1), slot::part_n(&emmc, 4));
     wait_for(&ep1)?;
     wait_for(&ep4)?;
@@ -593,6 +595,11 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
 
     // 7. Last: U-Boot. Only now can the eMMC start.
     say("writing U-Boot");
+    let w = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(O_EXCL)
+        .open(&emmc)?;
     w.write_all_at(&uboot, UBOOT_OFFSET)?;
     w.sync_all()?;
     drop_caches();
