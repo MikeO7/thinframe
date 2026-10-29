@@ -15,11 +15,21 @@ and the page reloads itself. Nothing is deployed to the frame.
 Tasks: `TASKS.md` section S.
 
 ## Pairing a new frame
-Flash the card without a token and power the frame on: it finds the server at `SERVER_URL` and
-shows a PAIR button. Tap it once; the server gives that frame its own token and the dashboard
-opens. A paired frame cannot be paired again until you press "forget pairing" on `/admin`.
-Endpoints: `POST /api/pair`, `POST /pair/{id}/accept`, `GET /api/pair/{id}?nonce=` (no auth; see
-docs/decisions.md "One-press pairing").
+Flash the card without a token and power the frame on: it finds the server and shows a 6-digit
+pairing code. Open `/admin` on a phone or computer; the frame is listed under "Waiting to pair".
+Type the code, press pair, and within a few seconds the frame gets its own token and opens its
+dashboard. (Or tell Claude the code: MCP `pair_frame`.) 5 wrong codes and the frame shows a new
+one. A paired frame cannot be paired again until you press "forget pairing" on `/admin`.
+Endpoints: `POST /api/pair` (answers the code), `GET /api/pair/{id}?nonce=` (the token, once,
+after the code was typed), `POST /admin/{id}/pair` (admin auth); `POST /pair/{id}/accept` shows the
+code to frames with an older tfctl. See docs/decisions.md "Pairing".
+
+## Host names
+Routes without a token (the dashboard, its data, apps, pairing) answer only to IP addresses,
+`localhost`, single-label names (`nas`), names under `.local`, `.lan`, `.home.arpa` and
+`.internal`, and the container's hostname; anything else gets 421 (this stops DNS rebinding).
+If frames or browsers reach the server by another name, list it:
+`SERVER_HOSTS=server.nox,frames.example.com`. The token routes and `/mcp` answer under any name.
 
 `/admin` asks for a password when `FRAME_TOKEN` is set: any user name, the token as password
 (HTTP Basic). Its forms refuse cross-origin posts. Without a token it is open, like `/api`.

@@ -185,6 +185,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
   a reboot goes straight to the dashboard, a second pairing request is refused, "forget pairing"
   brings the button back. Evidence in docs/log.md (2026-10-20, docs/img/pair-qemu-*.png).
 - [ ] On the frame: the same with a finger on the real panel (touch axes, TASK 6).
+- [x] 2026-10-28, security: one press proved nothing (any LAN host could request, press and poll
+      alone). Now the frame shows a 6-digit code from the server and the owner types it on /admin
+      (or MCP `pair_frame`); 5 tries; the frame record is written at pickup. Older tfctl's PAIR
+      button shows the code. (pair.go, pair.rs; Go tests, tests/e2e-native.sh; docs/decisions.md
+      "Pairing".)
+- [ ] Gate: in QEMU and on the frame, a frame without a token shows the code legibly, typing it on
+      /admin opens the dashboard, a wrong code 5 times brings a new one. Evidence in docs/log.md.
 
 ## 17. Wi-Fi first, on the frame's screen
 - [x] tfctl: a frame with a radio and no connection (nothing configured, or the configured network

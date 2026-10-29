@@ -116,7 +116,8 @@ Three layers, three mechanisms:
 | Layer | How it updates | Who does it |
 |---|---|---|
 | Dashboard (HTML/JS/data) | Served live. `page_version` in config; agent reloads cog when it changes | server |
-| Frame software (`tfctl`, `image/rootfs/` overlay) | Container image bundles `tfctl-armv7` and `overlay.tar.gz` with a version + sha256. Config poll says `software_version`; agent downloads from `/api/artifacts/<name>`, verifies, installs, restarts. Overlay excludes `thinframe.conf`, ssh and iwd | agent |
+| Frame software (`tfctl`) | Container image bundles `tfctl-armv7` (and, for system updates, `system-<ver>.tar`) with `versions.json`; every file has a sha256 (`scripts/make-artifacts.sh`, which makes no `overlay.tar.gz` and deletes a stale one) [V]. Config poll says `software_version`; agent downloads from `/api/artifacts/<name>`, verifies, installs, restarts [V] | agent |
+| Root filesystem (`image/rootfs/` and the rest of the OS) | Only as a whole system update into the other A/B slot ("Full OS updates" below), never unpacked into a running root [V: make-artifacts.sh] | agent |
 | Kernel, DTB, U-Boot | Card re-write. Rare. Optional later: A/B root partitions and `extlinux.conf` switching | human |
 
 So "rebuild the container" is the only deploy action. Every frame converges within one poll.
@@ -183,7 +184,8 @@ upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edg
   next to it in `/data/etc/thinframe.token`, mode 0600, root only; `FRAME_TOKEN` in the conf is
   read only as a leftover from an older tfctl and moved out on the next save. cog runs as `frame`,
   so a compromised web process cannot read the server's admin secret. A rollback to a tfctl older
-  than this reads an empty token and pairs again (one press at the frame); nothing else is lost. [V]
+  than this reads an empty token and pairs again (a code on the frame, typed on /admin); nothing
+  else is lost. [V]
 
 ## Two containers
 `frameserver` is production: one binary, one volume, no build tools. `simframe` is development
@@ -363,16 +365,66 @@ the card and the vendor software entirely; recovery then needs a rescue card or 
 a verified eMMC backup is a hard prerequisite so the frame can be returned to stock. Done on
 2026-10-26: "Running from the eMMC" below.
 
-## One-press pairing
+## Pairing
 Typing a server token into the flash script was the hardest step of onboarding. Now the token is
-optional: a frame without one asks the server to pair (`POST /api/pair` with a random nonce only it
-knows) and shows a PAIR button on its screen. The button posts that nonce from cog straight to the
-server, which proves someone is at the frame; the server then mints a 256-bit per-frame token,
-stores only its SHA-256, and hands the token once to the frame's next poll. A paired id refuses new
-requests until the admin page forgets it, so pairing happens once per frame. The per-frame token
-opens only that frame's own routes (config GET, heartbeat, control socket) plus release info and
-update artifacts; listing, layout, actions and MCP keep needing `FRAME_TOKEN`. A 401 later clears
-the frame's token and brings the button back. [V] in QEMU, see docs/log.md.
+optional: a frame without one pairs.
+- **Until 2026-10-28: one press.** The frame asked to pair (`POST /api/pair` with a nonce it chose)
+  and showed a PAIR button that posted the nonce back from cog. That did not prove anyone was at
+  the frame: the nonce came from the requester and accept and poll only checked the source IP, so
+  any LAN host could request, press and poll on its own and get a frame token for any unpaired
+  id (control socket, heartbeat, reports, screenshots), or squat an id so the real frame got 409.
+  Every new id also wrote a frame file. [V: read in pair.go; a Go test did it alone]
+- **Now: a code on the frame's screen (2026-10-28).** `POST /api/pair {id, nonce}` answers 202
+  with a 6-digit code (crypto/rand, unique among open requests). Only the requester sees it; the
+  frame shows it big on its own pairing page. The owner types it on `/admin` ("Waiting to pair",
+  `POST /admin/{id}/pair`, admin auth) or gives it to MCP `pair_frame`. Only then does the server
+  mint the 256-bit per-frame token (stored as SHA-256), and only the poll
+  `GET /api/pair/{id}?nonce=` with that request's nonce from the same source IP gets it, once.
+  Anyone else on the LAN learns only the code of a request of their own, which nobody types in.
+  [V: Go tests `TestPairNeedsTheCodeFromTheFrame` (a host alone gets no token; beside a squatter
+  the real frame still pairs), `tests/e2e-native.sh` (real tfctl shows the code, nothing pairs
+  until it is typed, then the frame gets its token and heartbeats)]; [U] the page on the panel.
+  - 5 wrong codes for an id drop its open requests; the frame's next poll gets 404 and it asks
+    again with a new code. Requests live 15 minutes; at most 4 open per source IP and 32 in all.
+  - Several requests for one id may be open (from different IPs), so a squatter cannot keep the
+    real frame from asking. The accepted one wins; the others are dropped.
+  - A paired id refuses new requests (409) until "forget pairing" on `/admin`, which is the
+    admin's explicit go for re-pairing; the code is checked again at accept and pickup.
+  - The frame record is written at pickup, so requests that are never accepted leave nothing on
+    disk. [V: Go tests]
+  - Without `FRAME_TOKEN` (LAN dev mode) `/admin` is open, so anyone on the LAN can type a code:
+    there is no owner to prove anything to. [V: read in server.go]
+  - Upgrades: frames that have a token keep it (nothing to re-pair) [V: unchanged auth]. A tfctl
+    from before codes shows the old PAIR button; its POST to `/pair/{id}/accept` now answers
+    with a page showing the code, to the holder of the nonce only, so it pairs from `/admin` too.
+    A new tfctl on an old server gets no code and shows the PAIR button. [V: Go and Rust tests]
+- The per-frame token opens only that frame's own routes (config GET, heartbeat, control socket,
+  report, screenshot upload) plus release info and update artifacts; listing, layout, actions and
+  MCP keep needing `FRAME_TOKEN`. A 401 later clears the frame's token and a new code comes up.
+  [V] in QEMU for the one-press flow (docs/log.md 2026-10-20); the code flow [U] on the frame.
+
+## Public routes: Host and CORS (2026-10-28)
+The dashboard plane, the apps' endpoints and pairing carry no credentials (cog loads a plain URL,
+apps run sandboxed with no token).
+- **No wildcard CORS on data.** `/api/stream/<id>`, `/api/data/{weather,calendar,source/<key>}`,
+  app state and emit answered `Access-Control-Allow-Origin: *`, so any web page a LAN user opened
+  could read them, private CalDAV calendars included. They now answer only `Origin: null` (a
+  sandboxed app, an opaque origin) and `Origin: file://` (the frame's saved boot page, depending
+  on the engine) with that origin, and `Vary: Origin`; same-origin pages (the dashboard) need no
+  header. Fonts, assets, app files without an emit key and `/apps-sdk.js` keep `*`. [V: Go tests
+  `TestDataCORS`]; [U] that WPE WebKit sends `null` or `file://` for the boot page's stream: check
+  on the frame. Limit: a page on another site can still read these through a sandboxed iframe of
+  its own, which also sends `null`; closing that needs a key on reads, as emit has. [U]
+- **Host allowlist.** With no Host check, DNS rebinding could read every public route whatever
+  the CORS header. Public routes now answer only to IP literals, `localhost`, single-label names
+  (`nas`, `frameserver`), names under `.local`, `.lan`, `.home.arpa`, `.internal`, `.localhost`,
+  the container's hostname and the names in `SERVER_HOSTS` (comma-separated); others get 421 and
+  a log line naming the Host. Token routes (`/api/frames*`, `/mcp`, `/admin` with a token) skip
+  the check: without the token there is nothing to read, and an MCP client behind any name keeps
+  working. Without a server token every route is public, so every route checks. [V: Go tests
+  `TestHostCheckOnPublicRoutes`, `TestHostAllowlist`]
+- A frame that reaches the server by another name (prod: `server.nox`) needs it in
+  `SERVER_HOSTS`, or its dashboard and pairing get 421. [V: read in hosts.go]
 
 ## The frame finds its server on the LAN (2026-10-22)
 A UDP probe to port 41007 (limited broadcast plus the USB link's 192.168.7.255); the server
@@ -431,8 +483,8 @@ panes, dawn frost, midnight lens). `SPLASH_STYLE=dawn` is the default; `seventie
 
 ## Wi-Fi setup on the frame's screen
 
-A frame with a radio and no connection shows a Wi-Fi page before the PAIR page (TASK 17), so
-setup is: power on, pick Wi-Fi, press PAIR. That way
+A frame with a radio and no connection shows a Wi-Fi page before the pairing page (TASK 17), so
+setup is: power on, pick Wi-Fi, type the code it shows on the server's `/admin`. That way
 no one has to type a password into `flash.sh`, and moving house only takes a tap. **[V in QEMU]**
 - **Where the page lives.** Pairing posts to the server. Before Wi-Fi works there is no server, so
   the agent serves the page itself, from a small HTTP listener in tfctl on 127.0.0.1:8091.
@@ -660,11 +712,14 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   allows six connections per host, so one stream per app widget would starve the page. The
   dashboard forwards only an allowlist (sources, its own frame's emit, its app's state). On the frame's
   WPE WebKit the full-screen mode works as in Chromium (CSP sandbox on a top-level document,
-  opaque-origin fetch with `Access-Control-Allow-Origin: *`) [V 2026-10-26, docs/log.md]; the
+  opaque-origin fetch with `Access-Control-Allow-Origin: *`, since 2026-10-28 `null`, see
+  "Public routes: Host and CORS") [V 2026-10-26, docs/log.md; `null` U on the frame]; the
   widget bridge is [V] in Chromium, [U] on the frame.
 - **Public endpoints**, like the dashboard plane (the page has no token): `/apps/*`,
   `/apps-sdk.js`, `GET /api/data/source/<key>`, `GET|POST /api/apps/<name>/state[/<key>]`,
-  `POST /api/frames/<id>/emit`. They answer any origin. Emit is limited to 20 per 10 s per frame,
+  `POST /api/frames/<id>/emit`. They answered any origin until 2026-10-28; now only sandboxed
+  apps and the boot page (`Origin: null`, `file://`) and only under a LAN Host name ("Public
+  routes: Host and CORS"). Emit is limited to 20 per 10 s per frame,
   state writes to 80 per 10 s per app; emit needs an existing frame and never creates one.
   Sources become readable by anyone on the LAN, as they already were through any page's stream.
 - **Emit needs the frame's emit key (2026-10-28).** Open, emit was a cross-site request
