@@ -6,7 +6,7 @@
 #   sim/qemu/run.sh tap X Y    touch the running guest at panel pixel X,Y (0..799, 0..1279):
 #                              one finger on a virtio multitouch screen, like the frame's panel
 # Env: SERVER_URL (required, as the guest sees it: http://10.0.2.2:PORT = this Mac's PORT),
-#      FRAME_ID (sim-qemu), FRAME_TOKEN (set it empty to pair with the PAIR button),
+#      FRAME_ID (sim-qemu), FRAME_TOKEN (set it empty to pair: type the code it shows on /admin),
 #      WIFI_SSID/WIFI_PSK (provisioned network; unset = pick one on the Wi-Fi setup page. The sim
 #      image has "Groovy Wifi" (password "far out man") and the open "Cafe"; see S35simwifi),
 #      SHOT_INTERVAL_S (10), SSHP (2222), RUN_FOR_S,
