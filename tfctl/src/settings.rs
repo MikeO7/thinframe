@@ -197,6 +197,11 @@ pub fn start(
     Ok(port)
 }
 
+/// Returns to the page that posted the form (the dashboard).
+const BACK_PAGE: &str =
+    "<!doctype html><meta charset=\"utf-8\"><body style=\"background:#0b0d10\">\
+<script>history.back()</script>";
+
 impl Ctx {
     fn cfg(&self) -> crate::config::Config {
         crate::config::load(&self.conf).unwrap_or_default()
@@ -221,8 +226,13 @@ impl Ctx {
         if req.method == "POST" && req.path == "/settings/open" {
             // Once per OPEN_EVERY: a page posting this in a loop cannot hold Settings on screen.
             let mut s = lock(&self.st);
-            if s.active || s.opened.is_some_and(|t| t.elapsed() < OPEN_EVERY) {
+            if s.active {
                 return see_other("/settings");
+            }
+            if s.opened.is_some_and(|t| t.elapsed() < OPEN_EVERY) {
+                // Too soon after the last open (a second tap on the gear right after closing):
+                // back to the page that posted, not a "not found" page with nothing to tap.
+                return html(BACK_PAGE.into());
             }
             s.opened = Some(Instant::now());
             drop(s);
@@ -596,7 +606,15 @@ impl Ctx {
         let mut body = self.take_note();
         body.push_str("<div class=\"card col\"><b>Networks in range</b><ul>");
         if nets.is_empty() {
-            body.push_str("<li class=\"dim\">Looking for networks…</li>");
+            let looking = {
+                let st = lock(&self.st);
+                st.scanning || st.scanned.is_none()
+            };
+            body.push_str(if looking {
+                "<li class=\"dim\">Looking for networks…</li>"
+            } else {
+                "<li class=\"dim\">No networks found</li>"
+            });
         }
         for n in nets.iter().take(12) {
             let tag = if current.as_deref() == Some(n.ssid.as_str()) {
@@ -975,6 +993,21 @@ mod tests {
             Ok(KioskCmd::SettingsShown("/settings".into()))
         );
         assert_eq!(get(port, "/settings", &me).0, 200);
+        // Closed and opened again at once: back to the page, never a dead "not found".
+        close(&st);
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            s,
+            "POST /settings/open HTTP/1.1\r\nHost: {me}\r\nContent-Length: 0\r\n\r\n"
+        )
+        .unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        assert!(
+            out.starts_with("HTTP/1.1 200") && out.contains("history.back()"),
+            "{out}"
+        );
+        open(&st);
         // A form from another page (an app on the dashboard) cannot restart or reset.
         let post = |path: &str, origin: &str| {
             let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
