@@ -112,6 +112,11 @@ fn main() -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
+    // The watchdog (and its unconfirmed-slot rule) before anything that can fail: a new system
+    // slot whose tfctl dies on its config must still be rebooted back.
+    if args.first().is_some_and(|a| a == "kiosk") {
+        watchdog::start();
+    }
     let cfg = match config::load(&conf) {
         Ok(c) => c,
         Err(e) => {

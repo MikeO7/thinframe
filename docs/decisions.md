@@ -150,7 +150,7 @@ frame's slot, version and last-good in `/admin`.
 Boot-state invariants (boot.cmd.patch, slot.rs, sysupdate.rs):
 - A fresh card has `slot=a tries=0` (image/boot/uEnv.txt), no `zImage.b` and an all-zero p3 **[V]**
   (read from image/out/thinframe-sd.img). With tries=0 U-Boot never writes uEnv.txt and never flips,
-  and the agent's unconfirmed-slot reboot needs tries>0, so a frame waiting at the Wi-Fi page is never
+  and the unconfirmed-slot reboot (watchdog.rs) needs tries>0, so a frame waiting at the Wi-Fi page is never
   rebooted towards the empty slot. `rollback` refuses while the other slot has no kernel.
 - uEnv.txt that names no slot (lost in a power cut: FAT has no journal) falls back to `uEnv.bak`, the
   copy tfctl keeps of the state before its last write; tfctl reads the same fallback
@@ -506,6 +506,14 @@ timer armed only until the respawned tfctl reopens it, and a frame with no tfctl
 dark rather than rebooting every 16 s. Upstream saw the reset work on this board (ormarch E041).
 QEMU exercises the same code with the virt machine's `i6300esb` (`-watchdog-action reset`). [V] in
 QEMU, [U] on the frame until the first hang.
+
+The unconfirmed-slot reboot lives in the same thread (2026-10-28), not in the agent loop: a new
+slot whose tfctl died before the agent ran (config, Kiosk::new, the splash) was respawned by
+init, each instance petted the watchdog, and nothing ever rebooted it back. The watchdog starts
+first in `tfctl kiosk` (before the config is read), checks once synchronously at start and then
+every 30 s: uEnv `tries` > 0 naming the running slot, 10 min of uptime and no server answer in
+10 min means `reboot`, and the petting stops so a hung reboot still ends in a reset. tries=0
+(confirmed) is never rebooted. [U] until a broken slot is tried on the frame.
 
 The README budgets (rootfs 200 MB, 300 MB with the page up, tfctl under 1 MB) were our own
 targets, not hardware limits: each root slot is 1 GB and the board has 1 GB of RAM. They stay as
