@@ -5,7 +5,6 @@
 //! The agent drops back to the status page while Wi-Fi or the server stay away (agent.rs
 //! `leave_cached`), so a frame that cannot reach its server still says why.
 use crate::http::{self, Url};
-use std::fs;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
@@ -40,16 +39,23 @@ pub fn save(url: &str, server_url: &str, token: &str) -> io::Result<()> {
     if !html.contains("<html") && !html.contains("<!doctype") && !html.contains("<!DOCTYPE") {
         return Err(io::Error::other(format!("GET {url}: not a page")));
     }
-    let tmp = format!("{PAGE}.tmp");
-    fs::write(&tmp, with_base(&html, server_url))?;
-    fs::rename(&tmp, PAGE)
+    // Synced before the rename: a power cut right after the first save left an empty page,
+    // which the next boot opened.
+    crate::update::write_synced(
+        std::path::Path::new(PAGE),
+        with_base(&html, server_url).as_bytes(),
+    )
 }
+
+/// One save at a time: a connect and a page-version change share the temporary file.
+static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `save` in its own thread: the agent's loop does not wait on it.
 pub fn save_in_background(url: String, server_url: String, token: String) {
     let _ = std::thread::Builder::new()
         .name("offline".into())
         .spawn(move || {
+            let _one = SAVING.lock().unwrap_or_else(|p| p.into_inner());
             if let Err(e) = save(&url, &server_url, &token) {
                 eprintln!("tfctl: offline page: {e}");
             }

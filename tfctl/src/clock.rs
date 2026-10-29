@@ -83,6 +83,10 @@ fn parse(reply: &[u8], nonce: [u8; 8]) -> Option<i64> {
     if leap == 3 || mode != 4 || stratum == 0 || stratum > 15 {
         return None;
     }
+    // A zero transmit time is "not set", not 2036 (era 1 of 0).
+    if reply[40..48] == [0; 8] {
+        return None;
+    }
     let mut secs = u32::from_be_bytes([reply[40], reply[41], reply[42], reply[43]]) as i64;
     if secs < 0x8000_0000 {
         secs += 1 << 32;
@@ -184,6 +188,9 @@ mod tests {
         client[0] = 0b00_100_011;
         assert_eq!(parse(&client, n), None, "not a server reply");
         assert_eq!(parse(&r[..40], n), None, "short");
+        let mut zero = r;
+        zero[40..48].copy_from_slice(&[0; 8]);
+        assert_eq!(parse(&zero, n), None, "no transmit time");
         let mut y2040 = r;
         let t2040: i64 = 2_208_988_800;
         y2040[40..44].copy_from_slice(&ntp(t2040).to_be_bytes());
