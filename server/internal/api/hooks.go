@@ -266,7 +266,7 @@ func (s *Server) runHook(ctx context.Context, h Hook, v hookVars) EmitResult {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, h.Method, u, body)
 	if err != nil {
-		return EmitResult{Error: err.Error()}
+		return hookFailed(v.name, "the hook is not set up right", err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -276,7 +276,10 @@ func (s *Server) runHook(ctx context.Context, h Hook, v hookVars) EmitResult {
 	}
 	resp, err := hookClient.Do(req)
 	if err != nil {
-		return EmitResult{Error: err.Error()}
+		if ctx.Err() != nil {
+			return hookFailed(v.name, "no answer in time", err)
+		}
+		return hookFailed(v.name, "could not reach it", err)
 	}
 	defer resp.Body.Close()
 	res := EmitResult{OK: resp.StatusCode < 400, Status: resp.StatusCode}
@@ -289,6 +292,13 @@ func (s *Server) runHook(ctx context.Context, h Hook, v hookVars) EmitResult {
 		}
 	}
 	return res
+}
+
+// hookFailed logs the full error and returns a short one. The emit answer reaches the page (and
+// anyone on the LAN); Go's error names the URL, and a Home Assistant webhook URL is a secret.
+func hookFailed(name, short string, err error) EmitResult {
+	log.Printf("hook %s: %v", name, err)
+	return EmitResult{Error: short}
 }
 
 // ---- polls ----------------------------------------------------------------------------------
