@@ -99,6 +99,33 @@ func TestImageDimensionsCheckedBeforeDecode(t *testing.T) {
 	}
 }
 
+// A public picture host cannot redirect the proxy into the LAN; a LAN host a source names can
+// still redirect within it, and public to public is fine.
+func TestImageRedirectsStayOutOfTheLAN(t *testing.T) {
+	hop := func(from, to string) error {
+		first, _ := http.NewRequest("GET", from, nil)
+		next, _ := http.NewRequest("GET", to, nil)
+		return imgRedirect(next, []*http.Request{first})
+	}
+	for _, to := range []string{"http://127.0.0.1/x", "http://10.0.0.5/x", "http://192.168.1.2/x",
+		"http://169.254.169.254/latest/meta-data", "http://[::1]/x", "http://[fd00::1]/x", "http://0.0.0.0/x", "http://100.100.1.1/x"} {
+		if err := hop("https://93.184.216.34/p.png", to); err == nil {
+			t.Errorf("public -> %s was followed", to)
+		}
+	}
+	for _, c := range [][2]string{{"https://93.184.216.34/p.png", "https://8.8.8.8/p.png"},
+		{"http://192.168.1.10:8989/poster", "http://192.168.1.10:8989/poster/2"},
+		{"http://192.168.1.10/poster", "http://127.0.0.1/poster"}} {
+		if err := hop(c[0], c[1]); err != nil {
+			t.Errorf("%s -> %s: %v", c[0], c[1], err)
+		}
+	}
+	first, _ := http.NewRequest("GET", "https://8.8.8.8/", nil)
+	if err := imgRedirect(first, make([]*http.Request, 5)); err == nil {
+		t.Error("a sixth redirect was followed")
+	}
+}
+
 func TestShrinkAveragesBlocks(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 4, 2))
 	for x := range 4 {
