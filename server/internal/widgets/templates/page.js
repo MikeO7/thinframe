@@ -806,14 +806,15 @@
   }
   TF.ring = ring; // tests and the MCP preview
 
-  // A hand held over the light sensor (tfctl sense.rs): close a camera view, else the next tab.
+  // A hand held over the light sensor (tfctl sense.rs): close a camera view, else the next page,
+  // second pages included, in rail order (Home, Cars, House, Security & energy, Cameras, ...).
   function gesture(g) {
     if (g !== 'wave') return;
     if (view.el) { if (view.ringId) dismissed(view.ringId, true); closeView(); return; }
-    const tabs = Array.from(document.querySelectorAll('.tab[data-tab]'));
-    if (!tabs.length) return;
-    const i = tabs.findIndex(t => t.classList.contains('on'));
-    show(tabs[(i + 1) % tabs.length].dataset.tab);
+    const ids = Array.from(document.querySelectorAll('.tabs [data-tab]'), t => t.dataset.tab).filter((id, i, a) => a.indexOf(id) === i);
+    if (!ids.length) return;
+    const on = document.querySelector('.page.on'), i = on ? ids.indexOf(on.dataset.page) : -1;
+    show(ids[(i + 1) % ids.length]);
     dispatchEvent(new Event('tf-activity'));
   }
   TF.gesture = gesture;
