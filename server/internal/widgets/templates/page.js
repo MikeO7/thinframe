@@ -136,6 +136,8 @@
   }
   // Drop items from the end of box until it fits, and say how many: a list cut in half mid-row
   // looks broken. Needs the box laid out, so call it at the end of a draw (draws are visible).
+  // Hide items until `box` fits, with a "+N more" line: items marked data-past first (what
+  // already aired today), then from the end.
   function fit(box, sel) {
     const items = () => box.querySelectorAll(':scope > ' + sel);
     const over = () => box.scrollHeight > box.clientHeight + 1;
@@ -143,10 +145,21 @@
     while (over()) {
       const l = items();
       if (l.length <= 1) break;
-      l[l.length - 1].remove(); hid++;
+      const past = box.querySelector(':scope > ' + sel + '[data-past]');
+      (past || l[l.length - 1]).remove(); hid++;
       if (!more) { more = h('div', 'more'); box.append(more); }
       more.textContent = '+' + hid + ' more';
     }
+  }
+  // "6:00 PM" on `day` is more than an hour before `now`.
+  function aired(day, t, now) {
+    const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(t || '');
+    if (!m) return false;
+    let hr = +m[1] % 12;
+    if (m[3] && m[3].toUpperCase() === 'PM') hr += 12;
+    if (!m[3]) hr = +m[1];
+    const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hr, +m[2]);
+    return now - at > 3600e3;
   }
   function st(s) { return ['ok', 'warn', 'bad', 'off'].includes(s) ? s : ''; }
   function badge(sec, b) {
@@ -445,6 +458,7 @@
           const got = parts.indexOf('\u2713');
           if (got >= 0) parts.splice(got, 1);
           const e = h('div', 'ep'), sm = h('small', '', parts.join(' · '));
+          if (k === 0 && aired(day, parts[0], now)) e.dataset.past = '1';
           if (got >= 0) sm.append(h('span', 'got', '\u2713'));
           e.append(h('div', 't', x.title), sm); c.append(e);
         }
@@ -482,6 +496,17 @@
         t.append(cap); g.append(t);
       }
       b.append(g);
+      // More than 9: the column count that shows the most of each 16:9 picture (14 in 3
+      // columns were 2.6:1 strips, QA 2026-10-28).
+      if (cams.length > 9 && g.clientWidth && g.clientHeight) {
+        let best = 3, area = 0;
+        for (let c = 3; c <= 6; c++) {
+          const w = g.clientWidth / c, ht = g.clientHeight / Math.ceil(cams.length / c);
+          const a = Math.min(w, ht * 16 / 9) * Math.min(ht, w * 9 / 16);
+          if (a > area) { area = a; best = c; }
+        }
+        g.style.gridTemplateColumns = 'repeat(' + best + ',1fr)';
+      }
       camTick(sec, true);
     },
     services(sec, d, p) {
@@ -631,6 +656,7 @@
     fetch(emitURL, { method: 'POST',
       body: JSON.stringify({ name: on ? 'room_on' : 'room_off', data: { area_id: t.dataset.area } }) })
       .then(r => r.json()).then(res => {
+        if (!res.status && res.error) { window.toast(name + ': ' + res.error); return; }
         if (!res.status) { window.toast('Room lights are not connected yet'); return; }
         if (!res.ok) { window.toast(name + ': ' + (res.error || 'failed')); return; }
         // Show it now; the next rooms update brings the real state.
@@ -684,7 +710,8 @@
     const every = Math.max(2, num(props(sec).interval_s) || 4) * 1000, now = Date.now();
     if (!force && now - (sec._camAt || 0) < every) return;
     sec._camAt = now;
-    sec.querySelectorAll('.cam').forEach(t => loadCam(t, t.dataset.cam));
+    // An offline camera only answers 502: no request (it comes back with the camera list).
+    sec.querySelectorAll('.cam:not(.offline)').forEach(t => loadCam(t, t.dataset.cam));
   }
   const camSecs = Array.from(document.querySelectorAll('.w-cameras'));
   const view = { el: null };
@@ -770,7 +797,9 @@
     };
     es.onerror = () => {
       TF.perf.reconnects = (TF.perf.reconnects || 0) + 1; es.close();
-      if (stream === es) setTimeout(connect, 5000);
+      // Only if no newer stream was opened meanwhile (the resume detector): two at once
+      // delivered every message twice.
+      if (stream === es) setTimeout(() => { if (stream === es) connect(); }, 5000);
     };
   }
   connect();
@@ -793,10 +822,12 @@
   }, { passive: true });
 
   // How long this load took, once, for `tfctl bench`-style checks of boot and reload speed.
-  addEventListener('load', () => setTimeout(() => {
+  // Load can come before the first paint: wait for it (up to 3 s), or paint_ms read 0.
+  addEventListener('load', () => setTimeout(function send(tries) {
     const n = performance.getEntriesByType('navigation')[0];
     const p = performance.getEntriesByName('first-contentful-paint')[0];
     if (!n) return;
+    if (!p && (tries || 0) < 15) { setTimeout(send, 200, (tries || 0) + 1); return; }
     navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/beacon', JSON.stringify({ load: {
       response_ms: Math.round(n.responseEnd), dom_ms: Math.round(n.domContentLoadedEventEnd),
       paint_ms: p ? Math.round(p.startTime) : 0, load_ms: Math.round(n.loadEventEnd || performance.now()) } }));
