@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +50,19 @@ func (s *Server) finishShot(id string, r shotResult) {
 		}
 	}
 	delete(s.shots.m, id)
+}
+
+// dropShotWaiter forgets one waiter (it got its answer, timed out, or its client left), so a
+// frame that never answers does not collect them.
+func (s *Server) dropShotWaiter(id string, ch chan shotResult) {
+	s.shots.mu.Lock()
+	defer s.shots.mu.Unlock()
+	list := slices.DeleteFunc(s.shots.m[id], func(c chan shotResult) bool { return c == ch })
+	if len(list) == 0 {
+		delete(s.shots.m, id)
+	} else {
+		s.shots.m[id] = list
+	}
 }
 
 // shotFailed turns the frame's "screenshot failed: ..." event into an answer for the waiters.
@@ -173,6 +187,7 @@ func (s *Server) Screenshot(ctx context.Context, id string) ([]byte, error) {
 	}
 	s.shots.m[id] = append(s.shots.m[id], ch)
 	s.shots.mu.Unlock()
+	defer s.dropShotWaiter(id, ch)
 	if _, err := s.Act(id, "screenshot", nil); err != nil {
 		return nil, err
 	}
