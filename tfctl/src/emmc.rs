@@ -14,8 +14,13 @@
 //! The vendor set the eMMC to boot from its boot0 hardware partition (EXT_CSD PARTITION_CONFIG
 //! 0x48, BOOT_ACK on, BOOT_BUS_CONDITIONS 0x01; boot0 holds a copy of Android's boot0) [V
 //! 2026-10-26]. U-Boot's sunxi code says the boot ROM tries such a boot partition before the
-//! user area. The install switches that off (PARTITION_CONFIG 0) and clears boot0's header, so
-//! the boot ROM reads the user area at 8 KiB, as on any A33 board with a fresh eMMC.
+//! user area. The first installs switched that off (PARTITION_CONFIG 0) and left U-Boot only in
+//! the user area at 8 KiB; with the card out the frame never started (the eMMC's /data was never
+//! mounted) [V 2026-10-29]. So the install now ends the way the vendor's eMMC was set up, the one
+//! layout this board is known to start from: U-Boot at the start of boot0 too, and
+//! PARTITION_CONFIG 0x48 (boot from boot0, BOOT_ACK) with BOOT_BUS_CONDITIONS 0x01 (4-bit SDR).
+//! The copy at 8 KiB stays: a boot ROM that reads the user area finds it, and the SPL loads
+//! U-Boot proper from the user area either way (raw mode, sector 80).
 //!
 //! Write order: the vendor bootloader's eGON headers are cleared first, U-Boot is written last.
 //! Until the last step the eMMC has no boot code, so the boot ROM skips it (card, else FEL):
@@ -48,6 +53,10 @@ const MMC_IOC_CMD: std::ffi::c_ulong = 0xc048_b300;
 /// EXT_CSD bytes (JEDEC JESD84): boot bus conditions, partition config.
 pub const EXT_CSD_BOOT_BUS: usize = 177;
 pub const EXT_CSD_PART_CONFIG: usize = 179;
+/// Boot from boot0 with BOOT_ACK, access to the user area: the vendor's value on this frame.
+pub const PART_CONFIG_BOOT0: u8 = 0x48;
+/// 4-bit SDR boot bus, as the vendor left it (U-Boot: the boot ROM needs 0x01 or 0x09).
+pub const BOOT_BUS_4BIT: u8 = 0x01;
 
 /// What the install destroys and `backup` (the user area) does not cover, saved once before the
 /// first change: boot0's first 64 KiB (the install zeroes them) and the EXT_CSD boot bytes (it
@@ -762,12 +771,63 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
         return Err(err("U-Boot reads back different; cleared it again"));
     }
     drop(w);
+
+    // 9. The same U-Boot at the start of boot0, and the boot ROM told to start from there.
+    if b0.exists() {
+        boot_from_boot0(&emmc, &b0, &uboot)?;
+    }
     let _ = fs::write(&force_ro, "1\n");
     println!(
         "thinframe is on the eMMC (slot {}). Power off, remove the card and power on.\n\
          Keep the card: with it inserted the frame starts from the card again.",
         running.name()
     );
+    Ok(())
+}
+
+/// U-Boot at offset 0 of boot0 (read back), then BOOT_BUS_CONDITIONS and PARTITION_CONFIG as
+/// the vendor had them. If boot0 cannot be written, PARTITION_CONFIG stays 0 (the user area copy
+/// is still there) and the install reports it.
+fn boot_from_boot0(emmc: &Path, b0: &Path, uboot: &[u8]) -> R<()> {
+    say(&format!("writing U-Boot to {} as well", b0.display()));
+    let ro = format!("/sys/block/{}/force_ro", sys_name(b0));
+    fs::write(&ro, "0\n")?;
+    let r = (|| -> R<()> {
+        let f = OpenOptions::new().read(true).write(true).open(b0)?;
+        f.write_all_at(uboot, 0)?;
+        f.sync_all()?;
+        drop_caches();
+        let mut back = vec![0u8; uboot.len()];
+        f.read_exact_at(&mut back, 0)?;
+        if back != uboot {
+            f.write_all_at(&[0u8; 512], 0)?;
+            f.sync_all()?;
+            return Err(err(
+                "U-Boot in boot0 reads back different; cleared it again",
+            ));
+        }
+        Ok(())
+    })();
+    let _ = fs::write(&ro, "1\n");
+    r?;
+    let f = File::open(emmc)?;
+    if read_ext_csd(&f)?[EXT_CSD_BOOT_BUS] != BOOT_BUS_4BIT {
+        write_ext_csd(&f, EXT_CSD_BOOT_BUS, BOOT_BUS_4BIT)?;
+    }
+    write_ext_csd(&f, EXT_CSD_PART_CONFIG, PART_CONFIG_BOOT0)?;
+    let csd = read_ext_csd(&f)?;
+    if csd[EXT_CSD_PART_CONFIG] != PART_CONFIG_BOOT0 || csd[EXT_CSD_BOOT_BUS] != BOOT_BUS_4BIT {
+        let _ = write_ext_csd(&f, EXT_CSD_PART_CONFIG, 0);
+        return Err(err(format!(
+            "EXT_CSD reads PARTITION_CONFIG {:#04x}, BOOT_BUS_CONDITIONS {:#04x}; set back to 0",
+            csd[EXT_CSD_PART_CONFIG], csd[EXT_CSD_BOOT_BUS]
+        )));
+    }
+    say(&format!(
+        "PARTITION_CONFIG {}, BOOT_BUS_CONDITIONS {:#04x}",
+        part_config_text(PART_CONFIG_BOOT0),
+        BOOT_BUS_4BIT
+    ));
     Ok(())
 }
 
@@ -836,6 +896,9 @@ fn fix_boot(mnt: &Path, files: &Path, boot_scr: &[u8], uenv: &UEnv, running: Slo
     for stale in ["uEnv.bak", "uEnv.tmp", "pf/uboot.env", "pf/linux-ok.env"] {
         let _ = fs::remove_file(mnt.join(stale));
     }
+    // boot.scr counts its starts in pf/uboot.env (fatwrite makes no directories): with the
+    // directory there, a start from the eMMC leaves a mark the card can read afterwards.
+    fs::create_dir_all(mnt.join("pf"))?;
     let _ = Command::new("sync").status();
     Ok(())
 }
@@ -889,6 +952,15 @@ mod tests {
         let mut early = card;
         early[446 + 8..446 + 12].copy_from_slice(&100u32.to_le_bytes());
         assert!(emmc_mbr(&early, 30_777_344).is_err(), "p1 over U-Boot");
+    }
+
+    #[test]
+    fn the_boot0_setting_is_the_vendors() {
+        assert_eq!(
+            part_config_text(PART_CONFIG_BOOT0),
+            "0x48 (boot from boot0, BOOT_ACK on)"
+        );
+        assert_eq!(BOOT_BUS_4BIT & 0x1b, 0x01);
     }
 
     #[test]

@@ -298,7 +298,7 @@ pub fn reboot_soon() {
             std::thread::sleep(std::time::Duration::from_secs(5));
         }
         update::sync_disks();
-        let _ = Command::new("reboot").spawn();
+        crate::sys::reboot_now();
     });
 }
 

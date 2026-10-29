@@ -39,6 +39,47 @@ extern "C" {
     fn syscall(num: std::ffi::c_long, ...) -> std::ffi::c_long;
 }
 
+/// Restart the frame: `reboot` (init's orderly path), and if that program cannot run or init has
+/// not restarted the frame within a minute, the kernel's own restart. A card pulled while the
+/// system runs takes /sbin/reboot with it; the frame then answered `reboot` and stayed up
+/// [V 2026-10-29]. Blocks the calling thread.
+pub fn reboot_now() {
+    let _ = std::process::Command::new("sync").status();
+    match std::process::Command::new("reboot").status() {
+        Ok(s) if s.success() => std::thread::sleep(std::time::Duration::from_secs(60)),
+        Ok(s) => eprintln!("tfctl: reboot exited with {s}; restarting by the kernel"),
+        Err(e) => eprintln!("tfctl: reboot: {e}; restarting by the kernel"),
+    }
+    kernel_restart();
+}
+
+/// reboot(2) with LINUX_REBOOT_CMD_RESTART, after sync(2): no program needed.
+fn kernel_restart() {
+    #[cfg(all(target_os = "linux", target_arch = "arm"))]
+    const NR: [std::ffi::c_long; 2] = [36, 88];
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    const NR: [std::ffi::c_long; 2] = [81, 142];
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    const NR: [std::ffi::c_long; 2] = [162, 169];
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "arm", target_arch = "aarch64", target_arch = "x86_64")
+    ))]
+    // SAFETY: sync() and reboot(magic, magic2, RESTART, NULL) take no pointers we own; on
+    // success the call does not return, on failure nothing changed.
+    unsafe {
+        syscall(NR[0]);
+        syscall(
+            NR[1],
+            0xfee1_deadu32 as std::ffi::c_int,
+            672_274_793 as std::ffi::c_int,
+            0x0123_4567 as std::ffi::c_int,
+            0 as std::ffi::c_long,
+        );
+    }
+    eprintln!("tfctl: the kernel restart failed");
+}
+
 /// Give the calling thread the lowest best-effort I/O priority (`ioprio_set`, which BFQ honours):
 /// for bulk reads that may wait, such as the prewarm.
 pub fn low_io_priority_this_thread() {

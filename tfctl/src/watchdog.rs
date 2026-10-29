@@ -20,7 +20,6 @@
 use crate::update::{self, Paths};
 use std::fs;
 use std::io::Write;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Once, OnceLock};
 use std::thread;
@@ -124,10 +123,9 @@ fn check_unconfirmed() {
     eprintln!("tfctl: watchdog: {text}");
     update::queue_event(&p, "slot-unconfirmed-reboot", &text);
     update::sync_disks();
-    // Spawned, not after a delay in a thread: this process may be about to crash.
-    if let Err(e) = Command::new("reboot").spawn() {
-        eprintln!("tfctl: watchdog: reboot: {e}; letting the SoC reset");
-    }
+    // In a thread of its own, not after a delay: this process may be about to crash, and the
+    // watchdog stops being petted, so a hanging restart still ends in a SoC reset.
+    std::thread::spawn(crate::sys::reboot_now);
 }
 
 pub fn start() {
