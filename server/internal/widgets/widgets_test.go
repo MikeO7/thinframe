@@ -50,6 +50,22 @@ func TestUnknownTypeRendersPlaceholder(t *testing.T) {
 	}
 }
 
+// A compact cars card is titled like every other card; the full view (one card per car) is not,
+// and a view that is not a string does not break the page.
+func TestCarsTitle(t *testing.T) {
+	for view, want := range map[any]string{"compact": `<div class="label">Garage</div>`, "full": "", 3.0: ""} {
+		f := store.Frame{ID: "k", Layout: store.Layout{Cols: 1, Rows: 1, Widgets: []store.Widget{
+			{ID: "g", Type: "cars", W: 1, H: 1, Props: map[string]any{"view": view, "title": "Garage"}}}}}
+		b, err := Render(f)
+		if err != nil {
+			t.Fatalf("view %v: %v", view, err)
+		}
+		if got := strings.Contains(string(b), `<div class="label">`); got != (want != "") || !strings.Contains(string(b), want) {
+			t.Errorf("view %v: want label %q", view, want)
+		}
+	}
+}
+
 func TestCalendarWidgetRenders(t *testing.T) {
 	f := store.Frame{ID: "k", Config: store.DefaultConfig(), Layout: store.Layout{Cols: 4, Rows: 3, Widgets: []store.Widget{
 		{ID: "cal", Type: "calendar", X: 0, Y: 0, W: 2, H: 1}}}}

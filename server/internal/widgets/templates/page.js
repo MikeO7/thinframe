@@ -11,6 +11,16 @@
     if (h12) return ((d.getHours() + 11) % 12 + 1) + ':' + pad(d.getMinutes());
     return pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
+  // An event's time as the locale writes it, split into [time, day period]: ["6:00", "PM"] in
+  // the US, ["18:00", ""] in most of Europe. One formatter, made once: they are slow to make.
+  const tfmt = (() => { try { return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }); } catch (e) { return null; } })();
+  function clock(d) {
+    if (!tfmt || !tfmt.formatToParts) return [hm(d, true), ''];
+    let t = '', p = '';
+    for (const x of tfmt.formatToParts(d)) { if (x.type === 'dayPeriod') p = x.value; else t += x.value; }
+    return [t.trim(), p];
+  }
+  const clockText = d => clock(d).filter(Boolean).join(' ');
 
   function paintClock() {
     const d = new Date();
@@ -265,7 +275,7 @@
       if (!d.events) { empty(b); return; }
       if (view === 'next') {
         if (!next) { empty(b, 'Nothing else today'); return; }
-        b.append(h('div', 'nx-title ellip', next.title), h('div', 'nx-when ellip', hm(next.s, true) + ' – ' + hm(next.e, true) + (next.where ? ' · ' + next.where : '')));
+        b.append(h('div', 'nx-title ellip', next.title), h('div', 'nx-when ellip', clockText(next.s) + ' – ' + clockText(next.e) + (next.where ? ' · ' + next.where : '')));
         const m = mins(now, next.s), n = h('div', 'big nx-in', m < 60 ? m : Math.floor(m / 60));
         n.append(h('span', 'unit', m < 60 ? ' min' : ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''))); b.append(n);
         return;
@@ -293,7 +303,9 @@
       const ahead = src.findIndex(e => e.e >= now), from = ahead < 0 ? Math.max(0, src.length - max) : Math.min(ahead, Math.max(0, src.length - max));
       for (const e of src.slice(from, from + max)) {
         const r = h('div', 'e' + (e.e < now ? ' past' : ''));
-        r.append(h('span', 'faint', hm(e.s, true)));
+        const [t0, ap] = clock(e.s), tm = h('span', 'faint', t0);
+        if (ap) tm.append(h('span', 'ap', ap));
+        r.append(tm);
         const t = h('div', 'ellip', e.title); if (e.where) t.append(h('small', 'ellip', e.where));
         r.append(t); list.append(r);
       }
@@ -404,6 +416,8 @@
       badge(sec, d.badge);
       const b = body(sec), items = merge(p.items, d.items);
       if (!items.length) { empty(b); return; }
+      // props.open names a tab: a tap anywhere on the card opens it (the House glance).
+      if (typeof p.open === 'string' && document.querySelector('.page[data-page="' + p.open + '"]')) sec.dataset.open = p.open;
       const l = h('div', 'lst');
       for (const x of items) l.append(tile(x.label, x.value, x.note, x.icon, x.state));
       b.append(l);
@@ -773,7 +787,9 @@
     pill.append(icon(o.ring ? 'bell' : 'cam'), h('span', '', o.name));
     top.append(pill, h('span', 'cv-live', 'Live'));
     const foot = h('div', 'cv-foot'), txt = h('div', 'cv-txt');
-    txt.append(h('div', 'cv-title', o.ring ? 'Someone\u2019s at the door' : o.name), h('div', 'cv-sub', o.sub || 'Tap anywhere to close'));
+    // The camera's name is in the pill; the big title only for a ring.
+    if (o.ring) txt.append(h('div', 'cv-title', 'Someone\u2019s at the door'));
+    txt.append(h('div', 'cv-sub', o.sub || 'Tap anywhere to close'));
     foot.append(txt, h('div', 'cv-btn', o.ring ? 'Dismiss' : 'Close'));
     el.append(pic, top, foot);
     el.addEventListener('click', () => { if (o.ring) dismissed(o.ringId, true); closeView(); });
@@ -789,6 +805,7 @@
     view.el.remove(); view.el = null;
   }
   addEventListener('click', e => { const t = e.target.closest('.cam'); if (t) openView({ id: t.dataset.cam, name: t.dataset.name, secs: 120 }); });
+  addEventListener('click', e => { const t = e.target.closest('.w[data-open]'); if (t) show(t.dataset.open); });
   // A dismissed ring stays dismissed across the reload a waking screen does.
   function dismissed(id, set) {
     try {

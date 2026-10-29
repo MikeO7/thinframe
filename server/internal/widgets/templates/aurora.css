@@ -74,6 +74,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .bar{background:rgba(255,255,255,.09)}
 .bar>i{background:linear-gradient(90deg,var(--accent),var(--accent2))}
 .chart i.now{background:var(--accent)}
+.carrow .bar>i{background:linear-gradient(90deg,#3f9dff,#22d6f0)} /* the cars app's battery bar, on every tab */
 .tl .ev{border-left-color:var(--accent);background:rgba(255,255,255,.07)}
 .day.today,.fc.wide .fd.today{border:1px solid var(--accent);background:linear-gradient(180deg,var(--glow),rgba(255,255,255,.04))}
 .fc.wide .fd{border:1px solid transparent}
