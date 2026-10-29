@@ -12,6 +12,26 @@ use std::time::{Duration, SystemTime};
 
 /// Seconds since the epoch at 2024-01-01: anything earlier is not a clock.
 pub const CLOCK_MIN: i64 = 1_704_067_200;
+/// A time more than this after the build is not a clock either (a bad server, a flipped bit).
+const MAX_AFTER_BUILD: i64 = 20 * 365 * 86_400 + 5 * 86_400;
+
+/// When this tfctl was built (build.rs), never before CLOCK_MIN.
+fn built() -> i64 {
+    env!("TF_BUILD_EPOCH")
+        .parse::<i64>()
+        .unwrap_or(CLOCK_MIN)
+        .max(CLOCK_MIN)
+}
+
+/// The latest time taken from any source: 20 years after the build.
+pub fn clock_max() -> i64 {
+    built() + MAX_AFTER_BUILD
+}
+
+/// A time any source may set: from 2024 to 20 years after the build.
+fn plausible(t: i64) -> bool {
+    (CLOCK_MIN..=clock_max()).contains(&t)
+}
 const NTP_SERVERS: [&str; 2] = ["pool.ntp.org:123", "time.google.com:123"];
 /// Seconds from 1900 (NTP) to 1970 (Unix).
 const NTP_UNIX_OFFSET: i64 = 2_208_988_800;
@@ -38,7 +58,7 @@ pub fn valid() -> bool {
 
 /// `date -s @t` when off by more than 2 s, then the RTC follows. `who` names the source in the log.
 pub fn set(t: i64, who: &str) {
-    if t < CLOCK_MIN {
+    if !plausible(t) {
         eprintln!("tfctl: clock: ignoring {t} from {who}");
         return;
     }
@@ -92,7 +112,7 @@ fn parse(reply: &[u8], nonce: [u8; 8]) -> Option<i64> {
         secs += 1 << 32;
     }
     let t = secs - NTP_UNIX_OFFSET;
-    (t >= CLOCK_MIN).then_some(t)
+    plausible(t).then_some(t)
 }
 
 /// Eight unpredictable bytes: the kernel's random pool.
@@ -195,5 +215,18 @@ mod tests {
         let t2040: i64 = 2_208_988_800;
         y2040[40..44].copy_from_slice(&ntp(t2040).to_be_bytes());
         assert_eq!(parse(&y2040, n), Some(t2040), "after the 2036 wrap");
+        // More than 20 years after the build: era 1 reaches 2172, a clock does not.
+        assert!(clock_max() >= built() + 20 * 365 * 86_400 && built() >= CLOCK_MIN);
+        let far = clock_max() + 1;
+        let mut late = r;
+        late[40..44].copy_from_slice(&ntp(far).to_be_bytes());
+        assert_eq!(parse(&late, n), None, "past the upper bound");
+        let mut edge = r;
+        edge[40..44].copy_from_slice(&ntp(clock_max()).to_be_bytes());
+        assert_eq!(parse(&edge, n), Some(clock_max()));
+        let mut y2096 = r;
+        y2096[40..44].copy_from_slice(&ntp(4_000_000_000).to_be_bytes());
+        assert_eq!(parse(&y2096, n), None, "2096");
+        assert!(!plausible(CLOCK_MIN - 1) && plausible(CLOCK_MIN));
     }
 }

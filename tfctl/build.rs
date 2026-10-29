@@ -1,6 +1,9 @@
 //! TF_DRAW_HASH: a hash of the code and assets that draw the splash and backdrops, for the render
 //! cache key (rendercache.rs). Keyed by the binary instead, every software update re-rendered the
 //! splash on its first boot, ~4 s of CPU before cog could start.
+//! TF_BUILD_EPOCH: when this ran (or SOURCE_DATE_EPOCH), for the clock's upper bound (clock.rs).
+//! It reruns only with the drawing files, so the value can be older than the binary: the bound
+//! is then earlier, still 20 years out.
 use std::fs;
 
 const DRAWING: &[&str] = &[
@@ -27,4 +30,14 @@ fn main() {
         }
     }
     println!("cargo:rustc-env=TF_DRAW_HASH={h:016x}");
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    let built = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs())
+        });
+    println!("cargo:rustc-env=TF_BUILD_EPOCH={built}");
 }
