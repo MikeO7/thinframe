@@ -988,7 +988,9 @@ paints its first frame in about 1.3 s; a warm one in about 0.17 s. So:
   with a `<base>` to the server, written after each connect and page version change), else on
   the status page. The live page then replaces it with `cogctl open`, in place. With no Wi-Fi
   for 10 s or no server after 3 tries the cached page gives way to the status page.
-- **In place, not restarts.** Page version changes `cogctl reload`; wake sends SIGCONT and the
+- **In place, not restarts.** Page version changes `cogctl reload`; screen off stops cog and then its
+  group (WPEWebProcess, WPENetworkProcess; until 2026-10-28 only cog stopped, so the page most
+  likely ran on [U]), wake continues the helpers, then cog, and the
   page's resume detector (a gap over 10 s in a 1 s timer) repaints the clock and reconnects.
   Restarts asked for while the screen is off are dropped.
 - **Wi-Fi early.** `tfctl boot fsck` (the first sysinit line) starts `modprobe aic8800_fdrv`

@@ -75,6 +75,74 @@ fn reap_group(pgid: u32) {
     }
 }
 
+/// (pid, ppid, pgrp) from the text of /proc/PID/stat. The name in parentheses may hold spaces
+/// and parentheses itself, so the fields are counted from the last ')'.
+fn parse_stat(text: &str) -> Option<(u32, u32, u32)> {
+    let pid = text.split_whitespace().next()?.parse().ok()?;
+    let mut f = text.get(text.rfind(')')? + 1..)?.split_whitespace();
+    let _state = f.next()?;
+    Some((pid, f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+}
+
+/// Every process now (empty without /proc).
+fn proc_table() -> Vec<(u32, u32, u32)> {
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    dir.flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        })
+        .filter_map(|e| parse_stat(&fs::read_to_string(e.path().join("stat")).ok()?))
+        .collect()
+}
+
+/// cog's helpers: the members of its process group (cog leads it, see `command`) and any
+/// descendant that left it, without cog itself. WPEWebProcess and WPENetworkProcess run the page.
+fn helpers_of(root: u32, procs: &[(u32, u32, u32)]) -> Vec<u32> {
+    let mut tree = vec![root];
+    loop {
+        let before = tree.len();
+        for &(pid, ppid, pgrp) in procs {
+            if !tree.contains(&pid) && (pgrp == root || tree.contains(&ppid)) {
+                tree.push(pid);
+            }
+        }
+        if tree.len() == before {
+            break;
+        }
+    }
+    tree.retain(|&p| p != root);
+    tree.sort_unstable();
+    tree
+}
+
+/// Pause cog and its helpers: cog first, so it never sees a stopped web process as hung while it
+/// still runs, then the whole group at once, then helpers outside the group.
+fn stop_tree(pid: u32) -> bool {
+    if sys::send(pid, sys::SIGSTOP).is_err() {
+        return false;
+    }
+    let _ = sys::send_group(pid, sys::SIGSTOP);
+    for h in helpers_of(pid, &proc_table()) {
+        let _ = sys::send(h, sys::SIGSTOP);
+    }
+    true
+}
+
+/// Resume in the other order: the helpers first, so the web process answers whatever cog asks
+/// as soon as cog runs, then cog, then the group as a catch-all (no /proc: the helpers).
+fn cont_tree(pid: u32) {
+    for h in helpers_of(pid, &proc_table()) {
+        let _ = sys::send(h, sys::SIGCONT);
+    }
+    let _ = sys::send(pid, sys::SIGCONT);
+    let _ = sys::send_group(pid, sys::SIGCONT);
+}
+
 /// The dashboard's dark background (server page.css `--bg`).
 const BG_COLOR: &str = "#0b0d10";
 /// WebKit's own memory limit for the WebProcess (cog `--web-mem-limit`, MiB). Above a third of it
@@ -524,7 +592,7 @@ impl Kiosk {
     fn kill_child(&mut self) {
         if let Some(mut c) = self.child.take() {
             if self.stopped {
-                let _ = sys::send(c.id(), sys::SIGCONT);
+                cont_tree(c.id());
             }
             let _ = c.kill();
             let _ = c.wait();
@@ -551,7 +619,7 @@ impl Kiosk {
             // source. A restart here cost ~7 s of splash and reload per wake [V 2026-10-27].
             if self.stopped {
                 if let Some(c) = &self.child {
-                    let _ = sys::send(c.id(), sys::SIGCONT);
+                    cont_tree(c.id());
                 }
                 self.stopped = false;
                 if std::mem::take(&mut self.reload_on_wake) && self.pending.is_none() {
@@ -569,7 +637,7 @@ impl Kiosk {
                 eprintln!("tfctl: backlight: {e}");
             }
             if let Some(c) = &self.child {
-                if !self.stopped && sys::send(c.id(), sys::SIGSTOP).is_ok() {
+                if !self.stopped && stop_tree(c.id()) {
                     self.stopped = true;
                 }
             }
@@ -1110,6 +1178,90 @@ mod tests {
         k.set_screen(true);
         assert!(!k.stopped && !k.reload_on_wake);
         k.kill_child();
+    }
+
+    #[test]
+    fn helpers_are_the_group_and_the_descendants() {
+        assert_eq!(
+            parse_stat("812 (WPEWebProcess) S 800 800 800 0 -1 4194560 1 0"),
+            Some((812, 800, 800))
+        );
+        assert_eq!(
+            parse_stat("9 (a) b (c)) R 1 9 9"),
+            Some((9, 1, 9)),
+            "odd name"
+        );
+        assert_eq!(parse_stat("junk"), None);
+        let procs = [
+            (1, 0, 1),     // init
+            (700, 1, 700), // tfctl
+            (800, 700, 800),
+            (812, 800, 800), // WPEWebProcess
+            (813, 800, 800), // WPENetworkProcess
+            (820, 812, 820), // a helper that made its own group
+            (900, 700, 700), // dbus-daemon: tfctl's, not cog's
+            (950, 1, 800),   // reparented to init, still in cog's group
+        ];
+        assert_eq!(helpers_of(800, &procs), vec![812, 813, 820, 950]);
+        assert!(helpers_of(800, &[]).is_empty());
+    }
+
+    /// ps's state letter for `pid` ("T" stopped); ps is on the Mac and on Linux.
+    fn state(pid: u32) -> String {
+        let o = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    }
+
+    fn wait_state(pid: u32, stopped: bool) -> bool {
+        let end = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < end {
+            if state(pid).starts_with('T') == stopped {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[test]
+    fn screen_off_pauses_cogs_helpers_too() {
+        use std::io::BufRead;
+        // Like cog: a group leader with a helper process.
+        let mut c = Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!; wait"])
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(c.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let helper: u32 = line.trim().parse().unwrap();
+        let mut k = Kiosk::new(&Config::default());
+        let pid = c.id();
+        k.child = Some(c);
+        k.set_screen(false);
+        assert!(k.stopped);
+        assert!(wait_state(pid, true), "cog stopped: {}", state(pid));
+        assert!(
+            wait_state(helper, true),
+            "helper stopped: {}",
+            state(helper)
+        );
+        k.set_screen(true);
+        assert!(!k.stopped);
+        assert!(
+            wait_state(helper, false),
+            "helper running: {}",
+            state(helper)
+        );
+        assert!(wait_state(pid, false), "cog running: {}", state(pid));
+        k.kill_child();
+        assert!(sys::send_group(pid, 0).is_err(), "group gone");
     }
 
     #[test]
