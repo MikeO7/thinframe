@@ -2,13 +2,17 @@ package api
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,6 +67,35 @@ func TestRemotePicturesAreShrunkAndOnlyFromSources(t *testing.T) {
 		if resp, _ := get(u, "96"); resp.StatusCode != 404 {
 			t.Errorf("%q: %d, want 404", u, resp.StatusCode)
 		}
+	}
+}
+
+// pngHeader is the start of a PNG claiming w x h pixels: enough for DecodeConfig, nothing to decode.
+func pngHeader(w, h uint32) []byte {
+	ihdr := make([]byte, 0, 17)
+	ihdr = append(ihdr, "IHDR"...)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, w)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, h)
+	ihdr = append(ihdr, 8, 0, 0, 0, 0) // 8-bit gray
+	b := []byte("\x89PNG\r\n\x1a\n")
+	b = binary.BigEndian.AppendUint32(b, 13)
+	b = append(b, ihdr...)
+	return binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(ihdr))
+}
+
+// A small file claiming huge dimensions (a decompression bomb) is refused before decoding.
+func TestImageDimensionsCheckedBeforeDecode(t *testing.T) {
+	for _, wh := range [][2]uint32{{16000, 16000}, {9000, 10}, {10, 9000}, {7000, 7000}} {
+		if _, err := decodeBounded(pngHeader(wh[0], wh[1])); err == nil || !strings.Contains(err.Error(), "too large") {
+			t.Errorf("%dx%d: %v, want too large", wh[0], wh[1], err)
+		}
+	}
+	var ok bytes.Buffer
+	if err := png.Encode(&ok, image.NewGray(image.Rect(0, 0, 300, 200))); err != nil {
+		t.Fatal(err)
+	}
+	if img, err := decodeBounded(ok.Bytes()); err != nil || img.Bounds().Dx() != 300 {
+		t.Fatalf("a normal picture: %v", err)
 	}
 }
 

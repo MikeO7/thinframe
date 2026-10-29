@@ -95,7 +95,11 @@ func (c *imgCache) fetch(ctx context.Context, u string, w int) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("image: %s", resp.Status)
 	}
-	src, _, err := image.Decode(io.LimitReader(resp.Body, imgMaxBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, imgMaxBytes))
+	if err != nil {
+		return nil, err
+	}
+	src, err := decodeBounded(body)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +108,29 @@ func (c *imgCache) fetch(ctx context.Context, u string, w int) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// imgMaxSide and imgMaxPixels bound a picture before it is decoded. The byte limit alone does
+// not: a 242 KB PNG of 16000x16000 flat pixels made the server allocate 244 MB. 40 MP is a
+// large camera photo, decoded at 4 bytes a pixel, 160 MB at worst.
+const (
+	imgMaxSide   = 8192
+	imgMaxPixels = 40_000_000
+)
+
+// decodeBounded decodes b after checking the dimensions its header claims.
+func decodeBounded(b []byte) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > imgMaxSide || cfg.Height > imgMaxSide ||
+		cfg.Width*cfg.Height > imgMaxPixels {
+		return nil, fmt.Errorf("image: %dx%d is too large (at most %d a side and %d pixels)",
+			cfg.Width, cfg.Height, imgMaxSide, imgMaxPixels)
+	}
+	src, _, err := image.Decode(bytes.NewReader(b))
+	return src, err
 }
 
 // shrink scales src down to width w by averaging each block of source pixels (a box filter).
