@@ -188,10 +188,17 @@ pub struct Splash {
     display: Arc<Mutex<drm::Display>>,
     handed_over: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     anim: Option<thread::JoinHandle<()>>,
 }
 
 impl Splash {
+    /// Hold the animation (the backlight is off): the picture stays, no frames are drawn. A
+    /// cog that paints while paused still ends the splash.
+    pub fn pause(&self, on: bool) {
+        self.paused.store(on, Ordering::SeqCst);
+    }
+
     /// Let cog take the display: drop DRM master, keep the picture up. False if that failed
     /// (then the caller must drop the splash, or cog cannot become master).
     pub fn hand_over(&mut self) -> bool {
@@ -502,12 +509,18 @@ pub fn show(look: &Look) -> io::Result<Splash> {
         look.rotation, look.style, look.title, look.status, look.ip
     );
     let display = Arc::new(Mutex::new(d));
-    let (handed_over, stop) = (
+    let (handed_over, stop, paused) = (
+        Arc::new(AtomicBool::new(false)),
         Arc::new(AtomicBool::new(false)),
         Arc::new(AtomicBool::new(false)),
     );
     let anim = animated.then(|| {
-        let (disp, handed, stop) = (display.clone(), handed_over.clone(), stop.clone());
+        let (disp, handed, stop, pause) = (
+            display.clone(),
+            handed_over.clone(),
+            stop.clone(),
+            paused.clone(),
+        );
         let (style, title, status, ip, rot) = (
             look.style.to_string(),
             look.title.to_string(),
@@ -520,8 +533,7 @@ pub fn show(look: &Look) -> io::Result<Splash> {
             sys::nice_this_thread(10);
             animate(
                 &disp,
-                &handed,
-                &stop,
+                (&handed, &stop, &pause),
                 (w, h),
                 rot,
                 (&style, &title, &status),
@@ -534,17 +546,18 @@ pub fn show(look: &Look) -> io::Result<Splash> {
         display,
         handed_over,
         stop,
+        paused,
         anim,
     })
 }
 
-/// Redraw the animated scene every `period` until stopped or until cog's picture replaced ours.
-/// The address is looked up every 2 s and the scene rebuilt when it appears or changes.
+/// Redraw the animated scene every `period` until stopped or until cog's picture replaced ours,
+/// drawing nothing while paused. The address is looked up every 2 s and the scene rebuilt when
+/// it appears or changes.
 #[allow(clippy::too_many_arguments)]
 fn animate(
     disp: &Mutex<drm::Display>,
-    handed: &AtomicBool,
-    stop: &AtomicBool,
+    (handed, stop, paused): (&AtomicBool, &AtomicBool, &AtomicBool),
     (w, h): (usize, usize),
     rot: u8,
     (style, title, status): (&str, &str, &str),
@@ -566,6 +579,15 @@ fn animate(
     let start = Instant::now();
     let (mut frames, mut busy, mut last_ip) = (0u32, Duration::ZERO, Instant::now());
     while !stop.load(Ordering::SeqCst) {
+        if paused.load(Ordering::SeqCst) {
+            let d = disp.lock().unwrap_or_else(|e| e.into_inner());
+            if handed.load(Ordering::SeqCst) && !d.shown() {
+                break;
+            }
+            drop(d);
+            thread::sleep(Duration::from_millis(250));
+            continue;
+        }
         let t0 = Instant::now();
         if last_ip.elapsed() >= Duration::from_secs(2) {
             last_ip = Instant::now();

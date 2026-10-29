@@ -475,7 +475,10 @@ impl Kiosk {
             },
         };
         match splash::show(&look) {
-            Ok(s) => self.splash = Some(s),
+            Ok(s) => {
+                s.pause(!SCREEN_ON.load(Ordering::SeqCst));
+                self.splash = Some(s);
+            }
             Err(e) => eprintln!("tfctl: splash: {e}"),
         }
     }
@@ -610,6 +613,11 @@ impl Kiosk {
     fn set_screen(&mut self, on: bool) {
         SCREEN_ON.store(on, Ordering::SeqCst);
         crate::speed::cpu_governor(on);
+        // A boot inside the off hours pauses cog before its first frame, so the splash is never
+        // replaced: without this the dawn animation drew all night behind a dark backlight.
+        if let Some(s) = &self.splash {
+            s.pause(!on);
+        }
         if on {
             if let Err(e) = screen::set_brightness(self.backlight) {
                 eprintln!("tfctl: backlight: {e}");
