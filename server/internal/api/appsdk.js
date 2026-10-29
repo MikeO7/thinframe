@@ -12,6 +12,11 @@
   const app = (location.pathname.match(/^\/apps\/([a-z0-9_-]+)\//) || [])[1] || '';
   const embedded = window.parent !== window;
   const enc = encodeURIComponent;
+  // Full screen the server puts the frame's emit key on this script's tag (data-k); emit
+  // needs it. In a widget the dashboard adds its own, so the key is never used there.
+  const me = document.currentScript;
+  const key = (me && me.dataset.k) || '';
+  if (me) me.removeAttribute('data-k');
   const subs = {};
   let readyResolve;
   const tf = {
@@ -89,7 +94,7 @@
     tf.data(key).then(d => { if (d !== null) cb(d, key); });
     return off;
   };
-  tf.emit = (name, data) => req('POST', () => '/api/frames/' + enc(tf.frame) + '/emit', JSON.stringify({ app, name, data }))
+  tf.emit = (name, data) => req('POST', () => '/api/frames/' + enc(tf.frame) + '/emit' + (key && !embedded ? '?k=' + enc(key) : ''), JSON.stringify({ app, name, data }))
     .then(r => json(r) || { ok: false, status: r.status, error: r.body });
   tf.listen = (name, cb) => add('event', name, cb);
   tf.state = {

@@ -3,7 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +33,15 @@ import (
 var appSDK []byte
 
 // appCSP sandboxes every app document. No allow-same-origin: that would undo the sandbox.
-const appCSP = "sandbox allow-scripts allow-forms allow-pointer-lock allow-downloads"
+// frame-ancestors: only this server's dashboard may frame an app ('self' is the origin of the
+// app's URL, even for a sandboxed document), and the frame's saved dashboard, which opens
+// from a file:// URL at boot (tfctl offline.rs). A framed app talks only to its parent, so a
+// page that frames one gets nothing but its own postMessages.
+const appCSP = "sandbox allow-scripts allow-forms allow-pointer-lock allow-downloads; frame-ancestors 'self' file:"
+
+// pageCSP is the dashboard page's: no other site may frame it (a framed page could be clicked
+// into switching lights).
+const pageCSP = "frame-ancestors 'self'"
 
 // MaxEmit bounds one emit body; emitBurst emits per emitWindow per frame (or app) are allowed.
 const (
@@ -41,10 +53,34 @@ const (
 
 var headRe = regexp.MustCompile(`(?i)<head(\s[^>]*)?>|<!doctype[^>]*>`)
 
+// EmitKey is what a public emit for frameID must carry (query parameter k) when the server
+// has a token (secret): the first 32 hex digits of HMAC-SHA256(secret, "emit:"+frameID). Only
+// documents this server serves carry it (the dashboard page, an app shown full screen for that
+// frame), and no other origin can read either, so a cross-site page on the LAN cannot fire a
+// hook (docs/decisions.md "Apps"). Without a secret (LAN dev mode) it is "" and emit is open.
+func EmitKey(secret, frameID string) string {
+	if secret == "" {
+		return ""
+	}
+	m := hmac.New(sha256.New, []byte(secret))
+	m.Write([]byte("emit:" + frameID))
+	return hex.EncodeToString(m.Sum(nil))[:32]
+}
+
+// emitKeyOK: the request carries frameID's emit key, or none is needed.
+func (s *Server) emitKeyOK(r *http.Request, frameID string) bool {
+	want := EmitKey(s.opts.Token, frameID)
+	return want == "" || subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("k")), []byte(want)) == 1
+}
+
 // injectSDK puts the SDK script first in the document head (or after the doctype, never
-// before it: that would switch the page to quirks mode).
-func injectSDK(b []byte) []byte {
+// before it: that would switch the page to quirks mode). A non-empty key (hex) goes on the tag
+// as data-k; the SDK reads it, removes it and adds it to its emits.
+func injectSDK(b []byte, key string) []byte {
 	tag := []byte(`<script src="/apps-sdk.js"></script>`)
+	if key != "" {
+		tag = []byte(`<script src="/apps-sdk.js" data-k="` + key + `"></script>`)
+	}
 	loc := headRe.FindIndex(b)
 	if loc == nil {
 		return append(tag, b...)
@@ -59,9 +95,13 @@ func injectSDK(b []byte) []byte {
 	return append(out, b[loc[1]:]...)
 }
 
-func appHeaders(h http.Header) {
+// appHeaders: every app file. cors adds Access-Control-Allow-Origin * (an app's own scripts,
+// fonts and data, fetched from its opaque origin); never on a document that carries an emit key.
+func appHeaders(h http.Header, cors bool) {
 	h.Set("Content-Security-Policy", appCSP)
-	h.Set("Access-Control-Allow-Origin", "*")
+	if cors {
+		h.Set("Access-Control-Allow-Origin", "*")
+	}
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Cache-Control", "no-cache")
@@ -79,16 +119,29 @@ func (s *Server) handleAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	h := w.Header()
-	appHeaders(h)
+	html := strings.HasSuffix(p, ".html")
+	etag := fmt.Sprintf("%s-%d-%s", name, v, s.opts.Version)
+	// Full screen (?frame=<id>) a document carries that frame's emit key, so no other origin
+	// may read it: no CORS header on it.
+	key := ""
+	if fr := r.URL.Query().Get("frame"); html && store.ValidID(fr) {
+		key = EmitKey(s.opts.Token, fr)
+	}
+	appHeaders(h, key == "")
+	if key != "" {
+		// A new token is a new key: a cached copy must not revalidate.
+		sum := sha256.Sum256([]byte(key))
+		etag += "-" + hex.EncodeToString(sum[:4])
+	}
 	h.Set("Content-Type", apps.ContentType(p))
-	h.Set("ETag", fmt.Sprintf(`"%s-%d-%s"`, name, v, s.opts.Version))
-	if strings.HasSuffix(p, ".html") {
+	h.Set("ETag", `"`+etag+`"`)
+	if html {
 		b, err := io.ReadAll(io.LimitReader(f, apps.MaxBytes))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(injectSDK(b)))
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(injectSDK(b, key)))
 		return
 	}
 	http.ServeContent(w, r, "", time.Time{}, f)
@@ -326,11 +379,18 @@ func readSmall(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, boo
 	return b, true
 }
 
-// handleEmit: POST /api/frames/{id}/emit {"app","name","data"}. Public like the page (the app
-// has no token); limited per frame, and it never creates a frame record.
+// handleEmit: POST /api/frames/{id}/emit?k=<key> {"app","name","data"}. No token (the page
+// and the apps have none), but with a server token it needs the frame's emit key (EmitKey),
+// which only documents this server serves carry: a hook can unlock the car, and any web page
+// open on the LAN could otherwise POST here. The key is checked first, so a caller without it
+// cannot probe which frames exist. Limited per frame; it never creates a frame record.
 func (s *Server) handleEmit(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	id := r.PathValue("id")
+	if !s.emitKeyOK(r, id) {
+		http.Error(w, "emit needs this frame's key (k): only pages this server serves carry it", http.StatusForbidden)
+		return
+	}
 	if _, err := s.Store.Get(id); err != nil {
 		http.Error(w, "no such frame", http.StatusNotFound)
 		return

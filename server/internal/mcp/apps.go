@@ -56,6 +56,8 @@ Every app page runs in a sandbox with an opaque origin. So:
 - on(key, cb): cb(data) now and on every change of that source; returns an unsubscribe fn.
 - emit(name, data): Promise<{ok, status, body, error}>. Logged (get_app_events); if a hook named
   name exists (set_hook) the server runs it and body is its answer (with return_body). Buttons!
+  Always emit through the SDK: the server wants the frame's emit key, which the SDK adds; a
+  plain fetch to /api/frames/<id>/emit gets 403.
 - state.get(key) / state.set(key, value) / state.all() / state.watch(key, cb): JSON kept on the
   server per app (64 keys, 64 KB), shared by every frame showing the app and pushed live.
   get_app_state / set_app_state read and write it from MCP.

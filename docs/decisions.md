@@ -667,6 +667,30 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   `POST /api/frames/<id>/emit`. They answer any origin. Emit is limited to 20 per 10 s per frame,
   state writes to 80 per 10 s per app; emit needs an existing frame and never creates one.
   Sources become readable by anyone on the LAN, as they already were through any page's stream.
+- **Emit needs the frame's emit key (2026-10-28).** Open, emit was a cross-site request
+  forgery: it answered any origin and took a no-preflight `text/plain` POST, so any web page
+  open on a phone or laptop on the LAN could fire a hook, and the `car` hook unlocks the car.
+  An Origin check cannot tell us from them (sandboxed apps send `Origin: null`, and so can an
+  attacker's sandboxed iframe). Now, when the server has a `FRAME_TOKEN`, emit wants `?k=<key>`,
+  key = the first 32 hex digits of HMAC-SHA256(FRAME_TOKEN, "emit:"+frame id), compared in
+  constant time, 403 otherwise (checked before the frame lookup, so it does not tell which
+  frames exist). Only documents the server serves carry it, and no other origin can read them
+  (no `Access-Control-Allow-Origin`): the dashboard `/frame/<id>` (`window.TF.k`; page.js adds
+  it to its room switches and, after its path allowlist, to the emits it forwards for app
+  widgets, which never see it) and an app document served with `?frame=<id>` (on the SDK's
+  script tag as `data-k`; the SDK takes it off and adds it to `emit`). App documents without
+  `?frame=`, app assets and `/apps-sdk.js` hold no key and keep `*`. The frame's saved boot
+  dashboard (file://) has the key in its copy, so its switches still work. Without a token
+  (LAN dev mode, the sim) there is no key and emit stays open. MCP `send_to_app` and other
+  authenticated callers are unchanged. Against clickjacking, `/frame/<id>` sends
+  `Content-Security-Policy: frame-ancestors 'self'` and app documents add
+  `frame-ancestors 'self' file:` ('self' is the origin of the app's URL even in its sandbox, so
+  the dashboard's own app widgets still load; `file:` keeps them in the saved boot page; a
+  framed app talks only to its parent, so a framing page gains nothing). [V 2026-10-28: Go
+  tests (`emitkey_test.go`, the auth matrix); headless Chromium against a local server with a
+  token: a full-screen app's and an app widget's `thinframe.emit` both reach the server, a
+  plain POST gets 403]; [U] on the frame's WPE WebKit, in particular frame-ancestors for the
+  app widgets of the file:// boot page: check them on the frame.
 - **Buttons and outside APIs without secrets in pages.** A *hook* (`set_hook`) is a named HTTP
   request the server makes when an app emits that name: URL, method, headers (tokens) and a body
   template with `{{data}}`. A *poll* (`set_poll`) fetches a URL every 15 s or more into a source.

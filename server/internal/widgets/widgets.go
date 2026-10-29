@@ -110,7 +110,10 @@ var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
 
 // Page is the data the base template sees.
 type Page struct {
-	FrameID     string
+	FrameID string
+	// EmitKey is the frame's emit key (api.EmitKey; "" = none needed). The page's own emits
+	// and the ones it forwards for app widgets carry it; the apps never see it.
+	EmitKey     string
 	Layout      store.Layout
 	Config      store.Config
 	PageVersion int
@@ -142,11 +145,12 @@ type TabButton struct {
 }
 
 // Render produces the whole page for a frame.
-func Render(f store.Frame) ([]byte, error) { return RenderSim(f, 0, 0, 0, 0) }
+func Render(f store.Frame) ([]byte, error) { return RenderSim(f, "", 0, 0, 0, 0) }
 
-// RenderSim renders with an optional simulated panel size (simW x simH) scaled to
-// fit a surface of fitW x fitH (see Page.SimW). fit 0 means scale 1.
-func RenderSim(f store.Frame, simW, simH, fitW, fitH int) ([]byte, error) {
+// RenderSim renders with the frame's emit key (Page.EmitKey) and an optional simulated panel
+// size (simW x simH) scaled to fit a surface of fitW x fitH (see Page.SimW). fit 0 means
+// scale 1.
+func RenderSim(f store.Frame, emitKey string, simW, simH, fitW, fitH int) ([]byte, error) {
 	scale := 1.0
 	if simW > 0 && fitW > 0 && fitH > 0 {
 		scale = min(float64(fitW)/float64(simW), float64(fitH)/float64(simH))
@@ -181,7 +185,7 @@ func RenderSim(f store.Frame, simW, simH, fitW, fitH int) ([]byte, error) {
 	}
 	var out bytes.Buffer
 	err := tmpl.ExecuteTemplate(&out, "page.html", Page{
-		FrameID: f.ID, Layout: lay, Config: f.Config, PageVersion: f.Config.PageVersion,
+		FrameID: f.ID, EmitKey: emitKey, Layout: lay, Config: f.Config, PageVersion: f.Config.PageVersion,
 		CSS: template.CSS(css), JS: template.JS(js), Widgets: ws, //nolint:gosec // embedded assets
 		Pages: pages, Buttons: buttons, IdleS: idle,
 		SimW: simW, SimH: simH, SimScale: scale,
