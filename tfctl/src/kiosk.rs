@@ -1223,6 +1223,14 @@ mod tests {
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     }
 
+    fn comm(pid: u32) -> String {
+        let o = Command::new("ps")
+            .args(["-o", "comm=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    }
+
     fn wait_state(pid: u32, stopped: bool) -> bool {
         let end = Instant::now() + Duration::from_secs(2);
         while Instant::now() < end {
@@ -1249,6 +1257,12 @@ mod tests {
             .read_line(&mut line)
             .unwrap();
         let helper: u32 = line.trim().parse().unwrap();
+        // Wait for the helper to be `sleep`: on the Mac a stop that lands between the shell's
+        // fork and its exec was lost about one run in ten under a loaded test run.
+        let end = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < end && !comm(helper).contains("sleep") {
+            thread::sleep(Duration::from_millis(10));
+        }
         let mut k = Kiosk::new(&Config::default());
         let pid = c.id();
         k.child = Some(c);
