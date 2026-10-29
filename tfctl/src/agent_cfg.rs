@@ -11,7 +11,6 @@ use crate::png;
 use crate::sysupdate;
 use crate::update::{self, Artifacts};
 use std::io;
-use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
@@ -221,7 +220,7 @@ impl Agent {
                 // Let the ack leave first.
                 thread::spawn(|| {
                     thread::sleep(Duration::from_secs(1));
-                    let _ = Command::new("reboot").spawn();
+                    crate::sys::reboot_now();
                 });
                 Ok(())
             }
