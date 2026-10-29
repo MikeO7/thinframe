@@ -34,8 +34,11 @@ iframe{border:0;width:100%;height:100%;display:block}
 .tab{display:flex;align-items:center;gap:.9rem;padding:1.3rem 2.2rem;border-radius:99rem;font-size:1.6rem;font-weight:500;color:var(--dim)}
 .tab svg,.ic{width:2rem;height:2rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .tab.on{background:var(--sel);color:var(--fg)}
-.seg{display:none;padding:.4rem;border-radius:99rem;background:var(--chip);font-size:1.3rem;margin:0 .4rem}
-.seg.show{display:flex}.seg span{padding:.8rem 1.4rem;border-radius:99rem;color:var(--dim)}.seg span.on{background:var(--fg);color:var(--bg)}
+/* A tab's second pages are always listed under it, open or not: the rail never moves, so a quick
+   tap (tabs switch on touch-down) lands where the finger aimed (opening House used to move the
+   buttons below it by 53 px). */
+.seg{display:flex;padding:.4rem;border-radius:99rem;background:var(--chip);font-size:1.3rem;margin:0 .4rem}
+.seg span{padding:.8rem 1.4rem;border-radius:99rem;color:var(--dim)}.seg span.on{background:var(--fg);color:var(--bg)}
 /* nav left (default): a rail down the left edge, icon over label; the grid gets the full height */
 .nav-left .page{padding:2.8rem 2.8rem 2.8rem 16.4rem}
 .nav-left .tabs{left:2.4rem;top:2.8rem;bottom:2.8rem;transform:none;flex-direction:column;gap:.6rem;padding:.8rem;border-radius:3rem;width:11.2rem}

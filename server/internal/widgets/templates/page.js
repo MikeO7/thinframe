@@ -623,7 +623,8 @@
   // ---- tabs -------------------------------------------------------------------------------
   const grid = document.getElementById('grid');
   let idleT;
-  // The rail first: it is small and cheap to redraw, so the touch shows in the next frame.
+  // The rail first: it is small and cheap to redraw, so the touch shows in the next frame. A
+  // tab's second pages are always listed (.seg); "show" marks the list of the open tab.
   function highlight(id) {
     let parent = null;
     document.querySelectorAll('.seg').forEach(s => {
