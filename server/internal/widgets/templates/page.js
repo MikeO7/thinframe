@@ -699,12 +699,32 @@
   // reach the server through this page, so the page keeps the only event stream.
   const appFrames = Array.from(document.querySelectorAll('iframe.app'));
   const toApps = m => appFrames.forEach(f => f.contentWindow && f.contentWindow.postMessage({ tf: 1, op: 'server', msg: m }, '*'));
+  // Every app says hello once its script runs (the SDK is in every app document). One that has
+  // not after 15 s (the server unreachable, an error page, a broken app) gets a note in its place
+  // instead of a blank tab, and is loaded again every 30 s until it answers.
+  function appWait(f) {
+    clearTimeout(f._t);
+    f._hello = false;
+    f._t = setTimeout(function check(retry) {
+      if (f._hello) return;
+      if (!f._fail) {
+        const n = f.dataset.app || 'app', el = f._fail = h('div', 'appfail');
+        el.append(h('div', '', n[0].toUpperCase() + n.slice(1) + ' did not load'), h('small', '', 'Trying again every 30 seconds'));
+        f.after(el);
+      }
+      f._fail.hidden = false;
+      if (retry) f.src = f.src;
+      f._t = setTimeout(check, 30000, true);
+    }, 15000, false);
+  }
+  appFrames.forEach(appWait);
   if (appFrames.length) {
     addEventListener('message', e => {
       const f = appFrames.find(x => x.contentWindow === e.source), m = e.data;
       if (!f || !m || m.tf !== 1) return;
       const sec = f.closest('.w'), name = f.dataset.app;
       if (m.op === 'hello') {
+        f._hello = true; clearTimeout(f._t); if (f._fail) f._fail.hidden = true;
         let p = {};
         try { p = JSON.parse(sec.querySelector('script.wp').textContent); } catch { /* no props */ }
         e.source.postMessage({ tf: 1, op: 'init', frame: TF.frame, widget: sec.id.slice(2), props: p.props || {} }, '*');
@@ -815,7 +835,7 @@
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.reload || (m.page_version && m.page_version !== TF.pageVersion)) { location.reload(); return; }
       if (m.source || m.app_state || m.app_event) { toApps(m); return; }
-      if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) f.src = f.src; }); return; }
+      if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) { f.src = f.src; appWait(f); } }); return; }
       if (m.doorbell) { ring(m.doorbell); return; }
       if (m.gesture) { gesture(m.gesture); return; }
       if (!m.widget) return;
