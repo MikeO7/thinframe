@@ -895,3 +895,30 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   is disk bound (`/proc/pressure/io` some about 4 s of the first 10 s).
 - Wi-Fi MAC differs each boot (88:00:33:77:a3:fa, :24:ed, :68:51) [V], so DHCP takes a fresh
   lease (1.9 s idle). Needs a system image (iwd AddressOverride); not done.
+
+## 2026-10-28 Booting from the eMMC with no card
+- Owner report: with the card out, the frame does not boot [V]. The eMMC holds thinframe as
+  checked on 2026-10-27; PARTITION_CONFIG is 0x00 (no boot partition enabled).
+- Next: boot with the card out and USB-C to the Mac, and read what enumerates. FEL (1f3a:efe8)
+  means the BROM refused the eMMC; U-Boot (1f3a:1010) or the Linux gadget (0525:a4aa) means it
+  got further. A whycan report fixed A33 eMMC boot with PARTITION_CONFIG set to boot from the user
+  area [D]; if we need that, it goes into `tfctl emmc install`, never by hand.
+
+## 2026-10-28 QA pass (PRs #149, #150, #151), measured on the frame from the card
+- Wi-Fi loss [V] (`iwctl station wlan0 disconnect`): before, the page came back after 91 s
+  (the agent waited out the socket); after 832ecaa the agent leaves the session 3 s after the link
+  drops, rejoin 8 s, live page about 16 s.
+- Server loss [V] (blackhole route to the server): the frame keeps the page on screen, marks
+  the server dead after 90 s, reconnects 2 s after the route is back.
+- reload-page 2.1 s; restart-kiosk to a loaded page 4.1 s [V].
+- `tfctl bench` tabs [V]: p50 51 ms, max 235 ms; Cars tab 90 ms after the 08022e9 update.
+- Idle CPU 1.8 %, 41 °C [V].
+- Card boot [V]: cog spawned 3.96 s, WebKit ready 10.2 s (card bound), live page loaded 15.1 s.
+- Root fs 99 % full, 1.3 MB free [V]; iwd roam-scans twice a minute at -16 dBm [V]. Both need
+  a system image; not done.
+- Emit needed no key, so any page on the LAN could press a frame's buttons [V]. Fixed in #150:
+  emits carry an HMAC of the frame token; prod answers 403 without it (curl, 2026-10-28) [V].
+- Deployed [V]: server 08022e9 on Nox; software 2026.10.28-08022e9 on the frame by
+  `update-software`, log `software-updated: 2026.10.28-08022e9`, live page loaded 3.5 s later.
+- Nox host backup has failed since 2026-10-21 (`home-nox-media.automount` failed, so
+  `nox-update.service` stops) [V]; thinframe's data on Nox is not backed up. Needs the owner.
