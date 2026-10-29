@@ -66,21 +66,26 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: image self-check in `build.sh` passes; `image/out/thinframe-sd.img.sha256` written.
 
 ## 4. First boot on the frame (owner)
-- [ ] Write card with `scripts/write-card-macos.sh`. Power the frame from the Mac over USB-C.
+- [x] Write card with `scripts/write-card-macos.sh`. Power the frame from the Mac over USB-C.
+      (The script became `scripts/flash.sh`; a real card was written with it, docs/log.md.)
 - [ ] Within 60 s the Mac sees a USB serial device and a USB Ethernet interface (192.168.7.1
       host / 192.168.7.2 frame). `ssh frame@192.168.7.2` logs in.
 - Gate: `uname -a` shows 7.2.10; `dmesg | grep -i -E 'panel|dsi'` shows the panel bound.
 
 ## 5. Display
-- [ ] Console appears on the panel (DTB `full`, panel module loaded by `modules-load.d`).
-- [ ] `tfctl kiosk` (tfctl/src/kiosk.rs): spawn cog, restart on exit with back-off, SIGTERM passthrough.
-- [ ] `/etc/init.d/S90thinframe start` shows `www/index.html` full screen, landscape.
+- [x] Console appears on the panel (DTB `full`, panel module loaded by `modules-load.d`).
+      (Superseded by TASK 15: the console is kept off the panel, `fbcon=map:9`; the panel is bound and cog draws on DSI-1, docs/log.md.)
+- [x] `tfctl kiosk` (tfctl/src/kiosk.rs): spawn cog, restart on exit with back-off, SIGTERM passthrough.
+      (On the frame: cog on the panel, `restart-kiosk` acks and the page watchdog's restart, docs/log.md.)
+- [x] `/etc/init.d/S90thinframe start` shows `www/index.html` full screen, landscape.
+      (Superseded: the dashboard comes from the server; rotation 3 is upright on the panel, docs/log.md.)
       Tune `COG_ROTATION` in `/etc/thinframe.conf` (expect 3, [U]).
 - [ ] Memory: `free -m` before and after the page. Budget: <60 MB before, <300 MB after. Record it.
 - Gate: photo of the page on the frame in `docs/img/`, `free -m` output in `docs/log.md`.
 
 ## 6. Touch
-- [ ] `evtest` shows the Silead device. Firmware loaded (`dmesg | grep silead`).
+- [x] `evtest` shows the Silead device. Firmware loaded (`dmesg | grep silead`).
+      (Firmware hash matches, silead bound, taps work on the panel, docs/log.md.)
 - [ ] Release image (no firmware in it): the boot log says `touch firmware read from /dev/mmcblkN
       sector 172032`, `/data/thinframe/firmware/silead/gsl_m86_hd.fw` has SHA-256 e11ffa8a…, taps work.
 - [ ] Tapping the four corners of `www/index.html` (it prints coordinates) matches. Fix with
@@ -89,23 +94,26 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: all four corners within 10 px.
 
 ## 7. Wi-Fi
-- [ ] `tfctl wifi "SSID" "psk"` (tfctl/src/wifi.rs) writes `/var/lib/iwd/<SSID>.psk` and iwd connects.
+- [x] `tfctl wifi "SSID" "psk"` (tfctl/src/wifi.rs) writes `/var/lib/iwd/<SSID>.psk` and iwd connects.
       Modules `aic8800_bsp aic8800_fdrv` load from `modules-load.d` in that order. [D]
 - [ ] Reboot with no USB data cable: ssh by the DHCP-assigned name/IP works (no avahi: the router
       learns the hostname from dhcpcd).
-- Gate: three reboots in a row reconnect without help.
+- [x] Gate: three reboots in a row reconnect without help.
+  (Prod events 2026-10-27: about ten reboots, each reconnected by itself, docs/log.md 2026-10-28.)
 
 ## 8. Update path
-- [ ] `tfctl update` (tfctl/src/update.rs) fetches the main tarball with busybox wget, applies
+- [x] (Superseded by server artifacts, TASK 11 and #72: the root is read-only, no tarball overlay.)
+      `tfctl update` (tfctl/src/update.rs) fetches the main tarball with busybox wget, applies
       `image/rootfs/` and `www/`, replaces `/usr/bin/tfctl` from the latest GitHub release asset
       if newer, restarts the service. Logs to `/var/log/tf-update.log`.
-- [ ] Fast iteration goes through the server, not a push script (the root is read-only): cross-build
+- [x] Fast iteration goes through the server, not a push script (the root is read-only): cross-build
       tfctl, `scripts/make-artifacts.sh VERSION tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl`
-      stages `tfctl-armv7` + `overlay.tar.gz` in `server/artifacts/`, rebuild the frameserver
+      stages `tfctl-armv7` (no `overlay.tar.gz` any more) in `server/artifacts/`, rebuild the frameserver
       container; the agent sees the new `software_version` and installs it (TASK 11). Page changes
       need no frame step: they live on the server (`/admin`, `server/internal/widgets/`).
-- Gate: change `image/rootfs/` or tfctl on the Mac, stage, rebuild the container; the frame
+- [x] Gate: change `image/rootfs/` or tfctl on the Mac, stage, rebuild the container; the frame
   heartbeats the new version within one poll, with no ssh.
+  (tfctl half [V] 2026-10-28: 2026.10.28-08022e9 staged, `update-software`, heartbeat shows it; the rootfs half is TASK 12's system update.)
 
 ## 10. Thin client (frame side)
 - [x] `tfctl agent` (tfctl/src/agent.rs): WebSocket client (RFC 6455 over TcpStream, text frames,
@@ -150,7 +158,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: a person who has not read the repo flashes a frame from docs/flashing.md alone, timed, no questions asked.
 
 ## 15. Boot experience (ours from the first lit pixel)
-- [ ] Kernel cmdline: `quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0 fbcon=map:9`
+- [x] Kernel cmdline: `quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0 fbcon=map:9`
       so no console text ever appears on the panel; kernel log stays on ttyGS0 for debugging,
       `/dev/console` is tty1 (a write to ttyGS0 waits for a USB host).
 - [ ] `tfctl splash`: open /dev/dri/card0 (dumb buffer, no GLES), fill background colour, blit a PNG
@@ -323,7 +331,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: frame boots thinframe with no card; rescue card boots; backup restores Android on a test unit.
 
 ## 9. Polish (optional, after everything above)
-- [ ] Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
+- [x] (Superseded by TASK 15's cmdline, `loglevel=0`.) Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank
       console via `consoleblank`.
 - [x] Health check in `tfctl kiosk`: detect a hung WebProcess and restart cog.
       (Done server-side: the page pings `/alive` from a JS timer; a page that pinged during this agent
