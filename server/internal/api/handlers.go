@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,12 @@ func (s *Server) handleDeleteFrame(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	delete(s.pair.open, id)
 	s.mu.Unlock()
+	// Its screenshots and reports go with it (id is valid: Delete checked it).
+	for _, dir := range []string{s.shotDir(id), s.reportDir(id)} {
+		if err := os.RemoveAll(dir); err != nil {
+			log.Printf("delete %s: %v", id, err)
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -341,9 +348,7 @@ func (s *Server) recordHeartbeatSSE(f store.Frame) {
 // A stale reading (fetch failed, cache still holds one) is shown rather than an error.
 func (s *Server) weatherData() map[string]any {
 	wx, err := s.opts.Weather.Current()
-	if err != nil {
-		log.Printf("weather: %v", err)
-	}
+	s.feeds.note("weather", err)
 	if err != nil && wx.Desc == "" {
 		return map[string]any{"temp": "", "desc": "weather unavailable"}
 	}
@@ -367,9 +372,7 @@ func (s *Server) weatherData() map[string]any {
 // calendarData is the calendar widget's fields, shared by SSE and /api/data/calendar.
 func (s *Server) calendarData(now time.Time) map[string]any {
 	evs, err := s.opts.Calendar.Upcoming(now, 3)
-	if err != nil {
-		log.Printf("calendar: %v", err)
-	}
+	s.feeds.note("calendar", err)
 	data := map[string]any{"l1": "", "l2": "", "l3": ""}
 	for i, e := range evs {
 		data["l"+strconv.Itoa(i+1)] = e.Line(now)

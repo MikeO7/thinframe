@@ -292,6 +292,9 @@ func (s *Server) runHook(ctx context.Context, h Hook, v hookVars) EmitResult {
 	}
 	defer resp.Body.Close()
 	res := EmitResult{OK: resp.StatusCode < 400, Status: resp.StatusCode}
+	if !res.OK {
+		log.Printf("hook %s: HTTP %d", v.name, resp.StatusCode)
+	}
 	if h.ReturnBody {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxHookAnswer))
 		if json.Valid(b) {
@@ -303,11 +306,69 @@ func (s *Server) runHook(ctx context.Context, h Hook, v hookVars) EmitResult {
 	return res
 }
 
-// hookFailed logs the full error and returns a short one. The emit answer reaches the page (and
-// anyone on the LAN); Go's error names the URL, and a Home Assistant webhook URL is a secret.
+// hookFailed logs the error and returns a short one. The emit answer reaches the page (and
+// anyone on the LAN); Go's error names the URL, and a Home Assistant webhook URL is a secret,
+// so even the log line has the URL cut down to scheme and host (redactErr).
 func hookFailed(name, short string, err error) EmitResult {
-	log.Printf("hook %s: %v", name, err)
+	log.Printf("hook %s: %s: %s", name, short, redactErr(err))
 	return EmitResult{Error: short}
+}
+
+// redactErr is err for a log line without URL secrets: the URL of every *url.Error in it is cut
+// down to scheme and host (a webhook id sits in the path, an API key often in the query or
+// userinfo). Wrapped and joined errors are walked.
+func redactErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	var walk func(error)
+	walk = func(e error) {
+		switch x := e.(type) {
+		case *url.Error:
+			where := "(url)"
+			if u, perr := url.Parse(x.URL); perr == nil && u.Host != "" {
+				where = u.Scheme + "://" + u.Host + "/..."
+			}
+			if x.URL != "" {
+				msg = strings.ReplaceAll(msg, x.URL, where)
+			}
+			walk(x.Err)
+		case interface{ Unwrap() []error }:
+			for _, c := range x.Unwrap() {
+				walk(c)
+			}
+		case interface{ Unwrap() error }:
+			walk(x.Unwrap())
+		}
+	}
+	walk(err)
+	return msg
+}
+
+// feedLog logs a background feed's failures (weather, calendar, polls) when the error changes
+// and once when it recovers, instead of on every page request or poll tick.
+type feedLog struct {
+	mu   sync.Mutex
+	last map[string]string
+}
+
+func (l *feedLog) note(feed string, err error) {
+	msg := redactErr(err)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last == nil {
+		l.last = map[string]string{}
+	}
+	prev, failing := l.last[feed]
+	switch {
+	case msg == "" && failing:
+		log.Printf("%s: ok again", feed)
+		delete(l.last, feed)
+	case msg != "" && msg != prev:
+		log.Printf("%s: %s", feed, msg)
+		l.last[feed] = msg
+	}
 }
 
 // ---- polls ----------------------------------------------------------------------------------
@@ -398,6 +459,9 @@ func (s *Server) pollDue(ctx context.Context) {
 
 func (s *Server) pollOnce(ctx context.Context, key string, p Poll) {
 	err := s.fetchPoll(ctx, key, p)
+	if ctx.Err() == nil {
+		s.feeds.note("poll "+key, err)
+	}
 	s.pollRun.mu.Lock()
 	defer s.pollRun.mu.Unlock()
 	st := s.pollRun.last[key]

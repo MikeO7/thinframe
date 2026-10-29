@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -14,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -76,7 +78,9 @@ type Server struct {
 	polls    *jsonSet[Poll]
 	pollRun  pollRun
 	pollTick time.Duration
-	shots    shotWaiters
+	// feeds: last logged failure of weather, calendar and each poll (hooks.go feedLog).
+	feeds feedLog
+	shots shotWaiters
 	// ring: the last doorbell press and which doorbells rang (cameras.go).
 	ring ringState
 	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
@@ -665,6 +669,8 @@ func foldIDs(next http.Handler) http.Handler {
 	})
 }
 
+// logRequests logs method, path, status, client IP and duration. The path only: a query may
+// carry a token (?token=) or a pairing nonce, and headers are never logged.
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/stream/") || strings.HasPrefix(r.URL.Path, "/api/data/") {
@@ -672,7 +678,44 @@ func logRequests(next http.Handler) http.Handler {
 			return
 		}
 		t := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(t).Round(time.Millisecond))
+		rec := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(rec, r)
+		code := rec.code
+		if code == 0 {
+			code = http.StatusOK
+		}
+		log.Printf("%s %s %d %s %s", r.Method, r.URL.Path, code, sourceIP(r), time.Since(t).Round(time.Millisecond))
 	})
+}
+
+// statusWriter records the status code. Unwrap lets http.ResponseController reach Flush and
+// Hijack (the control socket's upgrade) on the real writer.
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if w.code == 0 {
+		w.code = code
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.code == 0 {
+		w.code = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *statusWriter) Flush() { _ = http.NewResponseController(w.ResponseWriter).Flush() }
+
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if w.code == 0 {
+		w.code = http.StatusSwitchingProtocols
+	}
+	return http.NewResponseController(w.ResponseWriter).Hijack()
 }

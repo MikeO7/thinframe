@@ -93,3 +93,17 @@ func TestReconnectDoesNotBlockHub(t *testing.T) {
 		t.Fatalf("reconnect stalled the hub for %s", d)
 	}
 }
+
+// Kick returns at once even when the frame never answers the close handshake: DELETE
+// /api/frames/{id} must not wait the 5 s close timeout.
+func TestKickDoesNotWaitForSilentPeer(t *testing.T) {
+	h := New()
+	h.Add(context.Background(), "f", dialConn(t, false))
+	start := time.Now()
+	if !h.Kick("f", "deleted") {
+		t.Fatal("kick: frame not online")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("kick blocked for %s", d)
+	}
+}

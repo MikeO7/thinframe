@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -381,8 +383,20 @@ func TestDeleteFrameKicksSocket(t *testing.T) {
 	if !s.Hub.Online("sim") {
 		t.Fatal("sim should be online")
 	}
+	// Keep reading, as tfctl does, so the close handshake completes.
+	go func() {
+		for {
+			if _, _, err := c.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}()
+	start := time.Now()
 	if resp, _ := do(t, "DELETE", ts.URL+"/api/frames/sim", "tok", nil); resp.StatusCode != 204 {
 		t.Fatalf("delete: %d", resp.StatusCode)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("delete waited %s for the socket to close", d)
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for s.Hub.Online("sim") {
@@ -395,5 +409,27 @@ func TestDeleteFrameKicksSocket(t *testing.T) {
 	// recreated the record it writes its "disconnected" event to.
 	if _, err := s.Store.Get("sim"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted frame came back when its socket closed: %v", err)
+	}
+}
+
+// Deleting a frame takes its screenshots and reports with it.
+func TestDeleteFrameRemovesItsFiles(t *testing.T) {
+	s, ts := newTest(t, "tok")
+	if _, err := s.Store.Ensure("gone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveReport("gone", []byte("==== tfctl\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveShot("gone", []byte("\x89PNG")); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := do(t, "DELETE", ts.URL+"/api/frames/gone", "tok", nil); r.StatusCode != 204 {
+		t.Fatalf("delete: %d", r.StatusCode)
+	}
+	for _, d := range []string{s.shotDir("gone"), s.reportDir("gone")} {
+		if _, err := os.Stat(d); !os.IsNotExist(err) {
+			t.Fatalf("%s survived the delete: %v", filepath.Base(filepath.Dir(d)), err)
+		}
 	}
 }

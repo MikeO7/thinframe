@@ -101,14 +101,16 @@ func (h *Hub) Send(id string, m Msg) bool {
 	}
 }
 
-// Kick closes a frame's socket (its pairing was forgotten); the frame reconnects and is
-// asked for credentials again. False when the frame is offline.
+// Kick closes a frame's socket (its pairing was forgotten, or it was deleted); the frame
+// reconnects and is asked for credentials again. False when the frame is offline. The close
+// runs in the background, as in Add: it waits up to 5 s for an unresponsive peer, and the
+// caller (a REST or admin request) should not.
 func (h *Hub) Kick(id, reason string) bool {
 	h.mu.RLock()
 	c, ok := h.conns[id]
 	h.mu.RUnlock()
 	if ok {
-		_ = c.ws.Close(websocket.StatusPolicyViolation, reason)
+		go func() { _ = c.ws.Close(websocket.StatusPolicyViolation, reason) }()
 	}
 	return ok
 }
