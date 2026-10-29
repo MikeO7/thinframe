@@ -49,6 +49,14 @@ const MMC_IOC_CMD: std::ffi::c_ulong = 0xc048_b300;
 pub const EXT_CSD_BOOT_BUS: usize = 177;
 pub const EXT_CSD_PART_CONFIG: usize = 179;
 
+/// What the install destroys and `backup` (the user area) does not cover, saved once before the
+/// first change: boot0's first 64 KiB (the install zeroes them) and the EXT_CSD boot bytes (it
+/// sets PARTITION_CONFIG to 0). An existing copy is never overwritten: a second install over
+/// thinframe would save only zeros.
+pub const ORIG_BOOT0: &str = "/data/thinframe/emmc-boot0-orig.bin";
+pub const ORIG_CSD: &str = "/data/thinframe/emmc-ext-csd-orig.txt";
+const BOOT0_CLEARED: usize = 64 << 10;
+
 /// Held by `emmc install` for its whole run, with its pid: while a live tfctl holds it the agent
 /// starts no software or system update, no rollback and no reboot (`reboot_soon` waits), since
 /// each of them can change the root or the boot partition in the middle of the raw copy.
@@ -481,6 +489,47 @@ fn mounted(dev_prefix: &str) -> bool {
         })
 }
 
+/// The text saved next to boot0's copy: the EXT_CSD bytes the install changes, and what held
+/// the eMMC then (`thinframe` when an earlier install already cleared them).
+pub fn orig_csd_text(csd: &[u8; 512], boot0_sha: Option<&str>, held: &str, now: i64) -> String {
+    format!(
+        "# EXT_CSD before tfctl emmc install. Back to the vendor boot: write these bytes back\n\
+         # (mmc-utils or the CMD6 tfctl uses) and emmc-boot0-orig.bin to mmcblk2boot0.\n\
+         partition_config={:#04x}\nboot_bus_conditions={:#04x}\nboot0_first_64k_sha256={}\n\
+         emmc_held={held}\nsaved_unix={now}\n",
+        csd[EXT_CSD_PART_CONFIG],
+        csd[EXT_CSD_BOOT_BUS],
+        boot0_sha.unwrap_or("none (no boot0 device)"),
+    )
+}
+
+/// Save boot0's head and the EXT_CSD text unless a copy is there already; each file is synced
+/// before this returns. Err means the install must not go on.
+fn save_originals(bin: &Path, txt: &Path, boot0: Option<&[u8]>, text: &str) -> R<()> {
+    if let Some(dir) = txt.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    if let Some(b) = boot0 {
+        if bin.exists() {
+            say(&format!("{} kept from an earlier install", bin.display()));
+        } else {
+            crate::update::write_synced(bin, b)?;
+            say(&format!(
+                "boot0's first {} KiB saved to {}",
+                b.len() >> 10,
+                bin.display()
+            ));
+        }
+    }
+    if txt.exists() {
+        say(&format!("{} kept from an earlier install", txt.display()));
+    } else {
+        crate::update::write_synced(txt, text.as_bytes())?;
+        say(&format!("EXT_CSD boot bytes saved to {}", txt.display()));
+    }
+    Ok(())
+}
+
 fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     // 0. Hold the agent off (updates, rollback, reboots) until this returns.
     let _lock = lock_with(Path::new(INSTALL_LOCK), std::process::id(), proc_comm)?;
@@ -554,6 +603,37 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     if mounted(&edev) {
         return Err(err(format!("something on {edev} is mounted")));
     }
+    // What no backup holds, before anything changes it (read-only: EXT_CSD by CMD8, boot0).
+    let csd = read_ext_csd(&File::open(&emmc)?)?;
+    let b0 = boot0_of(&emmc);
+    let boot0_head = if b0.exists() {
+        let mut v = vec![0u8; BOOT0_CLEARED];
+        File::open(&b0)?.read_exact_at(&mut v, 0)?;
+        Some(v)
+    } else {
+        None
+    };
+    let sha = boot0_head.as_deref().map(|b| {
+        let mut h = Sha256::new();
+        h.update(b);
+        h.finish_hex()
+    });
+    let held = match holds(&emmc_head, &emmc_egon) {
+        Holds::Thinframe => "thinframe",
+        _ => "vendor",
+    };
+    let text = orig_csd_text(&csd, sha.as_deref(), held, crate::clock::now());
+    save_originals(
+        Path::new(ORIG_BOOT0),
+        Path::new(ORIG_CSD),
+        boot0_head.as_deref(),
+        &text,
+    )
+    .map_err(|e| {
+        err(format!(
+            "cannot save boot0 and EXT_CSD to /data ({e}); not installing"
+        ))
+    })?;
 
     // 2. Open the eMMC for writing, exclusively (fails if any of it is in use).
     let force_ro = format!("/sys/block/{}/force_ro", sys_name(&emmc));
@@ -581,12 +661,11 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
             return Err(err(format!("PARTITION_CONFIG still {now:#04x}")));
         }
     }
-    let b0 = boot0_of(&emmc);
     if b0.exists() {
         let ro = format!("/sys/block/{}/force_ro", sys_name(&b0));
         fs::write(&ro, "0\n")?;
         let r = OpenOptions::new().write(true).open(&b0).and_then(|f| {
-            f.write_all_at(&vec![0u8; 64 << 10], 0)
+            f.write_all_at(&vec![0u8; BOOT0_CLEARED], 0)
                 .and_then(|_| f.sync_all())
         });
         let _ = fs::write(&ro, "1\n");
@@ -855,6 +934,40 @@ mod tests {
         assert_eq!(live_holder("x", |_| Some("tfctl".into())), None);
         assert_eq!(live_holder("0", |_| Some("tfctl".into())), None);
         assert_eq!(holder(&path), None, "no file");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn originals_are_saved_once_and_never_overwritten() {
+        let dir = std::env::temp_dir().join(format!("tfctl-emmc-orig-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (bin, txt) = (dir.join("thinframe/b0.bin"), dir.join("thinframe/csd.txt"));
+        let mut csd = [0u8; 512];
+        csd[EXT_CSD_PART_CONFIG] = 0x48;
+        csd[EXT_CSD_BOOT_BUS] = 0x01;
+        let t = orig_csd_text(&csd, Some("ab"), "vendor", 1_793_000_000);
+        assert!(
+            t.contains("partition_config=0x48\nboot_bus_conditions=0x01\n"),
+            "{t}"
+        );
+        assert!(
+            t.contains("boot0_first_64k_sha256=ab\nemmc_held=vendor\n"),
+            "{t}"
+        );
+        let vendor = vec![7u8; BOOT0_CLEARED];
+        save_originals(&bin, &txt, Some(&vendor), &t).unwrap();
+        assert_eq!(fs::read(&bin).unwrap(), vendor);
+        assert_eq!(fs::read_to_string(&txt).unwrap(), t);
+        // A later install (boot0 already zeroed, PARTITION_CONFIG 0) keeps the first copy.
+        csd[EXT_CSD_PART_CONFIG] = 0;
+        let t2 = orig_csd_text(&csd, None, "thinframe", 1_793_000_100);
+        save_originals(&bin, &txt, Some(&[0u8; BOOT0_CLEARED]), &t2).unwrap();
+        assert_eq!(fs::read(&bin).unwrap(), vendor);
+        assert_eq!(fs::read_to_string(&txt).unwrap(), t);
+        // Nowhere to write (/data read-only or gone): the install must stop.
+        let blocked = dir.join("file");
+        fs::write(&blocked, "x").unwrap();
+        assert!(save_originals(&blocked.join("b"), &blocked.join("t"), Some(&vendor), &t).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -971,7 +971,7 @@ waits for the install to end. [U] until the next install on the frame.
 | eMMC system broken later | Rescue card, then `tfctl emmc install` again (no backup needed over thinframe) |
 | Rescue card lost | Flash a new one on the Mac with `scripts/flash.sh` |
 | No card works | FEL over USB-C from the Mac (`sunxi-fel`, ormarch docs) |
-| Back to Android | From the card: the image to `/dev/mmcblk2`, `boot0.bin` to `mmcblk2boot0`, PARTITION_CONFIG 0x48 [U: not tested, it needs a second frame] |
+| Back to Android | From the card: the image to `/dev/mmcblk2`, `boot0.bin` to `mmcblk2boot0`, PARTITION_CONFIG 0x48 [U: not tested, it needs a second frame]. The install itself saves boot0's first 64 KiB and the old PARTITION_CONFIG / BOOT_BUS_CONDITIONS to `/data/thinframe/emmc-boot0-orig.bin` and `emmc-ext-csd-orig.txt` before it changes them (once, never overwritten; no save, no install) |
 
 ## Speed (2026-10-27)
 
