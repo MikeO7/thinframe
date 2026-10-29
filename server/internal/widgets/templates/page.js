@@ -208,7 +208,7 @@
       .filter(e => !isNaN(e.s)).sort((a, b) => a.s - b.s);
   }
   function mins(a, b) { return Math.round((b - a) / 60000); }
-  function inText(m) { return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60 ? (m % 60) + ' min' : ''); }
+  function inText(m) { return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); }
 
   const R = {
     hero(sec, d, p) {
@@ -273,8 +273,11 @@
         if (t >= from && t <= to) { const n = h('div', 'now'); n.style.top = (t - from) / span * 100 + '%'; tl.append(n); }
         b.append(tl); return;
       }
-      const list = h('div', 'ag');
-      for (const e of (p.all ? evs : day).slice(0, num(p.max) || 5)) {
+      const list = h('div', 'ag'), src = p.all ? evs : day, max = num(p.max) || 5;
+      // What is still ahead first: past events fill the list only when fewer remain than fit,
+      // so at 6 PM the card shows the evening, not the morning (QA 2026-10-28).
+      const ahead = src.findIndex(e => e.e >= now), from = ahead < 0 ? Math.max(0, src.length - max) : Math.min(ahead, Math.max(0, src.length - max));
+      for (const e of src.slice(from, from + max)) {
         const r = h('div', 'e' + (e.e < now ? ' past' : ''));
         r.append(h('span', 'faint', hm(e.s, true)));
         const t = h('div', 'ellip', e.title); if (e.where) t.append(h('small', 'ellip', e.where));
