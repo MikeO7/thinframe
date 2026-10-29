@@ -53,7 +53,7 @@ func TestInjectSDK(t *testing.T) {
 		`<p>hi`:                                              tag + `<p>hi`,
 		`<!doctype html><header>x</header>`:                  `<!doctype html>` + tag + `<header>x</header>`,
 	} {
-		if got := string(injectSDK([]byte(in))); got != want {
+		if got := string(injectSDK([]byte(in), "")); got != want {
 			t.Errorf("inject %q:\n got %q\nwant %q", in, got, want)
 		}
 	}
@@ -186,6 +186,7 @@ func TestAppMessages(t *testing.T) {
 func TestEmitHookAndLimit(t *testing.T) {
 	s, ts := newTest(t, "tok")
 	_, _ = s.Store.Ensure("office")
+	emitURL := ts.URL + "/api/frames/office/emit?k=" + EmitKey("tok", "office")
 	var got atomic.Value
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -200,7 +201,7 @@ func TestEmitHookAndLimit(t *testing.T) {
 	if h := s.Hooks()["lamp"]; h.Headers["Authorization"] != "(set)" || h.Method != "POST" {
 		t.Fatalf("listed hook %+v", h)
 	}
-	r, b := post(t, ts.URL+"/api/frames/office/emit", `{"app":"lights","name":"lamp","data":"light.desk"}`)
+	r, b := post(t, emitURL, `{"app":"lights","name":"lamp","data":"light.desk"}`)
 	if r.StatusCode != 200 || !strings.Contains(b, `"ok":true`) || !strings.Contains(b, `"state":"on"`) {
 		t.Fatalf("emit: %d %s", r.StatusCode, b)
 	}
@@ -212,18 +213,18 @@ func TestEmitHookAndLimit(t *testing.T) {
 		t.Fatalf("events %+v", ev)
 	}
 	// No hook: recorded, ok.
-	if r, b := post(t, ts.URL+"/api/frames/office/emit", `{"name":"tap"}`); r.StatusCode != 200 || !strings.Contains(b, `"ok":true`) {
+	if r, b := post(t, emitURL, `{"name":"tap"}`); r.StatusCode != 200 || !strings.Contains(b, `"ok":true`) {
 		t.Fatalf("plain emit %d %s", r.StatusCode, b)
 	}
-	if r, _ := post(t, ts.URL+"/api/frames/office/emit", `{"name":"Bad Name"}`); r.StatusCode != 400 {
+	if r, _ := post(t, emitURL, `{"name":"Bad Name"}`); r.StatusCode != 400 {
 		t.Fatalf("bad name %d", r.StatusCode)
 	}
-	if r, _ := post(t, ts.URL+"/api/frames/office/emit", strings.Repeat("x", MaxEmit+1)); r.StatusCode != 413 {
+	if r, _ := post(t, emitURL, strings.Repeat("x", MaxEmit+1)); r.StatusCode != 413 {
 		t.Fatalf("big %d", r.StatusCode)
 	}
 	limited := false
 	for range emitBurst + 2 {
-		if r, _ := post(t, ts.URL+"/api/frames/office/emit", `{"name":"tap"}`); r.StatusCode == 429 {
+		if r, _ := post(t, emitURL, `{"name":"tap"}`); r.StatusCode == 429 {
 			limited = true
 		}
 	}

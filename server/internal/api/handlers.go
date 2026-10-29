@@ -40,12 +40,15 @@ func (s *Server) handleFramePage(w http.ResponseWriter, r *http.Request) {
 	// Simulator: ?sim=WxH renders at the panel size; &fit=WxH scales it into the surface.
 	simW, simH := parseSize(r.URL.Query().Get("sim"))
 	fitW, fitH := parseSize(r.URL.Query().Get("fit"))
-	b, err := widgets.RenderSim(f, simW, simH, fitW, fitH)
+	// The page carries the frame's emit key: no other origin may read it (no CORS header) or
+	// frame it (pageCSP).
+	b, err := widgets.RenderSim(f, EmitKey(s.opts.Token, id), simW, simH, fitW, fitH)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", pageCSP)
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(b)
 }
