@@ -780,15 +780,17 @@ impl Kiosk {
         }
     }
 
-    /// An off screen on for `d` (a touch, a wave, a doorbell); one that a wake already turned on
-    /// stays on longer. The schedule and the light decide again when it ends.
+    /// The screen on for at least `d` (a touch, a wave, a doorbell, the server's `wake`); a
+    /// longer hold already running stays. A screen already on is held too: a wake at boot, before
+    /// the light rule has decided, was turned off 0.2 s later when it decided "dark"
+    /// [V 2026-10-28]. The schedule and the light decide again when the hold ends.
     fn wake(&mut self, d: Duration, why: &str) {
         let until = Instant::now() + d;
         if !SCREEN_ON.load(Ordering::SeqCst) {
             eprintln!("tfctl: {why}: screen on for {} s", d.as_secs());
             self.set_screen(true);
-            self.wake_until = Some(until);
-        } else if self.wake_until.is_some_and(|t| t < until) {
+        }
+        if self.wake_until.is_none_or(|t| t < until) {
             self.wake_until = Some(until);
         }
     }
@@ -1188,6 +1190,15 @@ mod tests {
         assert!(
             !SCREEN_ON.load(Ordering::SeqCst),
             "hold over in the dark: off"
+        );
+        // A wake while the screen is already on (boot, before the dark rule decided) holds it.
+        let mut k = Kiosk::new(&Config::default());
+        SCREEN_ON.store(true, Ordering::SeqCst);
+        k.wake(Duration::from_secs(300), "wake");
+        feed(&mut k, 0, 0, 200);
+        assert!(
+            SCREEN_ON.load(Ordering::SeqCst),
+            "the wake holds through the dark"
         );
         // DARK_OFF=0: the light is read for the log only.
         let mut k = Kiosk::new(&config::parse("DARK_OFF=0\n"));
