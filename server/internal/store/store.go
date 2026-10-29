@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Config is what a frame obeys. Sent whole on every change.
@@ -376,9 +377,31 @@ func clone(f Frame) Frame {
 	return c
 }
 
-// AddEvent appends a log line.
+// MaxEventKind and MaxEventText bound one log line, in characters. Frames send their own (up to
+// the socket's 64 KiB read limit), and 200 lines of that would be 13 MB rewritten on every update.
+const (
+	MaxEventKind = 48
+	MaxEventText = 500
+)
+
+// AddEvent appends a log line, cut to MaxEventKind and MaxEventText.
 func AddEvent(f *Frame, kind, text string) {
-	f.Events = append(f.Events, Event{At: time.Now().UTC(), Kind: kind, Text: text})
+	f.Events = append(f.Events, Event{At: time.Now().UTC(), Kind: clip(kind, MaxEventKind), Text: clip(text, MaxEventText)})
+}
+
+// clip cuts s to at most n characters, marking the cut with "…".
+func clip(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	i := 0
+	for j := range s {
+		if i == n-1 {
+			return s[:j] + "…"
+		}
+		i++
+	}
+	return s
 }
 
 // Ack resolves a pending action by id, moving it to history.
@@ -388,7 +411,7 @@ func Ack(f *Frame, id string, ok bool, errText string) bool {
 			continue
 		}
 		now := time.Now().UTC()
-		a.AckedAt, a.OK, a.Error = &now, &ok, errText
+		a.AckedAt, a.OK, a.Error = &now, &ok, clip(errText, MaxEventText)
 		f.Pending = append(f.Pending[:i], f.Pending[i+1:]...)
 		f.History = append(f.History, a)
 		AddEvent(f, "ack", fmt.Sprintf("%s ok=%v %s", a.Name, ok, errText))
