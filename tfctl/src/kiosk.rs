@@ -38,6 +38,9 @@ fn push_event(kind: &str, text: &str) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum KioskCmd {
     Restart,
+    /// gpuwatch: the GPU's jobs time out. Held while the screen is off or Settings is open (the
+    /// page is paused, or the person is typing), done on wake or close, never dropped.
+    GpuRestart,
     Reload,
     SetUrl(String),
     SetRotation(u8),
@@ -410,6 +413,8 @@ pub struct Kiosk {
     pending_tried: Instant,
     /// A reload asked for while the screen was off (a new layout): done on wake, not dropped.
     reload_on_wake: bool,
+    /// A GPU-hang restart held while the screen was off or Settings was open.
+    gpu_restart: bool,
 }
 
 impl Kiosk {
@@ -456,6 +461,7 @@ impl Kiosk {
             pending: None,
             pending_tried: Instant::now(),
             reload_on_wake: false,
+            gpu_restart: false,
         }
     }
 
@@ -610,6 +616,26 @@ impl Kiosk {
         self.next_spawn = Instant::now();
     }
 
+    /// A held GPU restart, once nothing holds it any more.
+    fn gpu_restart_if_held(&mut self) {
+        if self.gpu_restart && !self.stopped && self.back_to.is_none() {
+            self.gpu_restart_now();
+        }
+    }
+
+    /// A new cog on the page asked for last (kill_child resumes a paused one to end it); only
+    /// this counts toward gpuwatch's reboot.
+    fn gpu_restart_now(&mut self) {
+        eprintln!("tfctl: kiosk: GPU restart");
+        self.gpu_restart = false;
+        if let Some(u) = self.pending.take() {
+            self.url = u;
+        }
+        self.reload_on_wake = false;
+        self.restart();
+        crate::gpuwatch::restarted();
+    }
+
     fn set_screen(&mut self, on: bool) {
         SCREEN_ON.store(on, Ordering::SeqCst);
         crate::speed::cpu_governor(on);
@@ -625,6 +651,10 @@ impl Kiosk {
             // The paused page carries on where it was: its picture is back with the backlight,
             // and page.js sees the gap in its timers and reconnects its stream, which replays every
             // source. A restart here cost ~7 s of splash and reload per wake [V 2026-10-27].
+            if self.stopped && self.gpu_restart && self.back_to.is_none() {
+                // The GPU hung meanwhile: a new cog instead of the paused one.
+                self.gpu_restart_now();
+            }
             if self.stopped {
                 if let Some(c) = &self.child {
                     cont_tree(c.id());
@@ -655,6 +685,16 @@ impl Kiosk {
     pub fn handle(&mut self, cmd: KioskCmd) {
         eprintln!("tfctl: kiosk: {cmd:?}");
         match cmd {
+            KioskCmd::GpuRestart if self.stopped || self.back_to.is_some() => {
+                eprintln!(
+                    "tfctl: kiosk: GPU restart held until the screen is on and Settings closed"
+                );
+                self.gpu_restart = true;
+            }
+            KioskCmd::GpuRestart => {
+                self.gpu_restart = true;
+                self.gpu_restart_if_held();
+            }
             // The server's page watchdog sees the dashboard go quiet while Settings is up: the
             // person at the screen comes first, the dashboard reloads when Settings closes.
             KioskCmd::Restart | KioskCmd::Reload if self.back_to.is_some() => {
@@ -748,7 +788,12 @@ impl Kiosk {
                     crate::settings::close(st);
                 }
                 if let Some(u) = self.back_to.take() {
-                    self.go(u);
+                    if self.gpu_restart && !self.stopped {
+                        self.pending = Some(u);
+                        self.gpu_restart_if_held();
+                    } else {
+                        self.go(u);
+                    }
                 }
             }
         }
@@ -1284,6 +1329,39 @@ mod tests {
         assert!(wait_state(pid, false), "cog running: {}", state(pid));
         k.kill_child();
         assert!(sys::send_group(pid, 0).is_err(), "group gone");
+    }
+
+    #[test]
+    fn a_gpu_restart_waits_for_the_wake_or_the_end_of_settings() {
+        let mut k = Kiosk::new(&Config::default());
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        let pid = k.child.as_ref().unwrap().id();
+        k.set_screen(false);
+        k.handle(KioskCmd::GpuRestart);
+        assert!(k.gpu_restart, "held while off");
+        assert_eq!(k.child.as_ref().map(Child::id), Some(pid));
+        k.handle(KioskCmd::SetUrl("http://server/frame/other".into()));
+        k.set_screen(true);
+        assert!(!k.gpu_restart && !k.stopped);
+        assert!(k.child.is_none(), "restarted on wake");
+        assert_eq!(
+            k.url, "http://server/frame/other",
+            "on the page asked for last"
+        );
+        assert!(k.next_spawn <= Instant::now());
+        // Settings open: held until it closes, then a new cog on the page Settings covered.
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        k.back_to = Some("http://server/frame/k".into());
+        k.url = "http://127.0.0.1:41008/settings".into();
+        k.handle(KioskCmd::GpuRestart);
+        assert!(k.gpu_restart && k.child.is_some());
+        k.handle(KioskCmd::CloseSettings);
+        assert!(!k.gpu_restart && k.child.is_none());
+        assert_eq!(k.url, "http://server/frame/k");
+        // Nothing holds it: at once.
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        k.handle(KioskCmd::GpuRestart);
+        assert!(!k.gpu_restart && k.child.is_none());
     }
 
     #[test]
