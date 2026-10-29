@@ -39,7 +39,21 @@ type sourceSet struct {
 type sourceEntry struct {
 	Data    json.RawMessage `json:"data"`
 	Updated time.Time       `json:"updated"`
+	// Seen is the last push, changed or not (Updated is the last change): how fresh what the
+	// page shows is. An unchanged push writes it to disk at most every seenSave.
+	Seen  time.Time `json:"seen,omitzero"`
+	saved time.Time // Seen as last written
+	told  time.Time // when pages last heard Seen
 }
+
+// Pages are told a source is still fresh (an unchanged push) at most every seenTell, and an
+// unchanged push rewrites the file at most every seenSave. Both stay well under staleFloor.
+const (
+	seenTell   = 5 * time.Minute
+	seenSave   = 5 * time.Minute
+	staleFloor = 15 * time.Minute
+	staleOther = time.Hour
+)
 
 // SourceInfo is what GET /api/sources lists.
 type SourceInfo struct {
@@ -59,6 +73,10 @@ func loadSources(dir string) *sourceSet {
 		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		var ent sourceEntry
 		if err == nil && json.Unmarshal(b, &ent) == nil && len(ent.Data) > 0 {
+			if ent.Seen.Before(ent.Updated) {
+				ent.Seen = ent.Updated
+			}
+			ent.saved = ent.Seen
 			s.data[key] = ent
 		}
 	}
@@ -66,10 +84,15 @@ func loadSources(dir string) *sourceSet {
 }
 
 func (s *sourceSet) get(key string) (json.RawMessage, bool) {
+	e, ok := s.entry(key)
+	return e.Data, ok
+}
+
+func (s *sourceSet) entry(key string) (sourceEntry, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	e, ok := s.data[key]
-	return e.Data, ok
+	return e, ok
 }
 
 func (s *sourceSet) list() []SourceInfo {
@@ -83,31 +106,49 @@ func (s *sourceSet) list() []SourceInfo {
 	return out
 }
 
-// put stores data and reports whether it differs from what was stored. An unchanged source
-// is not rewritten, so a poller that pushes the same state every minute costs nothing.
-func (s *sourceSet) put(key string, data json.RawMessage) (bool, error) {
+// put stores data and reports whether it differs from what was stored, and whether pages
+// should hear that an unchanged source is still fresh. An unchanged source only moves Seen: a
+// poller that pushes the same state every minute costs a file write every seenSave and a
+// message every seenTell.
+func (s *sourceSet) put(key string, data json.RawMessage) (changed, tell bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now().UTC()
 	old, ok := s.data[key]
 	if ok && bytes.Equal(old.Data, data) {
-		return false, nil
+		old.Seen = now
+		if now.Sub(old.saved) >= seenSave {
+			if err := s.write(key, old); err != nil {
+				return false, false, err
+			}
+			old.saved = now
+		}
+		if tell = now.Sub(old.told) >= seenTell; tell {
+			old.told = now
+		}
+		s.data[key] = old
+		return false, tell, nil
 	}
 	if !ok && len(s.data) >= MaxSources {
-		return false, fmt.Errorf("%w: %d sources, limit %d", ErrInvalid, len(s.data), MaxSources)
+		return false, false, fmt.Errorf("%w: %d sources, limit %d", ErrInvalid, len(s.data), MaxSources)
 	}
-	ent := sourceEntry{Data: data, Updated: time.Now().UTC()}
-	b, err := json.Marshal(ent)
-	if err != nil {
-		return false, err
-	}
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return false, err
-	}
-	if err := writeDurable(filepath.Join(s.dir, key+".json"), b); err != nil {
-		return false, err
+	ent := sourceEntry{Data: data, Updated: now, Seen: now, saved: now, told: now}
+	if err := s.write(key, ent); err != nil {
+		return false, false, err
 	}
 	s.data[key] = ent
-	return true, nil
+	return true, false, nil
+}
+
+func (s *sourceSet) write(key string, ent sourceEntry) error {
+	b, err := json.Marshal(ent)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		return err
+	}
+	return writeDurable(filepath.Join(s.dir, key+".json"), b)
 }
 
 func (s *sourceSet) delete(key string) bool {
@@ -167,19 +208,56 @@ func (s *Server) SetSource(key string, raw []byte) error {
 	if err != nil {
 		return err
 	}
-	changed, err := s.src.put(key, data)
-	if err != nil || !changed {
+	changed, tell, err := s.src.put(key, data)
+	if err != nil || (!changed && !tell) {
 		return err
+	}
+	ent, _ := s.src.entry(key)
+	if !changed {
+		ent.Data = nil // still fresh: the age alone
 	}
 	for _, f := range s.Store.List() {
 		for _, w := range f.Layout.Widgets {
 			if reads(w, key) {
-				s.sse.publish(f.ID, map[string]any{"widget": w.ID, "data": data})
+				s.sse.publish(f.ID, s.sourceMsg(w, key, ent))
 			}
 		}
 	}
-	s.sse.publishApps("", map[string]any{"source": key, "data": data})
+	if changed {
+		s.sse.publishApps("", map[string]any{"source": key, "data": data})
+	}
 	return nil
+}
+
+// sourceMsg is what a widget gets from a source: {"widget", "data"} as always, plus "key",
+// "updated" (the last push, RFC 3339), "age_s" (its age now, so the page needs no clock in step
+// with the server's) and "stale_s" (staleAfter). Without data it only says the source is still
+// fresh. Pages that predate these fields read only "widget" and "data" (the frame's saved
+// boot page): never name a top-level field "source", which such a page hands to its apps.
+func (s *Server) sourceMsg(w store.Widget, key string, ent sourceEntry) map[string]any {
+	m := map[string]any{"widget": w.ID, "key": key, "updated": ent.Seen,
+		"age_s": max(0, int(time.Since(ent.Seen).Seconds())), "stale_s": s.staleAfter(w, key)}
+	if ent.Data != nil {
+		m["data"] = ent.Data
+	}
+	return m
+}
+
+// staleAfter is how many seconds old a widget's source may get before the page marks it as
+// old (0: never): the widget's props.stale_s, else three missed polls of the poll that fills
+// it (at least staleFloor), else staleOther. Pushes that come only on a change (nothing polls
+// them) should set stale_s to 0 or to how long they can stay quiet.
+func (s *Server) staleAfter(w store.Widget, key string) int {
+	switch v := w.Props["stale_s"].(type) {
+	case float64:
+		return max(0, int(v))
+	case int:
+		return max(0, v)
+	}
+	if p, ok := s.polls.get(key); ok {
+		return max(3*p.EveryS, int(staleFloor.Seconds()))
+	}
+	return int(staleOther.Seconds())
 }
 
 // Sources lists the stored sources.
@@ -208,8 +286,8 @@ func (s *Server) pushSources(f store.Frame) {
 	for _, w := range f.Layout.Widgets {
 		for _, p := range []string{"source", "health"} {
 			if k, _ := w.Props[p].(string); k != "" {
-				if data, ok := s.src.get(k); ok {
-					s.sse.publish(f.ID, map[string]any{"widget": w.ID, "data": data})
+				if ent, ok := s.src.entry(k); ok {
+					s.sse.publish(f.ID, s.sourceMsg(w, k, ent))
 				}
 			}
 		}

@@ -21,6 +21,7 @@
     document.querySelectorAll('.clock-date').forEach(e => e.textContent = !set ? '' :
       d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }));
     rerenderTimed();
+    widgets.forEach(markAge);
     return d;
   }
   function tickClock() {
@@ -576,6 +577,33 @@
     try { r(sec, state[sec.id] || {}, props(sec)); } catch (e) { fail(sec.id + ': ' + e); }
     TF.perf.draws++; TF.perf.ms += performance.now() - t;
   }
+  // ---- how old a card's data is ------------------------------------------------------------
+  // Source messages carry the source's age (age_s, measured on the server, so no clock needs to
+  // be in step) and when to call it old (stale_s, server/internal/api/sources.go staleAfter).
+  // An old source dims the card and says "updated 40 min ago" in its bottom margin, as the
+  // cars app does. Ages run on performance.now(), which a clock being set does not move.
+  function fresh(sec, m) {
+    if (m.key !== props(sec).source || typeof m.age_s !== 'number') return;
+    sec._seenAt = performance.now() - m.age_s * 1000;
+    sec._staleMs = (Number(m.stale_s) || 0) * 1000;
+    markAge(sec);
+  }
+  function ago(ms) {
+    const m = Math.round(ms / 60000), hr = Math.floor(m / 60);
+    return m < 60 ? m + ' min ago' : hr < 24 ? hr + ' h ago' : Math.floor(hr / 24) + ' d ago';
+  }
+  function markAge(sec) {
+    if (sec._seenAt === undefined) return;
+    const age = performance.now() - sec._seenAt, old = sec._staleMs > 0 && age > sec._staleMs;
+    const text = old ? 'updated ' + ago(age) : '';
+    if (sec._ageText === text) return; // most minutes: nothing changes, nothing is redrawn
+    sec._ageText = text;
+    sec.classList.toggle('stale', old);
+    if (!sec._ageEl) { if (!old) return; sec._ageEl = h('div', 'age'); sec.append(sec._ageEl); }
+    sec._ageEl.textContent = text;
+    sec._ageEl.hidden = !old;
+  }
+
   function rerenderTimed() {
     document.querySelectorAll('.w-agenda,.w-worldclock,.w-shows').forEach(draw);
   }
@@ -769,9 +797,18 @@
   }
   TF.gesture = gesture;
 
-  let stream;
+  // The stream down for more than 30 s (server gone, Wi-Fi out): a small "Offline" note, so old
+  // numbers are not taken for current ones. A reconnect within 30 s (a server restart, a resume)
+  // shows nothing. Counted from page load until the stream first opens.
+  let stream, downSince = performance.now();
+  const offEl = document.getElementById('offline');
+  function offlineTick(now) {
+    const off = !!downSince && now - downSince > 30000;
+    if (offEl && offEl.hidden === off) offEl.hidden = !off;
+  }
   function connect() {
     const es = stream = new EventSource('/api/stream/' + encodeURIComponent(TF.frame) + (appFrames.length ? '?apps=1' : ''));
+    es.onopen = () => { if (stream === es) { downSince = 0; offlineTick(0); } };
     es.onmessage = ev => {
       TF.perf.msgs = (TF.perf.msgs || 0) + 1;
       let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -783,6 +820,7 @@
       if (!m.widget) return;
       const sec = document.getElementById('w-' + m.widget);
       if (!sec) return;
+      if (m.key) { fresh(sec, m); if (!m.data) return; } // no data: the source is still fresh
       // The same message again (a reconnect replays every source) changes nothing: skip it.
       const raw = JSON.stringify(m.data || {}), key = Object.keys(m.data || {}).sort().join();
       sec._last = sec._last || {};
@@ -797,6 +835,7 @@
     };
     es.onerror = () => {
       TF.perf.reconnects = (TF.perf.reconnects || 0) + 1; es.close();
+      if (stream === es && !downSince) downSince = performance.now();
       // Only if no newer stream was opened meanwhile (the resume detector): two at once
       // delivered every message twice.
       if (stream === es) setTimeout(() => { if (stream === es) connect(); }, 5000);
@@ -849,9 +888,11 @@
       TF.perf.resumes = (TF.perf.resumes || 0) + 1;
       paintClock(); daypart(); alive();
       const old = stream; stream = null; if (old) old.close();
+      if (downSince) downSince = performance.now(); // the pause is not the stream's fault
       connect();
     }
     beat = now;
+    offlineTick(performance.now());
   }, 1000);
 
   let toastT;

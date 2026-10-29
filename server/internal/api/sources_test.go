@@ -206,3 +206,77 @@ func TestReplayDoesNotDrop(t *testing.T) {
 		t.Fatalf("queued %d of %d", len(ch), MaxSources)
 	}
 }
+
+// A widget's source messages say how old the source is and when the page should call it old,
+// and an unchanged push still counts as fresh (told now and then, without the data).
+func TestSourceFreshness(t *testing.T) {
+	s, _ := newTest(t, "")
+	l := srcLayout()
+	l.Widgets[1].Props = map[string]any{"source": "house", "stale_s": float64(120)}
+	if _, err := s.SetLayout("office", l); err != nil {
+		t.Fatal(err)
+	}
+	ch, unsub := s.sse.subscribe("office")
+	defer unsub()
+	if err := s.SetSource("house", []byte(`{"items":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []float64{3600, 120} { // no poll fills it: an hour; b says 120 s
+		m := recv(t, ch)
+		if m["key"] != "house" || m["age_s"] != float64(0) || m["stale_s"] != want || m["data"] == nil || m["updated"] == nil {
+			t.Fatalf("message %v, want stale_s %v", m, want)
+		}
+		// A page from before these fields hands any message with "source" to its apps.
+		if _, ok := m["source"]; ok {
+			t.Fatalf("widget message carries a top-level source: %v", m)
+		}
+	}
+	// Unchanged right away: nothing to tell.
+	if err := s.SetSource("house", []byte(`{"items":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(ch) != 0 {
+		t.Fatalf("unchanged push re-sent at once: %d messages", len(ch))
+	}
+	// Unchanged after a while: the age alone, and the new time on disk.
+	s.src.mu.Lock()
+	e := s.src.data["house"]
+	old := time.Now().Add(-10 * time.Minute)
+	e.Seen, e.saved, e.told, e.Updated = old, old, old, old
+	s.src.data["house"] = e
+	s.src.mu.Unlock()
+	if err := s.SetSource("house", []byte(`{"items":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	m := recv(t, ch)
+	if _, ok := m["data"]; ok || m["key"] != "house" || m["age_s"] != float64(0) {
+		t.Fatalf("still-fresh message %v", m)
+	}
+	recv(t, ch) // widget b's
+	s2 := New(s.Store, Options{})
+	ent, ok := s2.src.entry("house")
+	if !ok || time.Since(ent.Seen) > time.Minute || time.Since(ent.Updated) < 9*time.Minute {
+		t.Fatalf("after a restart: seen %v, updated %v", ent.Seen, ent.Updated)
+	}
+	// A poll sets the default: three missed polls, at least 15 minutes.
+	w := l.Widgets[0]
+	for _, c := range [][2]int{{60, 900}, {600, 1800}} {
+		every, want := c[0], c[1]
+		if err := s.polls.put("house", Poll{URL: "http://x.lan/", EveryS: every}, MaxPolls); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.staleAfter(w, "house"); got != want {
+			t.Errorf("poll every %d s: stale after %d, want %d", every, got, want)
+		}
+	}
+	w.Props = map[string]any{"source": "house", "stale_s": float64(0)}
+	if got := s.staleAfter(w, "house"); got != 0 {
+		t.Errorf("stale_s 0: %d", got)
+	}
+	// The replay on connect carries the age too.
+	f, _ := s.Store.Get("office")
+	s.pushSources(f)
+	if m := recv(t, ch); m["data"] == nil || m["age_s"] == nil || m["stale_s"] != float64(1800) {
+		t.Fatalf("replay %v", m)
+	}
+}

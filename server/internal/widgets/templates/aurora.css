@@ -85,6 +85,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .room.lit{background:rgba(255,180,100,.16);border-color:rgba(255,197,110,.5)}
 .pct.chg,.chgi{color:var(--ok)}
 .stage::after{background:radial-gradient(closest-side,rgba(0,0,0,.6),transparent)}
+#offline{background:rgba(16,18,30,.94);border:1px solid var(--edge)}
 #toast{transition:none;background:rgba(16,18,30,.94);border:1px solid var(--edge);color:var(--fg);border-radius:99rem;font-weight:600}
 .cam{border:1px solid rgba(255,255,255,.08)}
 .camview.cv-ring .cv-pill{background:linear-gradient(150deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 1rem 3rem -.6rem var(--glow)}
