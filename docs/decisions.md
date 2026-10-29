@@ -905,7 +905,7 @@ Every layer now has a way back that needs no computer where one is possible.
 | tfctl's loop stuck | Hardware watchdog is petted only while the kiosk loop beats (120 s), so the SoC resets |
 | tfctl crashes or bad tfctl update | init respawns; two fast crashes after an update put `tfctl.prev` back |
 | Bad system update | U-Boot tries count down to the other slot; a slot that never reaches the server is rebooted after 10 min |
-| /data corrupt | `e2fsck -p`, then `-y`; still not mounting and either no ext4 superblock or errors left uncorrected: formatted fresh with the shipped config, frame starts like new. Never on a read error, never on another disk |
+| /data corrupt | `e2fsck -p`, then `-y`; still not mounting and no ext4 superblock anywhere (primary or the group-1 backups): formatted fresh with the shipped config, frame starts like new. An ext4 that will not mount is left alone (its files can still be read off the card). Never on a read error, never when e2fsck or the kernel log shows I/O errors for the disk, never on another disk (2026-10-28) |
 | Root slot full | Updates are atomic renames; RESBLKS=0 frees the reserved 5 % in the next image (the 190 MB image gate stays) |
 | Display memory | CMA 64 → 128 MB (`cma=128M`) in the next image: 4 screen buffers of 4 MB plus WebKit's left 6 MB free and `eglSwapBuffers` failed with EGL_BAD_ALLOC during page changes [V 2026-10-26] |
 | Everything above fails | Pull the card (card system) / insert the rescue card (eMMC system, see below); USB-C link 192.168.7.2 with SSH |
