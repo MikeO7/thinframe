@@ -1,6 +1,14 @@
 --- a/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
 +++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_fdrv/rwnx_main.c
-@@ -537,6 +537,11 @@
+@@ -23,6 +23,7 @@
+ #include <linux/ctype.h>
+ #include <linux/random.h>
+ #include <linux/vmalloc.h>
++#include <linux/hex.h>
+ #include "rwnx_defs.h"
+ #include "rwnx_dini.h"
+ #include "rwnx_msg_tx.h"
+@@ -537,6 +538,11 @@
  extern uint8_t scanning;
  int aicwf_dbg_level = LOGERROR;
  module_param(aicwf_dbg_level, int, 0660);
@@ -12,7 +20,7 @@
  #ifdef CONFIG_DYNAMIC_PWR
  int dynamic_pwr = 1;
  module_param(dynamic_pwr, int, 0660);
-@@ -6036,6 +6041,14 @@
+@@ -6036,6 +6042,14 @@
  	aicbsp_get_feature(&feature, fw_path);
  
  	get_random_bytes(&dflt_mac[4], 2);
