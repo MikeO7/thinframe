@@ -21,6 +21,19 @@ install -D -m 0644 "$REPO/image/rootfs/etc/thinframe.conf" "$T/usr/share/thinfra
 # dhcpcd keeps leases in /var/db; on a read-only root that is RAM.
 ln -sfn ../tmp "$T/var/db"
 
+# Root fs headroom (190 MiB, gate 200 MB): Buildroot never uninstalls, so a tree that built a
+# package before an option went off keeps its files. DejaVu Serif and Sans Condensed are off in
+# the defconfig but were 5.3 MB of the 2026.10.27 image. Also never used here: zoneinfo/right
+# (leap-second zones; TZ names resolve in posix/), the sqlite3 shell (WebKit links the library),
+# and udev's ID-to-name databases (hwdb 20-*: PCI/USB/OUI vendor names, 9 of hwdb.bin's 9.5 MB;
+# input quirks are in 60-* and 70-*, kept).
+rm -f "$T"/usr/share/fonts/dejavu/DejaVuSerif* "$T"/usr/share/fonts/dejavu/DejaVuSansCondensed*
+rm -rf "$T/usr/share/zoneinfo/right" "$T/usr/bin/sqlite3"
+if ls "$T"/etc/udev/hwdb.d/20-*.hwdb >/dev/null 2>&1; then
+	rm -f "$T"/etc/udev/hwdb.d/20-*.hwdb
+	"$HOST_DIR/bin/udevadm" hwdb --update --root "$T"
+fi
+
 # Nothing periodic and no logging daemon (README budget): drop BusyBox's syslog/klogd and
 # crond, and seedrng (it writes to the read-only root).
 rm -f "$T"/etc/init.d/S01syslogd "$T"/etc/init.d/S02klogd "$T"/etc/init.d/S*seedrng "$T"/etc/init.d/S50crond
