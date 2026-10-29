@@ -19,7 +19,7 @@
 {{range .Widgets}}{{.}}{{end}}
 </main>
 {{end}}<div id="toast"></div>
-<script>window.TF = {frame: {{.FrameID}}, pageVersion: {{.PageVersion}}};</script>
+<script>window.TF = {frame: {{.FrameID}}, pageVersion: {{.PageVersion}}, k: {{.EmitKey}}};</script>
 <script>{{.JS}}</script>
 </body>
 </html>

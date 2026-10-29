@@ -614,6 +614,10 @@
   tickClock();
   // Car and home controls are display-only for now: say so instead of doing nothing.
   addEventListener('click', e => { if (e.target.closest('[data-act]')) window.toast('Controls are not connected yet'); });
+  // Emits carry the frame's emit key (server/internal/api/apps.go EmitKey): only pages the
+  // server serves have it, so another site cannot fire a hook. The page's apps never see it.
+  const emitPath = '/api/frames/' + encodeURIComponent(TF.frame) + '/emit';
+  const emitURL = emitPath + (TF.k ? '?k=' + encodeURIComponent(TF.k) : '');
   // A room's switch: the hook room_on or room_off gets {"area_id"} (Home Assistant's light
   // service takes it as it is). Without such a hook on the server, say so; nothing flips.
   addEventListener('click', e => {
@@ -621,7 +625,7 @@
     if (!t || t._busy || !t.dataset.area) return;
     const on = !t.dataset.on, sec = t.closest('.w'), name = t.dataset.room;
     t._busy = true;
-    fetch('/api/frames/' + encodeURIComponent(TF.frame) + '/emit', { method: 'POST',
+    fetch(emitURL, { method: 'POST',
       body: JSON.stringify({ name: on ? 'room_on' : 'room_off', data: { area_id: t.dataset.area } }) })
       .then(r => r.json()).then(res => {
         if (!res.status) { window.toast('Room lights are not connected yet'); return; }
@@ -650,11 +654,12 @@
         dispatchEvent(new Event('tf-activity'));
       } else if (m.op === 'fetch') {
         const reply = (status, body) => e.source.postMessage({ tf: 1, op: 'reply', id: m.id, status, body }, '*');
-        const path = String(m.path || ''), fr = encodeURIComponent(TF.frame);
-        const ok = /^\/api\/data\/source\/[a-z0-9_-]+$/.test(path) || path === '/api/frames/' + fr + '/emit' ||
+        const path = String(m.path || ''), emit = path === emitPath;
+        const ok = /^\/api\/data\/source\/[a-z0-9_-]+$/.test(path) || emit ||
           path === '/api/apps/' + name + '/state' || path.startsWith('/api/apps/' + name + '/state/');
         if (!ok || (m.method !== 'GET' && m.method !== 'POST')) { reply(403, 'not allowed: ' + m.method + ' ' + path); return; }
-        fetch(path, m.method === 'POST' ? { method: 'POST', body: String(m.body ?? '') } : {})
+        // The key is added here, after the check on the path the app asked for.
+        fetch(emit ? emitURL : path, m.method === 'POST' ? { method: 'POST', body: String(m.body ?? '') } : {})
           .then(r => r.text().then(t => reply(r.status, t)), err => reply(0, String(err)));
       }
     });

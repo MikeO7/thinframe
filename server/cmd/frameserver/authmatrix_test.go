@@ -20,7 +20,8 @@ package main
 //     /healthz, and / (a redirect to /admin).
 //     apps (/apps/*, /apps-sdk.js, /api/data/source/*, /api/apps/*/state*, emit): MCP-written
 //     pages run sandboxed in an opaque origin with no token, like the dashboard; they read
-//     sources and app state, and emit (rate limited, runs only hooks the owner set over MCP).
+//     sources and app state, and emit (rate limited, runs only hooks the owner set over MCP,
+//     and needs the frame's emit key, which only the documents the server serves carry).
 //   - Screenshots: the frame uploads with its paired token; reading one needs FRAME_TOKEN.
 
 import (
@@ -289,8 +290,10 @@ func rows() []row {
 		{method: "GET", path: "/apps/nope/index.html", class: public, ok: 404},
 		{pattern: "GET /apps-sdk.js", method: "GET", path: "/apps-sdk.js", class: public, ok: 200},
 		{pattern: "GET /api/data/source/{key}", method: "GET", path: "/api/data/source/demo", class: public, ok: 200},
-		{pattern: "POST /api/frames/{id}/emit", method: "POST", path: "/api/frames/kitchen/emit", class: public, ok: 200, body: `{"app":"demo","name":"tap","data":1}`, ctype: "text/plain"},
-		{method: "POST", path: "/api/frames/stranger/emit", class: public, ok: 404, body: `{"name":"tap"}`, ctype: "text/plain"},
+		{pattern: "POST /api/frames/{id}/emit", method: "POST", path: "/api/frames/kitchen/emit?k=" + api.EmitKey(token, "kitchen"), class: public, ok: 200, body: `{"app":"demo","name":"tap","data":1}`, ctype: "text/plain"},
+		{method: "POST", path: "/api/frames/kitchen/emit", class: public, ok: 403, body: `{"name":"tap"}`, ctype: "text/plain"},
+		{method: "POST", path: "/api/frames/kitchen/emit?k=" + api.EmitKey(token, "hall"), class: public, ok: 403, body: `{"name":"tap"}`, ctype: "text/plain"},
+		{method: "POST", path: "/api/frames/stranger/emit?k=" + api.EmitKey(token, "stranger"), class: public, ok: 404, body: `{"name":"tap"}`, ctype: "text/plain"},
 		{pattern: "GET /api/apps/{name}/state", method: "GET", path: "/api/apps/demo/state", class: public, ok: 200},
 		{pattern: "POST /api/apps/{name}/state/{key}", method: "POST", path: "/api/apps/demo/state/count", class: public, ok: 204, body: `3`, ctype: "text/plain"},
 		// pairing
@@ -406,7 +409,7 @@ func TestPublicRoutesDoNotCreateFrames(t *testing.T) {
 		{"GET", "/api/data/photo/next?frame=stranger", ""},
 		{"POST", "/api/frames/stranger/beacon", `{"latency_ms":5}`},
 		{"POST", "/api/frames/stranger/alive", ""},
-		{"POST", "/api/frames/stranger/emit", `{"name":"tap"}`},
+		{"POST", "/api/frames/stranger/emit?k=" + api.EmitKey(token, "stranger"), `{"name":"tap"}`},
 		{"GET", "/apps/stranger/index.html", ""},
 		{"GET", "/api/pair/stranger?nonce=0123456789abcdef", ""},
 		{"POST", "/pair/stranger/accept", "nonce=0123456789abcdef"},
