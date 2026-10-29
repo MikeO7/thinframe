@@ -470,7 +470,7 @@
     },
     cameras(sec, d, p) {
       const b = body(sec), cams = arr(d.cameras);
-      sec.querySelector('.live').hidden = !cams.length;
+      sec.querySelector('.live').hidden = !cams.length || !!d.error || !!d.setup;
       if (d.setup) { empty(b, 'Cameras are not connected yet', 'Set PROTECT_URL and PROTECT_API_KEY on the server'); return; }
       if (d.error) { empty(b, 'Cameras unavailable'); return; }
       if (!cams.length) { empty(b, d.cameras ? 'No cameras match' : 'No camera data yet'); return; }
