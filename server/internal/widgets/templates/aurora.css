@@ -8,7 +8,7 @@
    each redraw of a card or page is drawn by the Mali-400, and those made it 25 to 50 % slower.
    The nav rail has its own layer, so lighting a tab redraws only the rail. */
 @font-face{font-family:"Manrope";src:url("/fonts/manrope.woff2") format("woff2"),url("/fonts/manrope.ttf") format("truetype");font-weight:200 800;font-display:block}
-:root{--bg:#04050a;--fg:#f7f8fc;--dim:rgba(236,239,250,.66);--faint:rgba(236,239,250,.4);
+:root{--bg:#04050a;--fg:#f7f8fc;--dim:rgba(236,239,250,.66);--faint:rgba(236,239,250,.58);
   --card:rgba(255,255,255,.05);--chip:rgba(255,255,255,.065);--chip2:rgba(255,255,255,.12);--sel:rgba(255,255,255,.14);
   --edge:rgba(255,255,255,.085);--ok:#3ff0b0;--warn:#ffb648;--bad:#ff5f78;--lit:#ffc56e;
   --g1:rgba(124,92,255,.62);--g2:rgba(255,124,72,.48);--g3:rgba(0,170,255,.2);--accent:#9a84ff;--accent2:#ff8f5c;--glow:rgba(154,132,255,.38)}
@@ -51,7 +51,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .w.nodata::after{opacity:.25}
 .appfail{border:1px dashed rgba(255,255,255,.13);border-radius:2.8rem}
 .empty{font-size:1.4rem;letter-spacing:.04em;color:var(--faint)}
-.label{text-transform:uppercase;letter-spacing:.2em;font-size:1.1rem;font-weight:700;color:var(--faint)}
+.label{text-transform:uppercase;letter-spacing:.14em;font-size:1.3rem;font-weight:700;color:var(--faint)}
 .label::before{content:"";display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:1rem;vertical-align:.15rem;
   background:linear-gradient(135deg,var(--accent),var(--accent2))}
 

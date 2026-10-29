@@ -1,7 +1,7 @@
 /* Obsidian: Apple-style dark grays on black. Loaded after page.css when the layout's theme is
    "obsidian". Flat fills only (no blur, no large shadows): the frame's GPU is a Mali-400. */
 @font-face{font-family:"Inter";src:url("/api/data/asset/inter.woff2") format("woff2");font-weight:100 900;font-display:swap}
-:root{--bg:#000;--fg:#f5f5f7;--dim:rgba(235,235,245,.6);--faint:rgba(235,235,245,.38);--card:#1c1c1e;--chip:#2c2c2e;--chip2:#3a3a3c;
+:root{--bg:#000;--fg:#f5f5f7;--dim:rgba(235,235,245,.6);--faint:rgba(235,235,245,.55);--card:#1c1c1e;--chip:#2c2c2e;--chip2:#3a3a3c;
   --edge:rgba(255,255,255,.08);--accent:#0a84ff;--ok:#30d158;--warn:#ff9f0a;--bad:#ff453a;--sel:#3a3a3c;--lit:#ffc46b}
 html,body{font-family:"Inter",system-ui,"DejaVu Sans",sans-serif;-webkit-font-smoothing:antialiased}
 .w{border-radius:2.2rem;padding:2.2rem 2.4rem}
