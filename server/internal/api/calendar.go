@@ -92,7 +92,7 @@ func (cs Calendars) Upcoming(now time.Time, n int) ([]Event, error) {
 	}
 	for _, err := range errs {
 		if err != nil {
-			log.Printf("calendar: %v", err)
+			log.Printf("calendar: %s", redactErr(err))
 		}
 	}
 	return out, nil

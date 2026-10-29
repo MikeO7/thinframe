@@ -61,6 +61,31 @@ for _ in $(seq 100); do
 	api "http://127.0.0.1:$PORT/api/frames/$ID" | grep -q '"acked_at"' && break; sleep 0.1
 done
 api "http://127.0.0.1:$PORT/api/frames/$ID" | grep -q '"acked_at"' || fail "action never acked"
+
+# Pairing: a frame without a token shows a code on its page; nothing pairs until the owner types
+# that code on /admin, then the frame gets its own token. (Own dir: the token file sits next to
+# the conf.)
+PD="$TMP/pairframe"; mkdir -p "$PD"
+printf 'SERVER_URL="http://127.0.0.1:%s"\nFRAME_ID="e2e-pair"\n' "$PORT" >"$PD/thinframe.conf"
+TFCTL_CONF="$PD/thinframe.conf" TFCTL_STATUS_PAGE="$PD/status.html" "$TMP/target/release/tfctl" agent \
+	>"$TMP/agent-pair.log" 2>&1 & PIDS+=($!)
+code=""
+for _ in $(seq 100); do
+	code="$(sed -n 's/.*<div class="code">\([0-9]\{3\}\) \([0-9]\{3\}\)<.*/\1\2/p' "$PD/pair.html" 2>/dev/null || true)"
+	[ -n "$code" ] && break; sleep 0.1
+done
+[ -n "$code" ] || fail "the unpaired frame shows no pairing code"
+sleep 3 # a few polls while nobody has typed the code
+api "http://127.0.0.1:$PORT/api/frames" | grep -q '"e2e-pair"' && fail "a frame record exists before the code was typed"
+[ -s "$PD/thinframe.token" ] && fail "the frame got a token before the code was typed"
+wrong=$(( (10#$code + 1) % 1000000 )); wrong=$(printf '%06d' "$wrong")
+curl -fsS -o /dev/null -w '%{redirect_url}' -u "admin:$TOKEN" -d "code=$wrong" \
+	"http://127.0.0.1:$PORT/admin/e2e-pair/pair" | grep -q 'err=' || fail "a wrong code was not refused"
+curl -fsS -o /dev/null -u "admin:$TOKEN" -d "code=$code" "http://127.0.0.1:$PORT/admin/e2e-pair/pair" || fail "typing the code"
+for _ in $(seq 100); do [ -s "$PD/thinframe.token" ] && break; sleep 0.1; done
+[ -s "$PD/thinframe.token" ] || fail "the frame never picked its token up"
+for _ in $(seq 100); do api "http://127.0.0.1:$PORT/api/frames/e2e-pair" 2>/dev/null | grep -q '"ip"' && break; sleep 0.1; done
+api "http://127.0.0.1:$PORT/api/frames/e2e-pair" | grep -q '"ip"' || fail "the paired frame never sent a heartbeat"
 # Artifacts: a second server (no agent, so nothing tries to self-update) carrying staged files.
 "$ROOT/scripts/make-artifacts.sh" v-e2e "$TMP/target/release/tfctl" "" "$TMP/staged" >/dev/null
 serve $((PORT + 1)) "$TMP/data2" "$TMP/staged" "$TMP/server2.log"; P2=$SP

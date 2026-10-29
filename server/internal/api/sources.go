@@ -121,7 +121,8 @@ func (s *sourceSet) delete(key string) bool {
 	return true
 }
 
-// writeDurable writes b to a temporary file, syncs it and renames it over path.
+// writeDurable writes b to a temporary file, syncs it, renames it over path and syncs the
+// directory, so a power cut leaves either the old file or the whole new one (as store.save).
 func writeDurable(path string, b []byte) error {
 	tmp := path + ".tmp"
 	w, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
@@ -139,7 +140,14 @@ func writeDurable(path string, b []byte) error {
 	if err := w.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 // checkSource accepts a JSON object and returns it compacted.

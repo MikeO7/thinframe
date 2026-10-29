@@ -18,7 +18,7 @@ import (
 
 // Instructions tell an MCP client (Claude Code, Hermes, ...) what this server is for.
 const Instructions = "thinframe manages wall-mounted picture frames. Each frame shows a dashboard " +
-	"rendered by this server. Start with list_frames. Change a frame with set_frame_config " +
+	"rendered by this server. Start with list_frames. A new frame shows a 6-digit code on its screen: ask the person at it for the code and call pair_frame. Change a frame with set_frame_config " +
 	"(rotation, brightness, schedule, splash) or set_layout (see list_widgets). frame_action reboots, " +
 	"updates, rolls back or runs bench (touch to paint, result in get_logs, samples in list_frames); omitting id targets every frame and needs confirm=true. " +
 	"For anything the widgets cannot do, write an app: any web page (HTML/CSS/JS) with live data, buttons and server-side API calls, " +
@@ -73,7 +73,8 @@ type empty struct{}
 // Results are JSON objects: structuredContent and outputSchema must be objects for clients on
 // protocol versions before 2026-07-28 (the Python and TypeScript SDKs validate this).
 type framesOut struct {
-	Frames []frameOut `json:"frames"`
+	Frames  []frameOut        `json:"frames"`
+	Waiting []api.PairWaiting `json:"waiting_to_pair,omitempty"`
 }
 
 type frameOut struct {
@@ -98,7 +99,20 @@ func register(m *sdk.Server, s *api.Server) {
 			for i, f := range fs {
 				out.Frames[i] = toOut(s, f)
 			}
+			out.Waiting = s.PairsWaiting()
 			return nil, out, nil
+		})
+
+	type pairIn struct {
+		ID   string `json:"id" jsonschema:"frame id, as listed under waiting_to_pair"`
+		Code string `json:"code" jsonschema:"the 6-digit code the frame shows on its screen; ask the person standing at it"`
+	}
+	sdk.AddTool(m, tool("pair_frame", "Pair frame", "Pair a new frame that shows a pairing code on its screen (list_frames lists it under waiting_to_pair). Only the person at the frame can read the code: ask them for it, never guess. 5 wrong codes and the frame shows a new one. The frame picks its token up within seconds and opens its dashboard.", safeWrite),
+		func(_ context.Context, _ *sdk.CallToolRequest, in pairIn) (*sdk.CallToolResult, map[string]any, error) {
+			if err := s.AcceptPairing(in.ID, in.Code); err != nil {
+				return nil, nil, err
+			}
+			return nil, map[string]any{"ok": true, "id": in.ID, "note": "accepted; the frame opens its dashboard on its next poll (2 s)"}, nil
 		})
 
 	sdk.AddTool(m, tool("get_frame", "Get frame", "Full detail for one frame: config, layout, pending actions, last 20 events.", readOnly),

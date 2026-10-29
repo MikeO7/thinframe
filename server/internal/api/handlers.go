@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -93,8 +94,14 @@ func (s *Server) handleDeleteFrame(w http.ResponseWriter, r *http.Request) {
 	// any open pairing request so the frame cannot carry on as if nothing happened.
 	s.Hub.Kick(id, "deleted")
 	s.mu.Lock()
-	delete(s.pair.open, id)
+	s.dropPairs(id)
 	s.mu.Unlock()
+	// Its screenshots and reports go with it (id is valid: Delete checked it).
+	for _, dir := range []string{s.shotDir(id), s.reportDir(id)} {
+		if err := os.RemoveAll(dir); err != nil {
+			log.Printf("delete %s: %v", id, err)
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -293,9 +300,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
-	// An app shown full screen runs in a sandbox (an opaque origin), so its stream is a
-	// cross-origin request. The stream is public and read-only like the page.
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// An app shown full screen runs in a sandbox (an opaque origin), and the saved boot page
+	// is a file:// document, so their streams are cross-origin requests (hosts.go appCORS).
+	appCORS(w, r)
 	ch, unsub := s.sse.subscribeAs(id, r.URL.Query().Get("apps") == "1")
 	defer unsub()
 	// Send the headers now: the client sees the stream open without waiting for the first event.
@@ -341,9 +348,7 @@ func (s *Server) recordHeartbeatSSE(f store.Frame) {
 // A stale reading (fetch failed, cache still holds one) is shown rather than an error.
 func (s *Server) weatherData() map[string]any {
 	wx, err := s.opts.Weather.Current()
-	if err != nil {
-		log.Printf("weather: %v", err)
-	}
+	s.feeds.note("weather", err)
 	if err != nil && wx.Desc == "" {
 		return map[string]any{"temp": "", "desc": "weather unavailable"}
 	}
@@ -367,9 +372,7 @@ func (s *Server) weatherData() map[string]any {
 // calendarData is the calendar widget's fields, shared by SSE and /api/data/calendar.
 func (s *Server) calendarData(now time.Time) map[string]any {
 	evs, err := s.opts.Calendar.Upcoming(now, 3)
-	if err != nil {
-		log.Printf("calendar: %v", err)
-	}
+	s.feeds.note("calendar", err)
 	data := map[string]any{"l1": "", "l2": "", "l3": ""}
 	for i, e := range evs {
 		data["l"+strconv.Itoa(i+1)] = e.Line(now)
@@ -437,8 +440,8 @@ func (s *Server) agendaData(now time.Time) map[string]any {
 
 // handleDataWeather serves GET /api/data/weather. The page never calls a third party:
 // the server fetches and caches, the page reads this or the SSE stream.
-func (s *Server) handleDataWeather(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*") // apps read it from their sandbox
+func (s *Server) handleDataWeather(w http.ResponseWriter, r *http.Request) {
+	appCORS(w, r) // apps read it from their sandbox
 	if s.opts.Weather == nil {
 		http.Error(w, "no weather source configured (WEATHER_LAT, WEATHER_LON)", http.StatusNotFound)
 		return
@@ -448,8 +451,8 @@ func (s *Server) handleDataWeather(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleDataCalendar serves GET /api/data/calendar.
-func (s *Server) handleDataCalendar(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*") // apps read it from their sandbox
+func (s *Server) handleDataCalendar(w http.ResponseWriter, r *http.Request) {
+	appCORS(w, r) // apps read it from their sandbox
 	if s.opts.Calendar == nil {
 		http.Error(w, "no calendar source configured (CALENDAR_ICS_URL)", http.StatusNotFound)
 		return

@@ -33,7 +33,11 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
 </style></head><body>
 <h1>thinframe <span class="hint">{{.Version}} · {{len .Frames}} frames · {{.Online}} online</span></h1>
 {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
-{{if not .Frames}}<p>No frames yet. A frame registers itself on its first connection.</p>{{end}}
+{{if .Waiting}}<h2>Waiting to pair</h2><p class="hint">Type the 6-digit code the frame shows on its own screen. After {{.MaxTries}} wrong codes the frame shows a new one.</p>
+{{range .Waiting}}<form method="post" action="/admin/{{.ID}}/pair" class="row"><b>{{.ID}}</b> <span class="hint">from {{.IP}}, asked {{ago .Since}}</span>
+{{if .Accepted}}<span class="on">code accepted, the frame is picking up its token</span>{{else}}<input name="code" inputmode="numeric" autocomplete="off" placeholder="code on its screen" style="width:9rem"> <button>pair</button>{{end}}</form>
+{{end}}{{end}}
+{{if not .Frames}}<p>No frames yet. A frame with the server's token registers itself on its first connection; one without asks to pair and shows a code.</p>{{end}}
 <table><tr><th>frame</th><th>state</th><th>ip</th><th>mem</th><th>temp</th><th>latency</th><th>versions</th><th>last seen</th></tr>
 {{range .Frames}}{{$f := .}}<tr><td><a href="#f-{{.ID}}">{{.ID}}</a>{{if .Name}}<br><span class="hint">{{.Name}}</span>{{end}}</td>
 <td class="{{if .Online}}on{{else}}off{{end}}">{{if .Online}}online{{else}}offline{{end}}</td>
@@ -41,7 +45,7 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
 <td>{{ago .LastSeen}}</td></tr>{{end}}</table>
 
 {{range .Frames}}{{$f := .}}<h2 id="f-{{.ID}}">{{.ID}} <a class="hint" href="/frame/{{.ID}}" target="_blank">open page ↗</a></h2>
-{{if .TokenHash}}<form method="post" action="/admin/{{.ID}}/unpair" class="row"><span class="on">paired on its screen</span> <button>forget pairing</button> <span class="hint">the frame then shows its PAIR button again</span></form>{{end}}
+{{if .TokenHash}}<form method="post" action="/admin/{{.ID}}/unpair" class="row"><span class="on">paired with the code on its screen</span> <button>forget pairing</button> <span class="hint">the frame then shows a new pairing code</span></form>{{end}}
 <form method="post" action="/admin/{{.ID}}/config" class="row">
  <label>name <input name="name" value="{{.Name}}"></label>
  <label>rotation <select name="rotation">{{$rot := .Config.Rotation}}{{range $r := list 0 1 2 3}}<option {{if eq $r $rot}}selected{{end}}>{{$r}}</option>{{end}}</select></label>
@@ -68,12 +72,14 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
 </body></html>`))
 
 type adminData struct {
-	Version string
-	Frames  []frameView
-	Online  int
-	Error   string
-	Actions []string
-	Types   []string
+	Version  string
+	Waiting  []PairWaiting
+	MaxTries int
+	Frames   []frameView
+	Online   int
+	Error    string
+	Actions  []string
+	Types    []string
 }
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +88,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) renderAdmin(w http.ResponseWriter, errText string) {
 	fs := s.Store.List()
-	d := adminData{Version: s.opts.Version, Error: errText, Actions: ValidActions, Types: widgets.Types}
+	d := adminData{Version: s.opts.Version, Error: errText, Actions: ValidActions, Types: widgets.Types,
+		Waiting: s.PairsWaiting(), MaxTries: pairMaxTries}
 	for _, f := range fs {
 		v := s.view(f)
 		v.Reports, _ = s.ListReports(f.ID)

@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -14,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -41,6 +43,9 @@ type Options struct {
 	Version    string
 	PageStale  time.Duration // hung-page timeout; 0 = 3 minutes
 	Reports    string        // where frame reports are kept; "" = <data>/reports next to the store
+	// Hosts: extra Host names the public routes answer to (SERVER_HOSTS), besides IP literals,
+	// localhost, single-label and local names and the container's hostname (hosts.go).
+	Hosts []string
 }
 
 // Server holds the dependencies and implements every operation once.
@@ -58,7 +63,7 @@ type Server struct {
 	page      pageWatch
 	pageStale time.Duration
 	pageCheck time.Duration
-	// pair: open one-press pairing requests (pair.go), guarded by mu.
+	// pair: open pairing requests (pair.go), guarded by mu.
 	pair pairings
 	// patterns: what Routes registered.
 	patterns []string
@@ -76,9 +81,13 @@ type Server struct {
 	polls    *jsonSet[Poll]
 	pollRun  pollRun
 	pollTick time.Duration
-	shots    shotWaiters
+	// feeds: last logged failure of weather, calendar and each poll (hooks.go feedLog).
+	feeds feedLog
+	shots shotWaiters
 	// ring: the last doorbell press and which doorbells rang (cameras.go).
 	ring ringState
+	// hosts: the Host names the public routes answer to (hosts.go).
+	hosts hostSet
 	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
 	// does not wait for hijacked connections, so a process that exits right after Shutdown
 	// could cut the "disconnected" event short; Drain waits for them.
@@ -92,6 +101,7 @@ func New(st *store.Store, opts Options) *Server {
 	if opts.PageStale > 0 {
 		s.pageStale = opts.PageStale
 	}
+	s.hosts = newHostSet(opts.Hosts)
 	data := filepath.Dir(st.Dir())
 	if s.opts.Reports == "" {
 		s.opts.Reports = filepath.Join(data, "reports")
@@ -131,7 +141,9 @@ func (s *Server) Routes() http.Handler {
 		m.Handle(pattern, h)
 		s.patterns = append(s.patterns, pattern)
 	}
-	fn := func(pattern string, h http.HandlerFunc) { handle(pattern, h) }
+	// Public routes carry no credentials, so they also check the Host header (hosts.go): a page
+	// on another site that rebinds its DNS name to this server's address gets 421.
+	fn := func(pattern string, h http.HandlerFunc) { handle(pattern, s.checkHost(h)) }
 	fn("GET /", s.handleIndex)
 	fn("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	fn("GET /frame/{id}", s.handleFramePage)
@@ -155,10 +167,11 @@ func (s *Server) Routes() http.Handler {
 	fn("POST /api/frames/{id}/emit", s.handleEmit)
 	fn("GET /api/apps/{name}/state", s.handleGetAppState)
 	fn("POST /api/apps/{name}/state/{key}", s.handleSetAppState)
-	// Pairing: a frame without a token asks for one (pair.go).
+	// Pairing: a frame without a token asks for one and shows a code; the owner types it on
+	// /admin (pair.go). /pair/{id}/accept shows the code to a frame with an older tfctl.
 	fn("POST /api/pair", s.handlePairRequest)
 	fn("GET /api/pair/{id}", s.handlePairPoll)
-	fn("POST /pair/{id}/accept", s.handlePairAccept)
+	fn("POST /pair/{id}/accept", s.handlePairShowCode)
 	// Protected by token when set. "frame" routes also take that frame's paired token,
 	// "anyFrame" routes any paired frame's token; the rest need FRAME_TOKEN.
 	handle("GET /api/frames", s.auth(http.HandlerFunc(s.handleList)))
@@ -191,6 +204,7 @@ func (s *Server) Routes() http.Handler {
 	handle("POST /admin/{id}/layout", cop.Handler(s.authAdmin(adminForm(s.handleAdminLayout))))
 	handle("POST /admin/{id}/action", cop.Handler(s.authAdmin(adminForm(s.handleAdminAction))))
 	handle("POST /admin/{id}/unpair", cop.Handler(s.authAdmin(adminForm(s.handleAdminUnpair))))
+	handle("POST /admin/{id}/pair", cop.Handler(s.authAdmin(adminForm(s.handleAdminPair))))
 	return logRequests(foldIDs(m))
 }
 
@@ -216,6 +230,9 @@ func (s *Server) authAnyFrame(next http.Handler) http.Handler {
 
 func (s *Server) authWith(next http.Handler, frameOK func(*http.Request) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.opts.Token == "" && !s.hostOK(w, r) { // no token: as public as the page plane
+			return
+		}
 		if s.opts.Token == "" || tokenOK(r, s.opts.Token) || frameOK(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -228,6 +245,9 @@ func (s *Server) authWith(next http.Handler, frameOK func(*http.Request) bool) h
 // authAdmin guards the browser admin page with HTTP Basic: any user name, password = token.
 func (s *Server) authAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.opts.Token == "" && !s.hostOK(w, r) {
+			return
+		}
 		if _, pw, ok := r.BasicAuth(); s.opts.Token == "" || ok && subtle.ConstantTimeCompare([]byte(pw), []byte(s.opts.Token)) == 1 {
 			next.ServeHTTP(w, r)
 			return
@@ -665,6 +685,8 @@ func foldIDs(next http.Handler) http.Handler {
 	})
 }
 
+// logRequests logs method, path, status, client IP and duration. The path only: a query may
+// carry a token (?token=) or a pairing nonce, and headers are never logged.
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/stream/") || strings.HasPrefix(r.URL.Path, "/api/data/") {
@@ -672,7 +694,44 @@ func logRequests(next http.Handler) http.Handler {
 			return
 		}
 		t := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(t).Round(time.Millisecond))
+		rec := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(rec, r)
+		code := rec.code
+		if code == 0 {
+			code = http.StatusOK
+		}
+		log.Printf("%s %s %d %s %s", r.Method, r.URL.Path, code, sourceIP(r), time.Since(t).Round(time.Millisecond))
 	})
+}
+
+// statusWriter records the status code. Unwrap lets http.ResponseController reach Flush and
+// Hijack (the control socket's upgrade) on the real writer.
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if w.code == 0 {
+		w.code = code
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.code == 0 {
+		w.code = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *statusWriter) Flush() { _ = http.NewResponseController(w.ResponseWriter).Flush() }
+
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if w.code == 0 {
+		w.code = http.StatusSwitchingProtocols
+	}
+	return http.NewResponseController(w.ResponseWriter).Hijack()
 }

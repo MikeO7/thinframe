@@ -10,6 +10,7 @@ services:
       - PORT=${PORT:-41007}
       - FRAME_TOKEN=${FRAME_TOKEN:-dev-token-change-me}
       - PAGE_STALE=${PAGE_STALE:-}
+      - SERVER_HOSTS=${SERVER_HOSTS:-}  # extra Host names, e.g. server.nox (server/README.md)
   simframe:
     profiles: [sim]
     build:

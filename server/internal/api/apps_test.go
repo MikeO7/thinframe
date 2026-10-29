@@ -33,9 +33,13 @@ func get(t *testing.T, url string, hdr map[string]string) (*http.Response, strin
 	return resp, string(b)
 }
 
+// post sends body as a sandboxed app does: text/plain, Origin "null".
 func post(t *testing.T, url, body string) (*http.Response, string) {
 	t.Helper()
-	resp, err := http.Post(url, "text/plain", strings.NewReader(body))
+	req, _ := http.NewRequest("POST", url, strings.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Origin", "null")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +160,7 @@ func TestAppMessages(t *testing.T) {
 	if st["app"] != "todo" || st["key"] != "items" {
 		t.Fatalf("state message %v", m)
 	}
-	if r, b := get(t, ts.URL+"/api/apps/todo/state", nil); r.StatusCode != 200 || !strings.Contains(b, "milk") || r.Header.Get("Access-Control-Allow-Origin") != "*" {
+	if r, b := get(t, ts.URL+"/api/apps/todo/state", map[string]string{"Origin": "null"}); r.StatusCode != 200 || !strings.Contains(b, "milk") || r.Header.Get("Access-Control-Allow-Origin") != "null" {
 		t.Fatalf("state get %d %s", r.StatusCode, b)
 	}
 	if r, _ := post(t, ts.URL+"/api/apps/todo/state/items", `{bad`); r.StatusCode != 400 {

@@ -37,7 +37,7 @@ func TestEmitKey(t *testing.T) {
 		if r.StatusCode != c.want {
 			t.Errorf("POST %s: %d %q, want %d", strings.TrimPrefix(c.url, ts.URL), r.StatusCode, b, c.want)
 		}
-		if r.StatusCode == 403 && r.Header.Get("Access-Control-Allow-Origin") != "*" {
+		if r.StatusCode == 403 && r.Header.Get("Access-Control-Allow-Origin") != "null" {
 			t.Errorf("403 without CORS: an app could not read why")
 		}
 	}

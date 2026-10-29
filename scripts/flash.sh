@@ -144,6 +144,6 @@ main() {
 	step 3 "Card"; wait_card
 	local a; read -r -p "  Erase $DEV ($((SIZE / 1000000000)) GB, $LABEL)? [y/N] " a </dev/tty; [ "$a" = y ] || [ "$a" = Y ] || stop "nothing written"
 	step 4 "Write"; [ "${1:-}" = "--settings-only" ] || write_card "$DEV" "$SIZE"; put_provision "$DEV"
-	printf '\n%sDone.%s Put the card in the frame and power it on. It joins %s,\nfinds the server, then shows a PAIR button: tap it once.\n\n' "$B" "$N" "${WIFI_SSID:-the Wi-Fi you pick on screen}"
+	printf '\n%sDone.%s Put the card in the frame and power it on. It joins %s,\nfinds the server, then shows a pairing code: type it on the server /admin page.\n\n' "$B" "$N" "${WIFI_SSID:-the Wi-Fi you pick on screen}"
 }
 [ "${FLASH_SOURCE_ONLY:-}" = 1 ] || main "$@"

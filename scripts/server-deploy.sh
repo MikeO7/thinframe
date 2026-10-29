@@ -6,6 +6,8 @@
 # The container uses host networking (HTTP on PORT from DIR/env, default 41007; frames find
 # it by UDP discovery on 41007, whose reply carries that port) and reads
 # the container list from the host's Docker socket for the services widget.
+# Frames that reach the server by a name outside .local/.lan/.home.arpa/.internal (for example
+# server.nox) need it in DIR/env as SERVER_HOSTS=server.nox, or their dashboard gets 421.
 # Tagged local/thinframe-server: update managers that skip local/* leave it alone.
 set -euo pipefail
 host=${1:?usage: server-deploy.sh HOST [DIR]}

@@ -14,9 +14,12 @@ package main
 //     and everything it calls carry no credentials. They only read what the page shows anyway,
 //     and never create frame records.
 //     pairing (/api/pair, /api/pair/{id}, /pair/{id}/accept): a frame without a token asks for
-//     one; the nonce plus the same-source-IP check are the proof (docs/decisions.md "One-press
-//     pairing"). The accept form comes from the frame's own local page, so it is cross-origin by
-//     nature and must not be refused for that.
+//     one and shows the code it got on its screen; the token is minted only when the owner types
+//     that code on /admin/{id}/pair (admin auth) or MCP pair_frame, and handed only to the poll
+//     with the request's nonce from the same IP (docs/decisions.md "Pairing"). /pair/{id}/accept
+//     is the PAIR button of an older tfctl's local page (cross-origin by nature): it only shows
+//     the code to the holder of the nonce.
+//   - Every public route also checks the Host header (421 for a name that is not ours).
 //     /healthz, and / (a redirect to /admin).
 //     apps (/apps/*, /apps-sdk.js, /api/data/source/*, /api/apps/*/state*, emit): MCP-written
 //     pages run sandboxed in an opaque origin with no token, like the dashboard; they read
@@ -330,6 +333,7 @@ func rows() []row {
 		{pattern: "POST /admin/{id}/layout", method: "POST", path: "/admin/adminf/layout", ghost: "/admin/ghost/layout", class: admin, ok: 303, body: "layout=" + url.QueryEscape(string(layout)), ctype: form},
 		{pattern: "POST /admin/{id}/action", method: "POST", path: "/admin/adminf/action", ghost: "/admin/ghost/action", class: admin, ok: 303, body: "name=reload-page", ctype: form},
 		{pattern: "POST /admin/{id}/unpair", method: "POST", path: "/admin/adminf/unpair", ghost: "/admin/ghost/unpair", class: admin, ok: 303, ctype: form},
+		{pattern: "POST /admin/{id}/pair", method: "POST", path: "/admin/adminf/pair", ghost: "/admin/ghost/pair", class: admin, ok: 303, body: "code=000000", ctype: form},
 		// mcp (stateless streamable HTTP: POST carries JSON-RPC, GET has no stream to offer)
 		{pattern: "/mcp", method: "POST", path: "/mcp", class: mcpc, ok: 200, body: initRPC, ctype: jsonT},
 		{pattern: "/mcp", method: "GET", path: "/mcp", class: mcpc, ok: http.StatusMethodNotAllowed},

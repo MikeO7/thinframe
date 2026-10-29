@@ -159,7 +159,7 @@ func (s *Server) handleAppSDK(w http.ResponseWriter, r *http.Request) {
 
 // handleDataSource is a source as the apps read it (thinframe.data). Public like the page.
 func (s *Server) handleDataSource(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	appCORS(w, r)
 	w.Header().Set("Cache-Control", "no-store")
 	data, ok := s.src.get(r.PathValue("key"))
 	if !ok {
@@ -385,7 +385,7 @@ func readSmall(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, boo
 // open on the LAN could otherwise POST here. The key is checked first, so a caller without it
 // cannot probe which frames exist. Limited per frame; it never creates a frame record.
 func (s *Server) handleEmit(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	appCORS(w, r)
 	id := r.PathValue("id")
 	if !s.emitKeyOK(r, id) {
 		http.Error(w, "emit needs this frame's key (k): only pages this server serves carry it", http.StatusForbidden)
@@ -420,7 +420,7 @@ func (s *Server) handleEmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetAppState(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	appCORS(w, r)
 	w.Header().Set("Cache-Control", "no-store")
 	st, err := s.apps.State(r.PathValue("name"))
 	if err != nil {
@@ -432,7 +432,7 @@ func (s *Server) handleGetAppState(w http.ResponseWriter, r *http.Request) {
 
 // handleSetAppState: POST (a simple request, no preflight from the sandbox) with the JSON value.
 func (s *Server) handleSetAppState(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	appCORS(w, r)
 	name := r.PathValue("name")
 	if !s.apps.Exists(name) {
 		http.Error(w, "no such app", http.StatusNotFound)
