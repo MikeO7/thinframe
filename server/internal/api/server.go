@@ -103,7 +103,8 @@ func New(st *store.Store, opts Options) *Server {
 	s.pollRun = pollRun{last: map[string]PollStatus{}, busy: map[string]bool{}}
 	s.pollTick = 5 * time.Second
 	s.Hub.OnClose = func(id string) {
-		_, _ = st.Update(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
+		// UpdateExisting: a frame deleted while online must stay deleted when its socket drops.
+		_, _ = st.UpdateExisting(id, func(f *store.Frame) { store.AddEvent(f, "ws", "disconnected") })
 	}
 	return s
 }

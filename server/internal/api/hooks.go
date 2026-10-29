@@ -81,10 +81,19 @@ type jsonSet[T any] struct {
 
 func loadSet[T any](path string) *jsonSet[T] {
 	s := &jsonSet[T]{path: path, m: map[string]T{}}
-	if b, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(b, &s.m); err != nil {
-			log.Printf("%s: %v (ignored)", path, err)
-			s.m = map[string]T{}
+	b, err := os.ReadFile(path)
+	if err == nil {
+		err = json.Unmarshal(b, &s.m)
+	}
+	if err != nil && !os.IsNotExist(err) {
+		// The next change would replace the file with what is in memory: set it aside first,
+		// so its entries (and their tokens) can be recovered by hand.
+		s.m = map[string]T{}
+		bad := fmt.Sprintf("%s.corrupt-%s", path, time.Now().UTC().Format("20060102T150405Z"))
+		if rerr := os.Rename(path, bad); rerr != nil {
+			log.Printf("ERROR: %s is unreadable (%v) and could not be moved aside (%v); starting empty", path, err, rerr)
+		} else {
+			log.Printf("ERROR: %s is unreadable (%v); moved to %s, starting empty", path, err, bad)
 		}
 	}
 	return s

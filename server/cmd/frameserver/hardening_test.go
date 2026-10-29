@@ -250,6 +250,18 @@ func waitOffline(t *testing.T, e *tenv, id string) {
 	t.Fatalf("%s still online after the client closed", id)
 }
 
+// The listener drops a client that dribbles its headers (slowloris) or idles on keep-alive, and
+// sets no whole-request deadline: SSE streams and control sockets live for days.
+func TestHTTPServerTimeouts(t *testing.T) {
+	hs := newHTTPServer("", http.NotFoundHandler())
+	if hs.ReadHeaderTimeout <= 0 || hs.IdleTimeout <= 0 {
+		t.Fatalf("ReadHeaderTimeout %s, IdleTimeout %s: both must be set", hs.ReadHeaderTimeout, hs.IdleTimeout)
+	}
+	if hs.ReadTimeout != 0 || hs.WriteTimeout != 0 {
+		t.Fatalf("ReadTimeout %s, WriteTimeout %s would cut SSE streams and sockets", hs.ReadTimeout, hs.WriteTimeout)
+	}
+}
+
 // TestGracefulShutdown: Shutdown with an open control socket and an open SSE stream returns
 // cleanly and well inside shutdownTimeout, and both clients see their connection end.
 func TestGracefulShutdown(t *testing.T) {

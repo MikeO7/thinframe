@@ -3,7 +3,9 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestEnsureCreatesDefaults(t *testing.T) {
@@ -136,6 +138,52 @@ func TestPendingIsCapped(t *testing.T) {
 	})
 	if err != nil || len(f.Pending) != MaxPending {
 		t.Fatalf("pending %d, err %v", len(f.Pending), err)
+	}
+}
+
+// A frame's own log lines are cut to a bounded size, on a character boundary.
+func TestEventsAreBounded(t *testing.T) {
+	var f Frame
+	AddEvent(&f, strings.Repeat("k", 1000), strings.Repeat("é", 10000))
+	AddEvent(&f, "ws", strings.Repeat("x", MaxEventText))
+	e := f.Events[0]
+	if n := utf8.RuneCountInString(e.Kind); n != MaxEventKind {
+		t.Fatalf("kind is %d characters, want %d", n, MaxEventKind)
+	}
+	if n := utf8.RuneCountInString(e.Text); n != MaxEventText || !utf8.ValidString(e.Text) || !strings.HasSuffix(e.Text, "é…") {
+		t.Fatalf("text is %d characters (valid %v), want %d ending in …", n, utf8.ValidString(e.Text), MaxEventText)
+	}
+	if f.Events[1].Text != strings.Repeat("x", MaxEventText) {
+		t.Fatal("a line exactly at the limit was cut")
+	}
+	f.Pending = []Action{{ID: "a1", Name: "reboot"}}
+	Ack(&f, "a1", false, strings.Repeat("e", 70000))
+	if n := len(f.History[0].Error); n > 4*MaxEventText {
+		t.Fatalf("ack error kept %d bytes", n)
+	}
+}
+
+// UpdateExisting never recreates a deleted frame (the socket-close and beacon paths use it).
+func TestUpdateExistingDoesNotCreate(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if _, err := s.UpdateExisting("gone", func(f *Frame) { f.Name = "x" }); err != ErrNotFound {
+		t.Fatalf("unknown frame: %v, want ErrNotFound", err)
+	}
+	if _, err := s.Ensure("a"); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := s.UpdateExisting("a", func(f *Frame) { f.Name = "Hall" }); err != nil || f.Name != "Hall" {
+		t.Fatalf("existing frame: %+v %v", f, err)
+	}
+	if err := s.Delete("a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateExisting("a", func(f *Frame) {}); err != ErrNotFound {
+		t.Fatalf("deleted frame: %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "frames", "a.json")); !os.IsNotExist(err) {
+		t.Fatalf("deleted frame's file is back: %v", err)
 	}
 }
 

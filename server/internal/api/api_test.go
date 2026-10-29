@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -330,6 +331,43 @@ func TestTouchSurvivesHeartbeat(t *testing.T) {
 	}
 }
 
+// Page timings out of range are dropped, and a flood of beacons is cut off per frame.
+func TestBeaconValidatedAndRateLimited(t *testing.T) {
+	s, ts := newTest(t, "secret")
+	if _, err := s.Store.Ensure("f1"); err != nil {
+		t.Fatal(err)
+	}
+	beacon := func(id string, body any) int {
+		resp, _ := do(t, "POST", ts.URL+"/api/frames/"+id+"/beacon", "", body)
+		return resp.StatusCode
+	}
+	for _, bad := range []map[string]int{{"response_ms": -1}, {"dom_ms": 600000}, {"paint_ms": 1 << 40}} {
+		load := map[string]int{"response_ms": 1, "dom_ms": 2, "paint_ms": 3, "load_ms": 4}
+		for k, v := range bad {
+			load[k] = v
+		}
+		beacon("f1", map[string]any{"load": load})
+	}
+	if f, _ := s.Store.Get("f1"); f.PageLoad != nil {
+		t.Fatalf("an out-of-range page load was stored: %+v", f.PageLoad)
+	}
+	limited := 0
+	for range emitBurst + 5 {
+		if beacon("f1", map[string]any{"latency_ms": 10}) == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited == 0 {
+		t.Fatal("no beacon was rate limited")
+	}
+	if f, _ := s.Store.Get("f1"); f.Touch == nil || len(f.Touch.SamplesMS) > emitBurst {
+		t.Fatalf("%d beacons were stored, want at most %d", len(f.Touch.SamplesMS), emitBurst)
+	}
+	if code := beacon("f2", map[string]any{"latency_ms": 10}); code != http.StatusNoContent {
+		t.Fatalf("another frame's beacon: %d, want 204", code)
+	}
+}
+
 // Deleting a frame must drop its live socket: it was authenticated against the record just removed.
 func TestDeleteFrameKicksSocket(t *testing.T) {
 	s, ts := newTest(t, "tok")
@@ -352,5 +390,10 @@ func TestDeleteFrameKicksSocket(t *testing.T) {
 			t.Fatal("deleted frame still online")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// The socket's close bookkeeping (it finishes before Online turns false) must not have
+	// recreated the record it writes its "disconnected" event to.
+	if _, err := s.Store.Get("sim"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted frame came back when its socket closed: %v", err)
 	}
 }
