@@ -63,7 +63,7 @@ type Server struct {
 	page      pageWatch
 	pageStale time.Duration
 	pageCheck time.Duration
-	// pair: open one-press pairing requests (pair.go), guarded by mu.
+	// pair: open pairing requests (pair.go), guarded by mu.
 	pair pairings
 	// patterns: what Routes registered.
 	patterns []string
@@ -167,10 +167,11 @@ func (s *Server) Routes() http.Handler {
 	fn("POST /api/frames/{id}/emit", s.handleEmit)
 	fn("GET /api/apps/{name}/state", s.handleGetAppState)
 	fn("POST /api/apps/{name}/state/{key}", s.handleSetAppState)
-	// Pairing: a frame without a token asks for one (pair.go).
+	// Pairing: a frame without a token asks for one and shows a code; the owner types it on
+	// /admin (pair.go). /pair/{id}/accept shows the code to a frame with an older tfctl.
 	fn("POST /api/pair", s.handlePairRequest)
 	fn("GET /api/pair/{id}", s.handlePairPoll)
-	fn("POST /pair/{id}/accept", s.handlePairAccept)
+	fn("POST /pair/{id}/accept", s.handlePairShowCode)
 	// Protected by token when set. "frame" routes also take that frame's paired token,
 	// "anyFrame" routes any paired frame's token; the rest need FRAME_TOKEN.
 	handle("GET /api/frames", s.auth(http.HandlerFunc(s.handleList)))
@@ -203,6 +204,7 @@ func (s *Server) Routes() http.Handler {
 	handle("POST /admin/{id}/layout", cop.Handler(s.authAdmin(adminForm(s.handleAdminLayout))))
 	handle("POST /admin/{id}/action", cop.Handler(s.authAdmin(adminForm(s.handleAdminAction))))
 	handle("POST /admin/{id}/unpair", cop.Handler(s.authAdmin(adminForm(s.handleAdminUnpair))))
+	handle("POST /admin/{id}/pair", cop.Handler(s.authAdmin(adminForm(s.handleAdminPair))))
 	return logRequests(foldIDs(m))
 }
 

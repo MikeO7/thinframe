@@ -69,6 +69,12 @@ func TestToolsOverHTTP(t *testing.T) {
 		t.Fatalf("all-frames action without confirm should error: %+v", res)
 	}
 
+	// pair_frame needs a frame that is waiting with that code; nothing is waiting here.
+	res, err = sess.CallTool(context.Background(), &sdk.CallToolParams{Name: "pair_frame", Arguments: map[string]any{"id": "porch", "code": "123456"}})
+	if err != nil || !res.IsError {
+		t.Fatalf("pair_frame without a waiting frame: %v %+v", err, res)
+	}
+
 	res, _ = sess.CallTool(context.Background(), &sdk.CallToolParams{Name: "list_frames", Arguments: map[string]any{}})
 	b, _ := json.Marshal(res.Content)
 	if !strings.Contains(string(b), "kitchen") {
@@ -145,7 +151,7 @@ func TestProtocolVersions(t *testing.T) {
 	_, m = rpc(t, ts.URL, h, `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{`+meta+`}}`)
 	r, _ = m["result"].(map[string]any)
 	tools, _ := r["tools"].([]any)
-	if len(tools) != 30 {
+	if len(tools) != 31 {
 		t.Fatalf("tools/list (2026-07-28): %v", m)
 	}
 	for _, x := range tools {

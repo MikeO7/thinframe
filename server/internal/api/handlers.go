@@ -94,7 +94,7 @@ func (s *Server) handleDeleteFrame(w http.ResponseWriter, r *http.Request) {
 	// any open pairing request so the frame cannot carry on as if nothing happened.
 	s.Hub.Kick(id, "deleted")
 	s.mu.Lock()
-	delete(s.pair.open, id)
+	s.dropPairs(id)
 	s.mu.Unlock()
 	// Its screenshots and reports go with it (id is valid: Delete checked it).
 	for _, dir := range []string{s.shotDir(id), s.reportDir(id)} {
