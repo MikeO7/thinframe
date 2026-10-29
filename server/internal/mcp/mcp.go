@@ -230,6 +230,7 @@ func register(m *sdk.Server, s *api.Server) {
 				"types":   widgets.Types,
 				"props":   widgets.Props,
 				"images":  "http(s) URL or asset:<file> from DATA_DIR/assets",
+				"stale_s": "any widget with a source: seconds without a push before the card dims and says how old it is (0 never; default three missed runs of the poll that fills the source, at least 900, else 3600)",
 				"tabs":    "optional tabs [{id,title,icon,parent}] (icons: " + strings.Join(widgets.IconNames(), ", ") + "); widgets set tab; every tab shares cols x rows; idle_s returns to the first tab; nav left (default, a rail on the left) or bottom",
 				"themes":  "light, dark, obsidian, aurora (glass cards over soft colour light that follows the tab)",
 				"apps":    "type app shows an app (put_app; see app_guide) in the cell: any HTML/CSS/JS, live data and buttons",
