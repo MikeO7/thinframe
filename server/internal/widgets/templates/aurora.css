@@ -8,7 +8,7 @@
    each redraw of a card or page is drawn by the Mali-400, and those made it 25 to 50 % slower.
    The nav rail has its own layer, so lighting a tab redraws only the rail. */
 @font-face{font-family:"Manrope";src:url("/fonts/manrope.woff2") format("woff2"),url("/fonts/manrope.ttf") format("truetype");font-weight:200 800;font-display:block}
-:root{--bg:#04050a;--fg:#f7f8fc;--dim:rgba(236,239,250,.66);--faint:rgba(236,239,250,.4);
+:root{--bg:#04050a;--fg:#f7f8fc;--dim:rgba(236,239,250,.66);--faint:rgba(236,239,250,.58);
   --card:rgba(255,255,255,.05);--chip:rgba(255,255,255,.065);--chip2:rgba(255,255,255,.12);--sel:rgba(255,255,255,.14);
   --edge:rgba(255,255,255,.085);--ok:#3ff0b0;--warn:#ffb648;--bad:#ff5f78;--lit:#ffc56e;
   --g1:rgba(124,92,255,.62);--g2:rgba(255,124,72,.48);--g3:rgba(0,170,255,.2);--accent:#9a84ff;--accent2:#ff8f5c;--glow:rgba(154,132,255,.38)}
@@ -49,8 +49,9 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .w-cars.full::after,.w-services::after,.w.w-app::after{display:none}
 .w.nodata{background:rgba(255,255,255,.018);border:1px dashed rgba(255,255,255,.13);box-shadow:none}
 .w.nodata::after{opacity:.25}
+.appfail{border:1px dashed rgba(255,255,255,.13);border-radius:2.8rem}
 .empty{font-size:1.4rem;letter-spacing:.04em;color:var(--faint)}
-.label{text-transform:uppercase;letter-spacing:.2em;font-size:1.1rem;font-weight:700;color:var(--faint)}
+.label{text-transform:uppercase;letter-spacing:.14em;font-size:1.3rem;font-weight:700;color:var(--faint)}
 .label::before{content:"";display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:1rem;vertical-align:.15rem;
   background:linear-gradient(135deg,var(--accent),var(--accent2))}
 
@@ -73,6 +74,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .bar{background:rgba(255,255,255,.09)}
 .bar>i{background:linear-gradient(90deg,var(--accent),var(--accent2))}
 .chart i.now{background:var(--accent)}
+.carrow .bar>i{background:linear-gradient(90deg,#3f9dff,#22d6f0)} /* the cars app's battery bar, on every tab */
 .tl .ev{border-left-color:var(--accent);background:rgba(255,255,255,.07)}
 .day.today,.fc.wide .fd.today{border:1px solid var(--accent);background:linear-gradient(180deg,var(--glow),rgba(255,255,255,.04))}
 .fc.wide .fd{border:1px solid transparent}
@@ -85,6 +87,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opa
 .room.lit{background:rgba(255,180,100,.16);border-color:rgba(255,197,110,.5)}
 .pct.chg,.chgi{color:var(--ok)}
 .stage::after{background:radial-gradient(closest-side,rgba(0,0,0,.6),transparent)}
+#offline{background:rgba(16,18,30,.94);border:1px solid var(--edge)}
 #toast{transition:none;background:rgba(16,18,30,.94);border:1px solid var(--edge);color:var(--fg);border-radius:99rem;font-weight:600}
 .cam{border:1px solid rgba(255,255,255,.08)}
 .camview.cv-ring .cv-pill{background:linear-gradient(150deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 1rem 3rem -.6rem var(--glow)}

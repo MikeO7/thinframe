@@ -11,6 +11,16 @@
     if (h12) return ((d.getHours() + 11) % 12 + 1) + ':' + pad(d.getMinutes());
     return pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
+  // An event's time as the locale writes it, split into [time, day period]: ["6:00", "PM"] in
+  // the US, ["18:00", ""] in most of Europe. One formatter, made once: they are slow to make.
+  const tfmt = (() => { try { return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }); } catch (e) { return null; } })();
+  function clock(d) {
+    if (!tfmt || !tfmt.formatToParts) return [hm(d, true), ''];
+    let t = '', p = '';
+    for (const x of tfmt.formatToParts(d)) { if (x.type === 'dayPeriod') p = x.value; else t += x.value; }
+    return [t.trim(), p];
+  }
+  const clockText = d => clock(d).filter(Boolean).join(' ');
 
   function paintClock() {
     const d = new Date();
@@ -21,6 +31,7 @@
     document.querySelectorAll('.clock-date').forEach(e => e.textContent = !set ? '' :
       d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }));
     rerenderTimed();
+    widgets.forEach(markAge);
     return d;
   }
   function tickClock() {
@@ -264,7 +275,7 @@
       if (!d.events) { empty(b); return; }
       if (view === 'next') {
         if (!next) { empty(b, 'Nothing else today'); return; }
-        b.append(h('div', 'nx-title ellip', next.title), h('div', 'nx-when ellip', hm(next.s, true) + ' – ' + hm(next.e, true) + (next.where ? ' · ' + next.where : '')));
+        b.append(h('div', 'nx-title ellip', next.title), h('div', 'nx-when ellip', clockText(next.s) + ' – ' + clockText(next.e) + (next.where ? ' · ' + next.where : '')));
         const m = mins(now, next.s), n = h('div', 'big nx-in', m < 60 ? m : Math.floor(m / 60));
         n.append(h('span', 'unit', m < 60 ? ' min' : ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''))); b.append(n);
         return;
@@ -292,7 +303,9 @@
       const ahead = src.findIndex(e => e.e >= now), from = ahead < 0 ? Math.max(0, src.length - max) : Math.min(ahead, Math.max(0, src.length - max));
       for (const e of src.slice(from, from + max)) {
         const r = h('div', 'e' + (e.e < now ? ' past' : ''));
-        r.append(h('span', 'faint', hm(e.s, true)));
+        const [t0, ap] = clock(e.s), tm = h('span', 'faint', t0);
+        if (ap) tm.append(h('span', 'ap', ap));
+        r.append(tm);
         const t = h('div', 'ellip', e.title); if (e.where) t.append(h('small', 'ellip', e.where));
         r.append(t); list.append(r);
       }
@@ -403,6 +416,8 @@
       badge(sec, d.badge);
       const b = body(sec), items = merge(p.items, d.items);
       if (!items.length) { empty(b); return; }
+      // props.open names a tab: a tap anywhere on the card opens it (the House glance).
+      if (typeof p.open === 'string' && document.querySelector('.page[data-page="' + p.open + '"]')) sec.dataset.open = p.open;
       const l = h('div', 'lst');
       for (const x of items) l.append(tile(x.label, x.value, x.note, x.icon, x.state));
       b.append(l);
@@ -438,7 +453,9 @@
         const a = arr(d.added).slice(0, num(p.max) || 6);
         if (!a.length) { empty(b); return; }
         const g = h('div', 'adds'); g.style.gridTemplateColumns = 'repeat(' + a.length + ',1fr)';
-        for (const x of a) { const c = h('div', 'ad'), i = img(x.image, '', 320); if (i) c.append(i); c.append(h('div', 'ellip', x.title), h('small', '', x.when || '')); g.append(c); }
+        // Each poster sits in a box of its final size from the first frame: nothing moves when
+        // it arrives, and one that fails leaves the empty box.
+        for (const x of a) { const c = h('div', 'ad'), ph = h('div', 'pst'), i = img(x.image, '', 320); if (i) ph.append(i); c.append(ph, h('div', 'ellip', x.title), h('small', '', x.when || '')); g.append(c); }
         b.append(g); return;
       }
       const up = arr(d.upcoming);
@@ -570,12 +587,59 @@
   function draw(sec) {
     const r = R[sec.dataset.type];
     if (!r) return;
-    if (!visible(sec)) { dirty.add(sec); return; }
+    if (!visible(sec)) { dirty.add(sec); if (sec.dataset.type === 'shows') prefetch(sec); return; }
     dirty.delete(sec);
     const t = performance.now();
     try { r(sec, state[sec.id] || {}, props(sec)); } catch (e) { fail(sec.id + ': ' + e); }
     TF.perf.draws++; TF.perf.ms += performance.now() - t;
   }
+  // ---- how old a card's data is ------------------------------------------------------------
+  // Source messages carry the source's age (age_s, measured on the server, so no clock needs to
+  // be in step) and when to call it old (stale_s, server/internal/api/sources.go staleAfter).
+  // An old source dims the card and says "updated 40 min ago" in its bottom margin, as the
+  // cars app does. Ages run on performance.now(), which a clock being set does not move.
+  function fresh(sec, m) {
+    if (m.key !== props(sec).source || typeof m.age_s !== 'number') return;
+    sec._seenAt = performance.now() - m.age_s * 1000;
+    sec._staleMs = (Number(m.stale_s) || 0) * 1000;
+    markAge(sec);
+  }
+  function ago(ms) {
+    const m = Math.round(ms / 60000), hr = Math.floor(m / 60);
+    return m < 60 ? m + ' min ago' : hr < 24 ? hr + ' h ago' : Math.floor(hr / 24) + ' d ago';
+  }
+  function markAge(sec) {
+    if (sec._seenAt === undefined) return;
+    const age = performance.now() - sec._seenAt, old = sec._staleMs > 0 && age > sec._staleMs;
+    const text = old ? 'updated ' + ago(age) : '';
+    if (sec._ageText === text) return; // most minutes: nothing changes, nothing is redrawn
+    sec._ageText = text;
+    sec.classList.toggle('stale', old);
+    if (!sec._ageEl) { if (!old) return; sec._ageEl = h('div', 'age'); sec.append(sec._ageEl); }
+    sec._ageEl.textContent = text;
+    sec._ageEl.hidden = !old;
+  }
+
+  // Posters of a Shows card on a hidden tab are fetched and decoded while the page is idle, so
+  // the first visit shows them at once instead of up to 0.6 s later. The images are kept, which
+  // keeps them decoded in WebKit's cache (six posters at 320 px: about 4 MB).
+  const pre = new Map();
+  function prefetch(sec) {
+    clearTimeout(sec._preT);
+    sec._preT = setTimeout(() => {
+      const p = props(sec), d = state[sec.id] || {};
+      if (p.part !== 'added') return;
+      for (const x of arr(d.added).slice(0, num(p.max) || 6)) {
+        const u = src(x.image, 320);
+        if (!u || pre.has(u)) continue;
+        const n = new Image(); n.decoding = 'async'; n.src = u;
+        if (n.decode) n.decode().catch(() => pre.delete(u));
+        pre.set(u, n);
+      }
+      while (pre.size > 24) pre.delete(pre.keys().next().value);
+    }, 3000);
+  }
+
   function rerenderTimed() {
     document.querySelectorAll('.w-agenda,.w-worldclock,.w-shows').forEach(draw);
   }
@@ -595,7 +659,8 @@
   // ---- tabs -------------------------------------------------------------------------------
   const grid = document.getElementById('grid');
   let idleT;
-  // The rail first: it is small and cheap to redraw, so the touch shows in the next frame.
+  // The rail first: it is small and cheap to redraw, so the touch shows in the next frame. A
+  // tab's second pages are always listed (.seg); "show" marks the list of the open tab.
   function highlight(id) {
     let parent = null;
     document.querySelectorAll('.seg').forEach(s => {
@@ -670,12 +735,32 @@
   // reach the server through this page, so the page keeps the only event stream.
   const appFrames = Array.from(document.querySelectorAll('iframe.app'));
   const toApps = m => appFrames.forEach(f => f.contentWindow && f.contentWindow.postMessage({ tf: 1, op: 'server', msg: m }, '*'));
+  // Every app says hello once its script runs (the SDK is in every app document). One that has
+  // not after 15 s (the server unreachable, an error page, a broken app) gets a note in its place
+  // instead of a blank tab, and is loaded again every 30 s until it answers.
+  function appWait(f) {
+    clearTimeout(f._t);
+    f._hello = false;
+    f._t = setTimeout(function check(retry) {
+      if (f._hello) return;
+      if (!f._fail) {
+        const n = f.dataset.app || 'app', el = f._fail = h('div', 'appfail');
+        el.append(h('div', '', n[0].toUpperCase() + n.slice(1) + ' did not load'), h('small', '', 'Trying again every 30 seconds'));
+        f.after(el);
+      }
+      f._fail.hidden = false;
+      if (retry) f.src = f.src;
+      f._t = setTimeout(check, 30000, true);
+    }, 15000, false);
+  }
+  appFrames.forEach(appWait);
   if (appFrames.length) {
     addEventListener('message', e => {
       const f = appFrames.find(x => x.contentWindow === e.source), m = e.data;
       if (!f || !m || m.tf !== 1) return;
       const sec = f.closest('.w'), name = f.dataset.app;
       if (m.op === 'hello') {
+        f._hello = true; clearTimeout(f._t); if (f._fail) f._fail.hidden = true;
         let p = {};
         try { p = JSON.parse(sec.querySelector('script.wp').textContent); } catch { /* no props */ }
         e.source.postMessage({ tf: 1, op: 'init', frame: TF.frame, widget: sec.id.slice(2), props: p.props || {} }, '*');
@@ -724,7 +809,9 @@
     pill.append(icon(o.ring ? 'bell' : 'cam'), h('span', '', o.name));
     top.append(pill, h('span', 'cv-live', 'Live'));
     const foot = h('div', 'cv-foot'), txt = h('div', 'cv-txt');
-    txt.append(h('div', 'cv-title', o.ring ? 'Someone\u2019s at the door' : o.name), h('div', 'cv-sub', o.sub || 'Tap anywhere to close'));
+    // The camera's name is in the pill; the big title only for a ring.
+    if (o.ring) txt.append(h('div', 'cv-title', 'Someone\u2019s at the door'));
+    txt.append(h('div', 'cv-sub', o.sub || 'Tap anywhere to close'));
     foot.append(txt, h('div', 'cv-btn', o.ring ? 'Dismiss' : 'Close'));
     el.append(pic, top, foot);
     el.addEventListener('click', () => { if (o.ring) dismissed(o.ringId, true); closeView(); });
@@ -740,6 +827,7 @@
     view.el.remove(); view.el = null;
   }
   addEventListener('click', e => { const t = e.target.closest('.cam'); if (t) openView({ id: t.dataset.cam, name: t.dataset.name, secs: 120 }); });
+  addEventListener('click', e => { const t = e.target.closest('.w[data-open]'); if (t) show(t.dataset.open); });
   // A dismissed ring stays dismissed across the reload a waking screen does.
   function dismissed(id, set) {
     try {
@@ -757,32 +845,43 @@
   }
   TF.ring = ring; // tests and the MCP preview
 
-  // A hand held over the light sensor (tfctl sense.rs): close a camera view, else the next tab.
+  // A hand held over the light sensor (tfctl sense.rs): close a camera view, else the next page,
+  // second pages included, in rail order (Home, Cars, House, Security & energy, Cameras, ...).
   function gesture(g) {
     if (g !== 'wave') return;
     if (view.el) { if (view.ringId) dismissed(view.ringId, true); closeView(); return; }
-    const tabs = Array.from(document.querySelectorAll('.tab[data-tab]'));
-    if (!tabs.length) return;
-    const i = tabs.findIndex(t => t.classList.contains('on'));
-    show(tabs[(i + 1) % tabs.length].dataset.tab);
+    const ids = Array.from(document.querySelectorAll('.tabs [data-tab]'), t => t.dataset.tab).filter((id, i, a) => a.indexOf(id) === i);
+    if (!ids.length) return;
+    const on = document.querySelector('.page.on'), i = on ? ids.indexOf(on.dataset.page) : -1;
+    show(ids[(i + 1) % ids.length]);
     dispatchEvent(new Event('tf-activity'));
   }
   TF.gesture = gesture;
 
-  let stream;
+  // The stream down for more than 30 s (server gone, Wi-Fi out): a small "Offline" note, so old
+  // numbers are not taken for current ones. A reconnect within 30 s (a server restart, a resume)
+  // shows nothing. Counted from page load until the stream first opens.
+  let stream, downSince = performance.now();
+  const offEl = document.getElementById('offline');
+  function offlineTick(now) {
+    const off = !!downSince && now - downSince > 30000;
+    if (offEl && offEl.hidden === off) offEl.hidden = !off;
+  }
   function connect() {
     const es = stream = new EventSource('/api/stream/' + encodeURIComponent(TF.frame) + (appFrames.length ? '?apps=1' : ''));
+    es.onopen = () => { if (stream === es) { downSince = 0; offlineTick(0); } };
     es.onmessage = ev => {
       TF.perf.msgs = (TF.perf.msgs || 0) + 1;
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.reload || (m.page_version && m.page_version !== TF.pageVersion)) { location.reload(); return; }
       if (m.source || m.app_state || m.app_event) { toApps(m); return; }
-      if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) f.src = f.src; }); return; }
+      if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) { f.src = f.src; appWait(f); } }); return; }
       if (m.doorbell) { ring(m.doorbell); return; }
       if (m.gesture) { gesture(m.gesture); return; }
       if (!m.widget) return;
       const sec = document.getElementById('w-' + m.widget);
       if (!sec) return;
+      if (m.key) { fresh(sec, m); if (!m.data) return; } // no data: the source is still fresh
       // The same message again (a reconnect replays every source) changes nothing: skip it.
       const raw = JSON.stringify(m.data || {}), key = Object.keys(m.data || {}).sort().join();
       sec._last = sec._last || {};
@@ -797,6 +896,7 @@
     };
     es.onerror = () => {
       TF.perf.reconnects = (TF.perf.reconnects || 0) + 1; es.close();
+      if (stream === es && !downSince) downSince = performance.now();
       // Only if no newer stream was opened meanwhile (the resume detector): two at once
       // delivered every message twice.
       if (stream === es) setTimeout(() => { if (stream === es) connect(); }, 5000);
@@ -849,9 +949,11 @@
       TF.perf.resumes = (TF.perf.resumes || 0) + 1;
       paintClock(); daypart(); alive();
       const old = stream; stream = null; if (old) old.close();
+      if (downSince) downSince = performance.now(); // the pause is not the stream's fault
       connect();
     }
     beat = now;
+    offlineTick(performance.now());
   }, 1000);
 
   let toastT;

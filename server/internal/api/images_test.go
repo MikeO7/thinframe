@@ -39,7 +39,7 @@ func TestRemotePicturesAreShrunkAndOnlyFromSources(t *testing.T) {
 
 	s, ts := newDataServer(t, Options{})
 	raw, _ := json.Marshal(map[string]any{"added": []any{map[string]any{"title": "X", "image": posterURL}}})
-	if _, err := s.src.put("shows", raw); err != nil {
+	if _, _, err := s.src.put("shows", raw); err != nil {
 		t.Fatal(err)
 	}
 	get := func(u, w string) (*http.Response, []byte) {

@@ -105,6 +105,13 @@ objects you push, kept in `DATA_DIR/sources` and replayed when a page connects.
 | `DELETE /api/sources/{key}` | bearer | forget |
 | `GET /api/data/asset/{name}` | public, like the page | PNG, JPEG, WebP, GIF or woff2 from `DATA_DIR/assets`; widgets say `asset:<name>` |
 
+**Old data.** Each push counts as fresh, changed or not. When a widget's source has not been
+pushed for a while, the page dims the card and writes "updated 40 min ago" under it: after
+`props.stale_s` seconds if the widget sets it (`0` never), else after three missed runs of the
+poll that fills the source (at least 15 minutes), else after an hour. A source that is pushed
+only when it changes should set `stale_s`. When the page's stream has been down for 30 s it shows
+"Offline" at the top.
+
 `SERVICES_DOCKER=/var/run/docker.sock` (in a container, with the host's socket mounted) or
 `SERVICES_SSH=<host>` (native runs only: the container has no ssh) reads the container list every
 `SERVICES_EVERY` (1m) into the source `services`. An unchanged list is not re-sent.

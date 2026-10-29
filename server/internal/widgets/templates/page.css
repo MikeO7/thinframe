@@ -1,5 +1,5 @@
-:root{--bg:#0b0d10;--fg:#e8e6e3;--dim:#7a8088;--faint:#5a6068;--card:#14181d;--chip:#1d2329;--chip2:#2a3138;--edge:rgba(255,255,255,.06);--accent:#f2b84b;--ok:#4cc38a;--warn:#f2b84b;--bad:#ff6b6b;--sel:#2a3138;--lit:#ffc46b}
-[data-theme=light]{--bg:#f4f1ea;--fg:#1b1d20;--dim:#6b6f76;--faint:#9a9ea5;--card:#ffffff;--chip:#f1eee8;--chip2:#e4e0d8;--edge:rgba(0,0,0,.06);--accent:#c47f00;--sel:#e4e0d8}
+:root{--bg:#0b0d10;--fg:#e8e6e3;--dim:#9aa0a8;--faint:#858b93;--card:#14181d;--chip:#1d2329;--chip2:#2a3138;--edge:rgba(255,255,255,.06);--accent:#f2b84b;--ok:#4cc38a;--warn:#f2b84b;--bad:#ff6b6b;--sel:#2a3138;--lit:#ffc46b}
+[data-theme=light]{--bg:#f4f1ea;--fg:#1b1d20;--dim:#565a61;--faint:#6f737a;--card:#ffffff;--chip:#f1eee8;--chip2:#e4e0d8;--edge:rgba(0,0,0,.06);--accent:#c47f00;--sel:#e4e0d8}
 html{font-size:1.25vh}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,"Noto Sans",sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none}
@@ -16,9 +16,17 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:
 .status{font-size:2.6vh;color:var(--dim);line-height:1.5}
 .text{font-size:4vh;white-space:pre-wrap}
 iframe{border:0;width:100%;height:100%;display:block}
+.appfail{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.6rem;padding:2rem;text-align:center;font-size:1.8rem;color:var(--fg);background:var(--card);border-radius:inherit}
+.appfail small{font-size:1.4rem;color:var(--dim)}
 .unknown{color:var(--accent);font-size:3vh}
 #toast{position:fixed;left:50%;bottom:3vh;transform:translate(-50%,200%);background:var(--accent);color:#000;padding:1.5vh 3vh;border-radius:1vh;font-size:3vh;transition:transform .3s ease}
 #toast.show{transform:translate(-50%,0)}
+/* old data (page.js markAge): the card dims and says its age in its bottom margin; the stream
+   gone for 30 s: a note in the top margin */
+.w.stale .body,.w.stale .chips,.w.stale .badge{opacity:.7}
+.age{position:absolute;right:2.4rem;bottom:.4rem;font-size:1.2rem;line-height:1.6rem;color:var(--warn);pointer-events:none;white-space:nowrap}
+#offline{position:fixed;top:.4rem;right:2.8rem;z-index:40;display:flex;align-items:center;gap:.7rem;padding:.3rem 1.2rem;border-radius:99rem;background:var(--chip2);color:var(--fg);font-size:1.3rem;line-height:1.6rem}
+#offline::before{content:"";width:.8rem;height:.8rem;border-radius:50%;background:var(--bad)}
 
 /* ---- tabs: one grid per tab, a tab bar at the bottom ---- */
 #grid.tabbed{display:block;position:relative;padding:0}
@@ -28,8 +36,11 @@ iframe{border:0;width:100%;height:100%;display:block}
 .tab{display:flex;align-items:center;gap:.9rem;padding:1.3rem 2.2rem;border-radius:99rem;font-size:1.6rem;font-weight:500;color:var(--dim)}
 .tab svg,.ic{width:2rem;height:2rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .tab.on{background:var(--sel);color:var(--fg)}
-.seg{display:none;padding:.4rem;border-radius:99rem;background:var(--chip);font-size:1.3rem;margin:0 .4rem}
-.seg.show{display:flex}.seg span{padding:.8rem 1.4rem;border-radius:99rem;color:var(--dim)}.seg span.on{background:var(--fg);color:var(--bg)}
+/* A tab's second pages are always listed under it, open or not: the rail never moves, so a quick
+   tap (tabs switch on touch-down) lands where the finger aimed (opening House used to move the
+   buttons below it by 53 px). */
+.seg{display:flex;padding:.4rem;border-radius:99rem;background:var(--chip);font-size:1.3rem;margin:0 .4rem}
+.seg span{padding:.8rem 1.4rem;border-radius:99rem;color:var(--dim)}.seg span.on{background:var(--fg);color:var(--bg)}
 /* nav left (default): a rail down the left edge, icon over label; the grid gets the full height */
 .nav-left .page{padding:2.8rem 2.8rem 2.8rem 16.4rem}
 .nav-left .tabs{left:2.4rem;top:2.8rem;bottom:2.8rem;transform:none;flex-direction:column;gap:.6rem;padding:.8rem;border-radius:3rem;width:11.2rem}
@@ -55,10 +66,10 @@ iframe{border:0;width:100%;height:100%;display:block}
 .s-ok{color:var(--ok)}.s-warn{color:var(--warn)}.s-bad{color:var(--bad)}.s-off{color:var(--faint)}
 .bar{height:1rem;border-radius:99rem;background:var(--chip2);overflow:hidden}.bar>i{display:block;height:100%;border-radius:99rem;background:var(--accent)}
 .tile{display:flex;align-items:center;gap:1.2rem;padding:1.1rem 1.4rem;border-radius:1.4rem;background:var(--chip);font-size:1.5rem;min-width:0}
-.tile .t{flex:1;min-width:0}.tile small{display:block;color:var(--faint);font-size:1.2rem;margin-top:.2rem}
+.tile .t{flex:1;min-width:0}.tile small{display:block;color:var(--faint);font-size:1.3rem;margin-top:.2rem}
 .tile .v{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;flex:none}.tile>.t{flex:1;min-width:0}
 .big{font-weight:300;letter-spacing:-.04em;line-height:.95}
-.empty{color:var(--faint);font-size:1.5rem;margin:auto;text-align:center;line-height:1.4}.empty small{display:block;font-size:1.2rem;opacity:.75;margin-top:.6rem}
+.empty{color:var(--faint);font-size:1.5rem;margin:auto;text-align:center;line-height:1.4}.empty small{display:block;font-size:1.3rem;margin-top:.6rem}
 .zone-sub{line-height:1.35}
 .w .body{display:flex;flex-direction:column;flex:1;min-height:0}
 .w-hero,.w-forecast,.w-agenda,.w-rooms,.w-climate,.w-list,.w-tiles,.w-worldclock,.w-energy,.w-shows,.w-cars,.w-services{display:flex;flex-direction:column}
@@ -83,12 +94,12 @@ iframe{border:0;width:100%;height:100%;display:block}
 .chips{display:flex;gap:1rem;flex-wrap:wrap;margin-top:auto;max-height:4.2rem;overflow:hidden}.chip>span{overflow:hidden;text-overflow:ellipsis}
 .chip{display:inline-flex;align-items:center;gap:.8rem;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:.8rem 1.4rem;border-radius:99rem;background:var(--chip);font-size:1.4rem}.chip .ic{width:1.7rem;height:1.7rem}
 /* agenda */
-.ag{display:grid;gap:1.2rem;font-size:1.8rem}.ag .e{display:grid;grid-template-columns:7rem 1fr;align-items:start}.ag .e.past{opacity:.45}
+.ag{display:grid;gap:1.2rem;font-size:1.8rem}.ag .e{display:grid;grid-template-columns:8.6rem 1fr;align-items:start}.ag .ap{font-size:1.3rem;margin-left:.4rem}.ag .e.past{opacity:.75}
 .ag small{display:block;font-size:1.3rem;color:var(--faint);margin-top:.2rem}
 .tl{position:relative;flex:1;margin:.4rem 0 0 5.6rem}
-.tl .hr{position:absolute;left:0;right:0;border-top:1px solid var(--edge)}.tl .hr span{position:absolute;left:-5.6rem;top:-.8rem;font-size:1.2rem;color:var(--faint)}
+.tl .hr{position:absolute;left:0;right:0;border-top:1px solid var(--edge)}.tl .hr span{position:absolute;left:-5.6rem;top:-.8rem;font-size:1.3rem;color:var(--faint)}
 .tl .ev{position:absolute;left:.6rem;right:.4rem;border-radius:1rem;padding:.5rem 1.2rem;min-height:3rem;background:var(--chip);border-left:.3rem solid var(--accent);font-size:1.4rem;display:flex;gap:1rem;align-items:center;overflow:hidden}
-.tl .ev small{color:var(--dim);font-size:1.2rem}.tl .ev.next{background:var(--chip2)}
+.tl .ev small{color:var(--dim);font-size:1.3rem}.tl .ev.next{background:var(--chip2)}
 .tl .now{position:absolute;left:-.6rem;right:0;border-top:2px solid var(--bad)}
 .nx-title{font-size:3rem;font-weight:500}.nx-when{font-size:1.6rem;color:var(--dim);margin-top:.4rem}.nx-in{font-size:6.4rem;margin-top:1.4rem}
 .unit{font-size:2.2rem;letter-spacing:0;color:var(--dim)}
@@ -135,15 +146,19 @@ iframe{border:0;width:100%;height:100%;display:block}
 .zone-main{display:flex;align-items:center;gap:2rem;margin-bottom:.4rem}.zone-main .big{font-size:8.4rem}
 .zones{display:grid;gap:.8rem;margin-top:auto;padding-top:1rem}
 .tgrid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-.tgrid .tile{flex-direction:column;align-items:flex-start;gap:.4rem}.tgrid .tile b{font-weight:400;font-size:2.2rem}.tgrid .tile .lb{font-size:1.2rem;color:var(--faint)}
-.lst{display:grid;gap:.8rem}
+.tgrid .tile{flex-direction:column;align-items:flex-start;gap:.4rem}.tgrid .tile b{font-weight:400;font-size:2.2rem}.tgrid .tile .lb{font-size:1.3rem;color:var(--faint)}
+/* list rows are not buttons: flat, with a hairline between them (a tile looked tappable). A
+   card with props.open is one button, marked by a chevron after its title. */
+.lst{display:grid;gap:0}
+.lst .tile{background:none;border:0;border-radius:0;border-bottom:1px solid var(--edge);padding:1.1rem .4rem}.lst .tile:last-child{border-bottom:0}
+.w[data-open]>.between>.label::after{content:"";display:inline-block;width:.7rem;height:.7rem;margin-left:1rem;border:solid currentColor;border-width:.2rem .2rem 0 0;transform:rotate(45deg);vertical-align:.1rem}
 .people{display:flex;gap:.8rem;margin-top:auto;align-items:center;padding-top:1rem}.people span{width:3.4rem;height:3.4rem;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:600;background:var(--chip2)}
 .people .faint{background:none;width:auto;font-weight:400}
 /* energy */
 .en{display:grid;grid-template-columns:26rem 1fr;gap:2.4rem;height:100%}
 .en .big{font-size:7.2rem}.parts{display:grid;gap:.8rem;margin-top:1.4rem;font-size:1.4rem}.parts .bar{height:.6rem;margin-top:.5rem}
 .chart{display:flex;align-items:flex-end;gap:.5rem;flex:1;min-height:0}.chart i{flex:1;border-radius:.3rem .3rem 0 0;background:var(--chip2)}.chart i.now{background:var(--accent)}
-.ax{display:flex;justify-content:space-between;font-size:1.1rem;color:var(--faint);margin-top:.6rem}
+.ax{display:flex;justify-content:space-between;font-size:1.3rem;color:var(--faint);margin-top:.6rem}
 /* shows */
 .week{display:grid;grid-template-columns:repeat(7,1fr);gap:1rem;flex:1;min-height:0}
 .day{border-radius:1.6rem;padding:1rem;background:var(--chip);display:flex;flex-direction:column;gap:1rem;min-width:0;min-height:0;overflow:hidden;border:1px solid transparent}
@@ -151,11 +166,12 @@ iframe{border:0;width:100%;height:100%;display:block}
 .dh{display:flex;justify-content:space-between;align-items:baseline;font-size:1.3rem;color:var(--dim)}.dh b{font-size:2rem;font-weight:400;color:var(--fg)}
 .ep{display:flex;gap:.8rem;align-items:center;min-width:0}.ep img{width:3.4rem;height:5rem;object-fit:cover;border-radius:.6rem;flex:none}
 .ep .t{font-size:1.4rem;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}.ep{flex-direction:column;align-items:stretch;gap:0}
-.ep small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ep .got{color:var(--ok);margin-left:.4rem}.day .none{font-size:1.2rem;color:var(--faint);margin-top:.2rem}
+.ep small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ep .got{color:var(--ok);margin-left:.4rem}.day .none{font-size:1.3rem;color:var(--faint);margin-top:.2rem}
 .room{touch-action:manipulation}
-.more{font-size:1.2rem;color:var(--faint);padding:.2rem .4rem;flex:none}.ep small,.ad small{display:block;font-size:1.2rem;color:var(--faint);margin-top:.2rem}
+.more{font-size:1.3rem;color:var(--faint);padding:.2rem .4rem;flex:none}.ep small,.ad small{display:block;font-size:1.3rem;color:var(--faint);margin-top:.2rem}
 .adds{display:grid;grid-template-rows:1fr;gap:1.6rem;flex:1;min-height:0}
-.ad{min-width:0;min-height:0;display:flex;flex-direction:column;font-size:1.4rem}.ad img{width:100%;flex:1;height:0;min-height:0;object-fit:cover;border-radius:1.2rem;margin-bottom:.8rem}
+.ad{min-width:0;min-height:0;display:flex;flex-direction:column;font-size:1.4rem}
+.ad .pst{position:relative;flex:1;min-height:0;border-radius:1.2rem;margin-bottom:.8rem;overflow:hidden;background:var(--chip)}.ad .pst img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 /* world clock */
 .wc{display:grid;gap:1rem}.wc .tile{justify-content:space-between}.wc b{font-weight:300;font-size:2.6rem}
 /* services */
@@ -171,6 +187,17 @@ iframe{border:0;width:100%;height:100%;display:block}
 .svc>.panel:first-child .ring{margin-top:auto}.svc>.panel:first-child>.badge{margin-bottom:auto}
 
 [hidden]{display:none!important}
+/* Portrait (the panel mounted the other way, or rotation not applied): sized by the width, and
+   each page's cards stacked in one column that scrolls; a page with one card fills the screen.
+   Plain fallback, not a designed layout. */
+@media (orientation:portrait){
+  html{font-size:1.25vw}
+  .page.on{display:flex;flex-direction:column;overflow-y:auto;touch-action:pan-y}
+  .page>.w{flex:1 0 36rem;min-height:36rem}
+  .page>.w:not([style$="/ span 1"]){flex-basis:72rem;min-height:72rem} /* two rows or more (the inline style ends with grid-row) */
+  .hero-main{flex-wrap:wrap;row-gap:0}.rgrid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .svc{grid-template-columns:1fr}.svc .groups{min-height:40rem}
+}
 .car>.between>div:first-child{flex:1}.car .name,.car .model{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lst,.cars-compact{overflow:hidden;min-height:0}
 .cars-compact>*,.lst>*,.groups>*,.tgrid>*{min-width:0}
 .w.nodata{background:var(--card);padding:2.2rem 2.4rem}.w.nodata .body{display:flex;flex:1}
