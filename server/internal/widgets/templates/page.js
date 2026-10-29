@@ -453,7 +453,9 @@
         const a = arr(d.added).slice(0, num(p.max) || 6);
         if (!a.length) { empty(b); return; }
         const g = h('div', 'adds'); g.style.gridTemplateColumns = 'repeat(' + a.length + ',1fr)';
-        for (const x of a) { const c = h('div', 'ad'), i = img(x.image, '', 320); if (i) c.append(i); c.append(h('div', 'ellip', x.title), h('small', '', x.when || '')); g.append(c); }
+        // Each poster sits in a box of its final size from the first frame: nothing moves when
+        // it arrives, and one that fails leaves the empty box.
+        for (const x of a) { const c = h('div', 'ad'), ph = h('div', 'pst'), i = img(x.image, '', 320); if (i) ph.append(i); c.append(ph, h('div', 'ellip', x.title), h('small', '', x.when || '')); g.append(c); }
         b.append(g); return;
       }
       const up = arr(d.upcoming);
@@ -585,7 +587,7 @@
   function draw(sec) {
     const r = R[sec.dataset.type];
     if (!r) return;
-    if (!visible(sec)) { dirty.add(sec); return; }
+    if (!visible(sec)) { dirty.add(sec); if (sec.dataset.type === 'shows') prefetch(sec); return; }
     dirty.delete(sec);
     const t = performance.now();
     try { r(sec, state[sec.id] || {}, props(sec)); } catch (e) { fail(sec.id + ': ' + e); }
@@ -616,6 +618,26 @@
     if (!sec._ageEl) { if (!old) return; sec._ageEl = h('div', 'age'); sec.append(sec._ageEl); }
     sec._ageEl.textContent = text;
     sec._ageEl.hidden = !old;
+  }
+
+  // Posters of a Shows card on a hidden tab are fetched and decoded while the page is idle, so
+  // the first visit shows them at once instead of up to 0.6 s later. The images are kept, which
+  // keeps them decoded in WebKit's cache (six posters at 320 px: about 4 MB).
+  const pre = new Map();
+  function prefetch(sec) {
+    clearTimeout(sec._preT);
+    sec._preT = setTimeout(() => {
+      const p = props(sec), d = state[sec.id] || {};
+      if (p.part !== 'added') return;
+      for (const x of arr(d.added).slice(0, num(p.max) || 6)) {
+        const u = src(x.image, 320);
+        if (!u || pre.has(u)) continue;
+        const n = new Image(); n.decoding = 'async'; n.src = u;
+        if (n.decode) n.decode().catch(() => pre.delete(u));
+        pre.set(u, n);
+      }
+      while (pre.size > 24) pre.delete(pre.keys().next().value);
+    }, 3000);
   }
 
   function rerenderTimed() {
