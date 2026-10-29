@@ -37,7 +37,7 @@ input,select,button{font:inherit;background:#14181d;color:#e8e6e3;border:1px sol
 <table><tr><th>frame</th><th>state</th><th>ip</th><th>mem</th><th>temp</th><th>latency</th><th>versions</th><th>last seen</th></tr>
 {{range .Frames}}{{$f := .}}<tr><td><a href="#f-{{.ID}}">{{.ID}}</a>{{if .Name}}<br><span class="hint">{{.Name}}</span>{{end}}</td>
 <td class="{{if .Online}}on{{else}}off{{end}}">{{if .Online}}online{{else}}offline{{end}}</td>
-{{with .Last}}<td>{{.IP}}</td><td>{{.MemUsedMB}}/{{.MemTotalMB}} MB</td><td>{{printf "%.0f" .TempC}}°C</td><td>{{with $f.Touch}}{{.LastMS}} ms<br><span class="hint">p50 {{.P50}} · max {{.Max}} · n {{len .SamplesMS}}</span>{{else}}<span class="hint">no touch yet</span>{{end}}</td><td>tfctl {{.TfctlVersion}}<br>sys {{.SystemVersion}} {{.Slot}}</td>{{else}}<td colspan="5" class="hint">no heartbeat yet</td>{{end}}
+{{with .Last}}<td>{{.IP}}</td><td>{{.MemUsedMB}}/{{.MemTotalMB}} MB</td><td>{{printf "%.0f" .TempC}}°C</td><td>{{with $f.Touch}}{{.LastMS}} ms<br><span class="hint">p50 {{.P50}} · max {{.Max}} · n {{len .SamplesMS}}</span>{{else}}<span class="hint">no touch yet</span>{{end}}</td><td>tfctl {{.Version}}<br>sys {{.SystemVersion}} {{.Slot}}</td>{{else}}<td colspan="5" class="hint">no heartbeat yet</td>{{end}}
 <td>{{ago .LastSeen}}</td></tr>{{end}}</table>
 
 {{range .Frames}}{{$f := .}}<h2 id="f-{{.ID}}">{{.ID}} <a class="hint" href="/frame/{{.ID}}" target="_blank">open page ↗</a></h2>

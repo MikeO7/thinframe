@@ -295,9 +295,10 @@ impl<'a> Look<'a> {
 }
 
 /// The frame's first LAN address (not the USB-C link's), if it has one yet.
+/// From the kernel's tables only: `status::collect` asks iwctl (up to 5 s while iwd starts),
+/// which held the first splash frame and froze the animation.
 pub fn lan_ip() -> Option<String> {
-    crate::status::collect()
-        .ips
+    crate::status::ips()
         .into_iter()
         .find(|ip| ip != crate::statuspage::USB_IP)
 }

@@ -540,6 +540,22 @@ mod tests {
     }
 
     #[test]
+    fn the_status_page_from_the_saved_dashboard_gives_way_to_the_live_one() {
+        // After a re-pair: cog still on the saved dashboard, on_fallback already cleared.
+        let (mut a, rx, _) = agent("cached");
+        a.on_cached = true;
+        a.on_fallback = false;
+        a.leave_cached("no Wi-Fi");
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            KioskCmd::SetUrl("file:///fb.html".into())
+        );
+        a.server_ok();
+        assert_eq!(rx.try_recv().unwrap(), KioskCmd::SetUrl(a.cfg.url.clone()));
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
     fn relative_url_resolves_against_server() {
         let (mut a, rx, _) = agent("relurl");
         a.apply_config(&json::parse(r#"{"url":"/frame/rel"}"#).unwrap());

@@ -138,3 +138,12 @@ func TestPendingIsCapped(t *testing.T) {
 		t.Fatalf("pending %d, err %v", len(f.Pending), err)
 	}
 }
+
+func TestHeartbeatVersionPrefersTheInstalledSoftware(t *testing.T) {
+	if v := (Heartbeat{TfctlVersion: "0.1.0", SoftwareVersion: "2026.10.28-832ecaa"}).Version(); v != "2026.10.28-832ecaa" {
+		t.Fatalf("got %q", v)
+	}
+	if v := (Heartbeat{TfctlVersion: "0.1.0"}).Version(); v != "0.1.0" {
+		t.Fatalf("older frame: got %q", v)
+	}
+}

@@ -115,6 +115,10 @@ const MISSING_DELAY: Duration = Duration::from_secs(3600);
 /// Where inittab sends our stderr and cog's (`>>`, O_APPEND). /var/log is the 64 MB tmpfs.
 pub const LOG: &str = "/var/log/thinframe.log";
 const LOG_MAX: u64 = 1 << 20;
+/// iwd's output (inittab appends it here).
+const IWD_LOG: &str = "/var/log/iwd.log";
+const LOG_CAP_EVERY: Duration = Duration::from_secs(60);
+const PENDING_EVERY: Duration = Duration::from_millis(500);
 const LOG_KEEP: u64 = 256 << 10;
 
 /// Over `max` bytes: keep the last `keep` in place. Truncated, not replaced: the inittab shell's
@@ -332,8 +336,12 @@ pub struct Kiosk {
     back_to: Option<String>,
     /// The session bus cog listens on (`BUS`); None where dbus-daemon is missing.
     bus: Option<Child>,
-    /// A page asked for while cog was still starting; `go` tries it again each pass.
+    /// A page asked for while cog was still starting or paused; tried again every
+    /// PENDING_EVERY (a cogctl is a process start), and after a wake.
     pending: Option<String>,
+    pending_tried: Instant,
+    /// A reload asked for while the screen was off (a new layout): done on wake, not dropped.
+    reload_on_wake: bool,
 }
 
 impl Kiosk {
@@ -378,6 +386,8 @@ impl Kiosk {
             back_to: None,
             bus: None,
             pending: None,
+            pending_tried: Instant::now(),
+            reload_on_wake: false,
         }
     }
 
@@ -544,6 +554,12 @@ impl Kiosk {
                     let _ = sys::send(c.id(), sys::SIGCONT);
                 }
                 self.stopped = false;
+                if std::mem::take(&mut self.reload_on_wake) && self.pending.is_none() {
+                    self.handle(KioskCmd::Reload);
+                }
+                if let Some(u) = self.pending.take() {
+                    self.go(u);
+                }
             }
             if self.child.is_none() {
                 self.next_spawn = Instant::now();
@@ -570,8 +586,13 @@ impl Kiosk {
             }
             // Paused on purpose (screen off): the server's page watchdog sees the pings stop, but
             // the page is not hung, and a restart would throw away the instant wake.
-            KioskCmd::Restart | KioskCmd::Reload if self.stopped => {
+            KioskCmd::Restart if self.stopped => {
                 eprintln!("tfctl: kiosk: screen off, page paused, not restarting");
+            }
+            // A new layout while off: the page reloads when the screen comes on.
+            KioskCmd::Reload if self.stopped => {
+                eprintln!("tfctl: kiosk: screen off, reloading on wake");
+                self.reload_on_wake = true;
             }
             // A reload in the running cog keeps WebKit warm: first paint ~0.2 s instead of the
             // 1.3 s of a new cog [V 2026-10-27].
@@ -662,6 +683,12 @@ impl Kiosk {
     fn go(&mut self, u: String) {
         self.pending = None;
         if u == self.url {
+            return;
+        }
+        // Paused (screen off): open it on wake. A restart now would throw away the instant
+        // wake for a 7 s cold start.
+        if self.child.is_some() && self.stopped {
+            self.pending = Some(u);
             return;
         }
         if self.open_in_place(&u) {
@@ -780,15 +807,17 @@ impl Kiosk {
         }
     }
 
-    /// An off screen on for `d` (a touch, a wave, a doorbell); one that a wake already turned on
-    /// stays on longer. The schedule and the light decide again when it ends.
+    /// The screen on for at least `d` (a touch, a wave, a doorbell, the server's `wake`); a
+    /// longer hold already running stays. A screen already on is held too: a wake at boot, before
+    /// the light rule has decided, was turned off 0.2 s later when it decided "dark"
+    /// [V 2026-10-28]. The schedule and the light decide again when the hold ends.
     fn wake(&mut self, d: Duration, why: &str) {
         let until = Instant::now() + d;
         if !SCREEN_ON.load(Ordering::SeqCst) {
             eprintln!("tfctl: {why}: screen on for {} s", d.as_secs());
             self.set_screen(true);
-            self.wake_until = Some(until);
-        } else if self.wake_until.is_some_and(|t| t < until) {
+        }
+        if self.wake_until.is_none_or(|t| t < until) {
             self.wake_until = Some(until);
         }
     }
@@ -919,8 +948,19 @@ impl Kiosk {
     pub fn supervise(&mut self, rx: &Receiver<KioskCmd>) -> io::Result<()> {
         self.open_inputs();
         self.start_bus();
+        let mut capped = Instant::now();
         loop {
             crate::watchdog::beat();
+            // The logs live in RAM (/tmp). cog now runs for weeks (wake and reloads keep it), so
+            // capping at each spawn alone let them grow; iwd's log grows by its roam scans.
+            if capped.elapsed() >= LOG_CAP_EVERY {
+                capped = Instant::now();
+                for log in [LOG, IWD_LOG] {
+                    if let Err(e) = cap_log(log, LOG_MAX, LOG_KEEP) {
+                        eprintln!("tfctl: kiosk: log cap {log}: {e}");
+                    }
+                }
+            }
             if sys::term_requested() || self.exit {
                 eprintln!("tfctl: kiosk: stopping cog");
                 self.kill_child();
@@ -942,8 +982,11 @@ impl Kiosk {
                 eprintln!("tfctl: kiosk: cog is on screen, splash released");
                 self.splash = None;
             }
-            if let Some(u) = self.pending.take() {
-                self.go(u);
+            if self.pending.is_some() && self.pending_tried.elapsed() >= PENDING_EVERY {
+                self.pending_tried = Instant::now();
+                if let Some(u) = self.pending.take() {
+                    self.go(u);
+                }
             }
             if self.child.is_none()
                 && !self.stopped
@@ -1054,13 +1097,18 @@ mod tests {
             Some(pid),
             "restart while off"
         );
-        k.set_screen(true);
-        assert!(!k.stopped);
+        // A new layout or another page while off waits for the wake; nothing restarts.
+        k.handle(KioskCmd::Reload);
+        assert!(k.reload_on_wake);
+        k.handle(KioskCmd::SetUrl("http://server/frame/other".into()));
+        assert_eq!(k.pending.as_deref(), Some("http://server/frame/other"));
         assert_eq!(
             k.child.as_ref().map(Child::id),
             Some(pid),
-            "same cog after wake"
+            "page change while off"
         );
+        k.set_screen(true);
+        assert!(!k.stopped && !k.reload_on_wake);
         k.kill_child();
     }
 
@@ -1188,6 +1236,15 @@ mod tests {
         assert!(
             !SCREEN_ON.load(Ordering::SeqCst),
             "hold over in the dark: off"
+        );
+        // A wake while the screen is already on (boot, before the dark rule decided) holds it.
+        let mut k = Kiosk::new(&Config::default());
+        SCREEN_ON.store(true, Ordering::SeqCst);
+        k.wake(Duration::from_secs(300), "wake");
+        feed(&mut k, 0, 0, 200);
+        assert!(
+            SCREEN_ON.load(Ordering::SeqCst),
+            "the wake holds through the dark"
         );
         // DARK_OFF=0: the light is read for the log only.
         let mut k = Kiosk::new(&config::parse("DARK_OFF=0\n"));
