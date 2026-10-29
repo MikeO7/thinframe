@@ -82,6 +82,23 @@ impl Paths {
     pub fn tmp(&self) -> PathBuf {
         self.data.join("tmp")
     }
+    /// `emmc::INSTALL_LOCK` on the frame; under the test root otherwise.
+    pub fn install_lock(&self) -> PathBuf {
+        if self.is_real() {
+            PathBuf::from(crate::emmc::INSTALL_LOCK)
+        } else {
+            self.root.join("run/thinframe/emmc-install")
+        }
+    }
+    /// Err while `tfctl emmc install` runs (emmc.rs): the root and /boot must not change.
+    pub fn no_install_running(&self) -> io::Result<()> {
+        match crate::emmc::holder(&self.install_lock()) {
+            Some(pid) => Err(io::Error::other(format!(
+                "an eMMC install is running (pid {pid}); try again when it is done"
+            ))),
+            None => Ok(()),
+        }
+    }
 }
 
 /// `artifacts` from the config object: logical name -> (file name, sha256 hex).

@@ -957,9 +957,13 @@ eGON at 8 KiB; PARTITION_CONFIG to 0 (read back) and boot0's header cleared, so 
 reads the user area as on any A33 with a fresh eMMC; the MBR; p1 to p3 copied from the card and
 read back by hash with the page cache dropped; on p1 the extlinux roots move to `50463045`,
 `boot.scr` and the DTBs come from the image, uEnv names the running slot with tries 0;
-`mkfs.ext4` p4 and a copy of /data; U-Boot last, read back. Until that last write the eMMC has
+`mkfs.ext4` p4 and a copy of /data; `e2fsck -f -n` on p2 to p4 (fsck.vfat is not in the image,
+p1 is checked by hash), any error stops here; U-Boot last, read back. Until that last write the eMMC has
 no boot code, so a cut or an error midway leaves a frame that starts from the card (or FEL),
-never a half system.
+never a half system. For its whole run the install holds `/run/thinframe/emmc-install` (its
+pid; a dead pid is stale): the agent then refuses update-software, update-system, rollback and
+reboot with an error ack, defers automatic updates, and `reboot_soon` (GPU hang, Settings)
+waits for the install to end. [U] until the next install on the frame.
 
 | Fails | Way back |
 |---|---|

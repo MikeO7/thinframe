@@ -49,7 +49,61 @@ const MMC_IOC_CMD: std::ffi::c_ulong = 0xc048_b300;
 pub const EXT_CSD_BOOT_BUS: usize = 177;
 pub const EXT_CSD_PART_CONFIG: usize = 179;
 
+/// Held by `emmc install` for its whole run, with its pid: while a live tfctl holds it the agent
+/// starts no software or system update, no rollback and no reboot (`reboot_soon` waits), since
+/// each of them can change the root or the boot partition in the middle of the raw copy.
+pub const INSTALL_LOCK: &str = "/run/thinframe/emmc-install";
+
 type R<T> = io::Result<T>;
+
+/// The install lock; removed on drop. A crash (panic=abort skips drop) leaves the file, which
+/// `holder` then sees as stale: its pid is gone or no longer a tfctl.
+pub struct InstallLock(PathBuf);
+
+impl Drop for InstallLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// The pid in a lock file's text when that process still runs tfctl (`comm` reads its name).
+pub fn live_holder(text: &str, comm: impl Fn(u32) -> Option<String>) -> Option<u32> {
+    let pid: u32 = text.trim().parse().ok()?;
+    (pid > 0 && comm(pid).is_some_and(|c| c.trim().starts_with("tfctl"))).then_some(pid)
+}
+
+fn proc_comm(pid: u32) -> Option<String> {
+    fs::read_to_string(format!("/proc/{pid}/comm")).ok()
+}
+
+/// Who holds the install lock at `path`, if anyone alive does.
+pub fn holder(path: &Path) -> Option<u32> {
+    live_holder(&fs::read_to_string(path).ok()?, proc_comm)
+}
+
+/// Take the lock at `path` for `pid`; a stale file is replaced, a live holder refuses.
+fn lock_with(path: &Path, pid: u32, comm: impl Fn(u32) -> Option<String>) -> R<InstallLock> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    for _ in 0..2 {
+        match OpenOptions::new().write(true).create_new(true).open(path) {
+            Ok(mut f) => {
+                f.write_all(format!("{pid}\n").as_bytes())?;
+                return Ok(InstallLock(path.to_path_buf()));
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                let text = fs::read_to_string(path).unwrap_or_default();
+                if let Some(p) = live_holder(&text, &comm) {
+                    return Err(err(format!("another eMMC install is running (pid {p})")));
+                }
+                let _ = fs::remove_file(path);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(err(format!("cannot take {}", path.display())))
+}
 
 fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())
@@ -428,6 +482,8 @@ fn mounted(dev_prefix: &str) -> bool {
 }
 
 fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
+    // 0. Hold the agent off (updates, rollback, reboots) until this returns.
+    let _lock = lock_with(Path::new(INSTALL_LOCK), std::process::id(), proc_comm)?;
     // 1. Where we are and what we would write.
     if slot::running_from_emmc() {
         return Err(err(
@@ -593,7 +649,10 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     let u = crate::update::sh("umount", &[&mnt.to_string_lossy()]);
     r.and(u)?;
 
-    // 7. Last: U-Boot. Only now can the eMMC start.
+    // 7. A read-only check of what was written; any doubt and the eMMC gets no boot code.
+    check_filesystems(&emmc)?;
+
+    // 8. Last: U-Boot. Only now can the eMMC start.
     say("writing U-Boot");
     let w = OpenOptions::new()
         .read(true)
@@ -617,6 +676,42 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
          Keep the card: with it inserted the frame starts from the card again.",
         running.name()
     );
+    Ok(())
+}
+
+/// e2fsck -f -n on partitions 2 to 4 (exit 0 only), fsck.vfat -n on partition 1 when the image
+/// has it (it ships e2fsprogs; dosfstools is a host tool only, and p1 was compared by hash).
+fn check_filesystems(emmc: &Path) -> R<()> {
+    say("checking the file systems on the eMMC (read-only)");
+    let run = |tool: &str, args: &[&str], dev: &Path| -> R<Option<()>> {
+        let d = dev.to_string_lossy().to_string();
+        let out = match Command::new(tool).args(args).arg(&d).output() {
+            Ok(o) => o,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if out.status.success() {
+            return Ok(Some(()));
+        }
+        let text = String::from_utf8_lossy(&out.stdout).to_string()
+            + &String::from_utf8_lossy(&out.stderr);
+        let tail: Vec<&str> = text.lines().rev().take(4).collect();
+        Err(err(format!(
+            "{tool} {} {d}: {}: {}; U-Boot not written, the eMMC does not start",
+            args.join(" "),
+            out.status,
+            tail.into_iter().rev().collect::<Vec<_>>().join(" / ")
+        )))
+    };
+    for n in 2..=4u8 {
+        if run("e2fsck", &["-f", "-n"], &slot::part_n(emmc, n))?.is_none() {
+            return Err(err("no e2fsck in this image; U-Boot not written"));
+        }
+    }
+    if run("fsck.vfat", &["-n"], &slot::part_n(emmc, 1))?.is_none() {
+        say("no fsck.vfat in this image; partition 1 was checked by hash");
+    }
+    say("file systems clean");
     Ok(())
 }
 
@@ -737,6 +832,30 @@ mod tests {
             slot::from_cmdline("root=PARTUUID=50463045-03 ro"),
             Some(Slot::B)
         );
+    }
+
+    #[test]
+    fn install_lock_refuses_a_live_holder_and_replaces_a_stale_one() {
+        let dir = std::env::temp_dir().join(format!("tfctl-emmc-lock-{}", std::process::id()));
+        let path = dir.join("run/thinframe/emmc-install");
+        let alive = |p: u32| (p == 4242).then(|| "tfctl\n".to_string());
+        let l = lock_with(&path, 4242, alive).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "4242\n");
+        let e = lock_with(&path, 5000, alive).err().unwrap().to_string();
+        assert!(e.contains("pid 4242"), "{e}");
+        drop(l);
+        assert!(!path.exists(), "released on drop");
+        // Left by a crashed install: the pid is gone, or now runs something else.
+        fs::write(&path, "4243\n").unwrap();
+        let l = lock_with(&path, 5000, |p| (p == 4243).then(|| "sh\n".into())).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "5000\n");
+        drop(l);
+        assert_eq!(live_holder("7\n", |_| Some("tfctl".into())), Some(7));
+        assert_eq!(live_holder("7\n", |_| None), None, "gone");
+        assert_eq!(live_holder("x", |_| Some("tfctl".into())), None);
+        assert_eq!(live_holder("0", |_| Some("tfctl".into())), None);
+        assert_eq!(holder(&path), None, "no file");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

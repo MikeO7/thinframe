@@ -217,6 +217,7 @@ impl Agent {
             "restart-kiosk" => self.send(KioskCmd::Restart),
             "reload-page" => self.send(KioskCmd::Reload),
             "reboot" => {
+                self.paths.no_install_running()?;
                 // Let the ack leave first.
                 thread::spawn(|| {
                     thread::sleep(Duration::from_secs(1));
@@ -243,6 +244,7 @@ impl Agent {
                 if self.busy.load(Ordering::SeqCst) {
                     return Err(io::Error::other("a system update is already running"));
                 }
+                self.paths.no_install_running()?;
                 // The artifact list from connect time may be stale (a newer build was staged
                 // since); the checksum would not match the file now served.
                 if let Err(e) = self.refresh_config() {
@@ -254,6 +256,7 @@ impl Agent {
                 Ok(())
             }
             "update-system" => {
+                self.paths.no_install_running()?;
                 if let Err(e) = self.refresh_config() {
                     eprintln!("tfctl: agent: refresh config before update: {e}");
                 }
@@ -268,6 +271,11 @@ impl Agent {
             }
             "screenshot" => self.start_screenshot(),
             "rollback" => {
+                // A rollback mid-dd would point U-Boot at the half-written slot.
+                if self.busy.load(Ordering::SeqCst) {
+                    return Err(io::Error::other("a system update is running"));
+                }
+                self.paths.no_install_running()?;
                 let slot = sysupdate::rollback(&self.paths)?;
                 self.event("rollback", &format!("booting slot {} next", slot.name()));
                 sysupdate::reboot_soon();
@@ -362,6 +370,11 @@ impl Agent {
     /// TASK 11/12: a config whose versions differ from what this root carries starts the
     /// update by itself. Only on a frame that has the version files; a dev box never updates.
     pub(crate) fn maybe_auto_update(&mut self) {
+        // An eMMC install copies this root and /boot: wait, the next config tries again.
+        if let Err(e) = self.paths.no_install_running() {
+            eprintln!("tfctl: agent: automatic update deferred: {e}");
+            return;
+        }
         let want = self.software_version.clone();
         if let Some(have) = update::installed_version(&self.paths) {
             // Rolled back after crashing at start (update.rs): installing it again by itself
@@ -723,6 +736,53 @@ mod tests {
             .unwrap_err();
         assert!(e.to_string().contains("already running"), "{e}");
         assert!(!a.exit);
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn rollback_refused_while_a_system_update_runs() {
+        let (mut a, _rx, _) = agent("busyrb");
+        a.busy.store(true, Ordering::SeqCst);
+        let e = a
+            .action("rollback", &json::parse("{}").unwrap())
+            .unwrap_err();
+        assert!(e.to_string().contains("system update is running"), "{e}");
+        let _ = std::fs::remove_file(&a.conf_path);
+    }
+
+    #[test]
+    fn nothing_changes_the_disk_while_an_emmc_install_runs() {
+        // The lock names a live tfctl: this test binary (its /proc comm starts with "tfctl").
+        if !std::path::Path::new("/proc/self/comm").exists() {
+            eprintln!("no /proc, skipping");
+            return;
+        }
+        let (mut a, _rx, _) = agent("emmclock");
+        let base = std::env::temp_dir().join(format!("tfctl-emmclock-{}", std::process::id()));
+        a.paths = update::Paths::under(&base);
+        let lock = a.paths.install_lock();
+        std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+        std::fs::write(&lock, format!("{}\n", std::process::id())).unwrap();
+        for act in ["update-software", "update-system", "rollback", "reboot"] {
+            let e = a
+                .action(act, &json::parse(r#"{"version":"x"}"#).unwrap())
+                .unwrap_err();
+            assert!(
+                e.to_string().contains("eMMC install is running"),
+                "{act}: {e}"
+            );
+        }
+        assert!(!a.exit && !a.busy.load(Ordering::SeqCst));
+        // Automatic updates wait and try again later (nothing is marked as tried).
+        std::fs::create_dir_all(base.join("root/etc")).unwrap();
+        std::fs::write(base.join("root/etc/thinframe.version"), "1.0\n").unwrap();
+        a.apply_config(&json::parse(r#"{"software_version":"2.0"}"#).unwrap());
+        a.maybe_auto_update();
+        assert!(a.tried.is_empty() && !a.exit);
+        // A lock left by a crashed install (pid gone) holds nothing.
+        std::fs::write(&lock, "999999999\n").unwrap();
+        assert!(a.paths.no_install_running().is_ok());
+        let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_file(&a.conf_path);
     }
 
