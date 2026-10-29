@@ -43,6 +43,9 @@ type Options struct {
 	Version    string
 	PageStale  time.Duration // hung-page timeout; 0 = 3 minutes
 	Reports    string        // where frame reports are kept; "" = <data>/reports next to the store
+	// Hosts: extra Host names the public routes answer to (SERVER_HOSTS), besides IP literals,
+	// localhost, single-label and local names and the container's hostname (hosts.go).
+	Hosts []string
 }
 
 // Server holds the dependencies and implements every operation once.
@@ -83,6 +86,8 @@ type Server struct {
 	shots shotWaiters
 	// ring: the last doorbell press and which doorbells rang (cameras.go).
 	ring ringState
+	// hosts: the Host names the public routes answer to (hosts.go).
+	hosts hostSet
 	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
 	// does not wait for hijacked connections, so a process that exits right after Shutdown
 	// could cut the "disconnected" event short; Drain waits for them.
@@ -96,6 +101,7 @@ func New(st *store.Store, opts Options) *Server {
 	if opts.PageStale > 0 {
 		s.pageStale = opts.PageStale
 	}
+	s.hosts = newHostSet(opts.Hosts)
 	data := filepath.Dir(st.Dir())
 	if s.opts.Reports == "" {
 		s.opts.Reports = filepath.Join(data, "reports")
@@ -135,7 +141,9 @@ func (s *Server) Routes() http.Handler {
 		m.Handle(pattern, h)
 		s.patterns = append(s.patterns, pattern)
 	}
-	fn := func(pattern string, h http.HandlerFunc) { handle(pattern, h) }
+	// Public routes carry no credentials, so they also check the Host header (hosts.go): a page
+	// on another site that rebinds its DNS name to this server's address gets 421.
+	fn := func(pattern string, h http.HandlerFunc) { handle(pattern, s.checkHost(h)) }
 	fn("GET /", s.handleIndex)
 	fn("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	fn("GET /frame/{id}", s.handleFramePage)
@@ -220,6 +228,9 @@ func (s *Server) authAnyFrame(next http.Handler) http.Handler {
 
 func (s *Server) authWith(next http.Handler, frameOK func(*http.Request) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.opts.Token == "" && !s.hostOK(w, r) { // no token: as public as the page plane
+			return
+		}
 		if s.opts.Token == "" || tokenOK(r, s.opts.Token) || frameOK(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -232,6 +243,9 @@ func (s *Server) authWith(next http.Handler, frameOK func(*http.Request) bool) h
 // authAdmin guards the browser admin page with HTTP Basic: any user name, password = token.
 func (s *Server) authAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.opts.Token == "" && !s.hostOK(w, r) {
+			return
+		}
 		if _, pw, ok := r.BasicAuth(); s.opts.Token == "" || ok && subtle.ConstantTimeCompare([]byte(pw), []byte(s.opts.Token)) == 1 {
 			next.ServeHTTP(w, r)
 			return

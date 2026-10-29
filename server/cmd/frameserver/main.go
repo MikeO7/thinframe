@@ -75,7 +75,10 @@ func main() {
 		log.Fatalf("store: %v", err)
 	}
 	opts := api.Options{Token: os.Getenv("FRAME_TOKEN"), Version: Version, Artifacts: artifacts.New(env("ARTIFACTS_DIR", "/artifacts")),
-		Reports: filepath.Join(dataDir, "reports")}
+		Reports: filepath.Join(dataDir, "reports"), Hosts: api.ParseHosts(os.Getenv("SERVER_HOSTS"))}
+	if len(opts.Hosts) > 0 {
+		log.Printf("host check: also answering to %s", strings.Join(opts.Hosts, ", "))
+	}
 	if dir := os.Getenv("PHOTOS_DIR"); dir != "" {
 		ph, err := photos.New(photos.Folder{Root: dir}, filepath.Join(dataDir, "cache"))
 		if err != nil {

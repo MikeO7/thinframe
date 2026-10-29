@@ -105,6 +105,7 @@ func TestPairRejectsBadInputAndExpires(t *testing.T) {
 // from sends one pairing call to h as if from ip. JSON body for /api/pair, form for accept.
 func from(h http.Handler, ip, method, path, body string) int {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Host = "frames.local" // httptest's example.com is not a LAN name (hosts.go)
 	req.RemoteAddr = ip + ":40000"
 	if strings.HasSuffix(path, "/accept") {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
