@@ -14,12 +14,14 @@ const CPUFREQ: &str = "/sys/devices/system/cpu/cpufreq";
 /// Start loading the Wi-Fi driver in the background, from `tfctl boot fsck` (the first sysinit
 /// line, ~0.7 s). udev loaded it at ~2.0 s, and its firmware upload then took 1.2 s before iwd
 /// could join [V 2026-10-27 dmesg]. Not waited for: udev's own modprobe later finds it loaded.
+/// It loads with this frame's own Wi-Fi address (netid.rs), so it must be the first load.
 pub fn load_wifi_early() {
     if Path::new("/sys/module").join(WIFI_MODULE).exists() {
         return;
     }
     let _ = Command::new("modprobe")
         .arg(WIFI_MODULE)
+        .args(crate::netid::module_args())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

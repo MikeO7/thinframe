@@ -32,6 +32,16 @@ define AIC8800_NO_SAE
 endef
 AIC8800_POST_PATCH_HOOKS += AIC8800_NO_SAE
 
+# A Wi-Fi address that is the same at every boot. With nothing in the chip's efuse the driver
+# made one up at every load (88:00:33:77 and 16 random bits), so DHCP gave the frame a new IP
+# each boot [V 2026-10-27]. mac-param.diff adds `mac=`; tfctl (netid.rs) derives it from the
+# SoC's Security ID and loads the driver with it. An address in the efuse still wins.
+# A .diff, not a .patch: Buildroot would apply a .patch before the debian series above.
+define AIC8800_MAC_PARAM
+	patch -d $(@D) -p1 --no-backup-if-mismatch < $(AIC8800_PKGDIR)/mac-param.diff
+endef
+AIC8800_POST_PATCH_HOOKS += AIC8800_MAC_PARAM
+
 define AIC8800_INSTALL_FIRMWARE
 	$(INSTALL) -d $(TARGET_DIR)/lib/firmware/aic8800_fw/SDIO/aic8800DC
 	$(INSTALL) -m 0644 $(@D)/src/SDIO/driver_fw/fw/aic8800DC/* \

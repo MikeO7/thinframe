@@ -1067,3 +1067,40 @@ is disk bound (IO pressure about 4 s of the first 10); the eMMC reads 4x faster 
 [V], so the next boot measurements are from the eMMC. Not done, needs a system image: a fixed
 Wi-Fi MAC (the aic8800 picks a random one each boot, so DHCP never reuses a lease) and a
 persistent dhcpcd lease directory.
+
+## System image: root fs room, no roaming, a fixed Wi-Fi address (2026-10-28)
+Measured on the frame from the card (system 2026.10.27-6081cbf9-debug): root fs 99 % full, iwd
+roam-scanning twice a minute at -16 dBm, a new Wi-Fi address and DHCP lease at every boot [V].
+
+- **Root fs room, same size.** The fs stays 190 MiB: the gate is `rootfs.ext4` under 200 MB
+  (TASKS 2); the 1 GiB slots on the card and the eMMC would take more, the gate would not. The
+  room comes from what was in it [V, debugfs of the 2026.10.27 image]: mke2fs gave 48576 inodes
+  for 2381 files (12 MB of inode tables), now 8192 (`BR2_TARGET_ROOTFS_EXT2_INODES`); DejaVu
+  Serif and Sans Condensed, off in the defconfig but left in the tree by an older build (5.3 MB,
+  Buildroot never uninstalls); udev's ID-to-name databases (hwdb `20-*`, 9 of hwdb.bin's
+  9.5 MB; the input quirks in `60-*`/`70-*` stay); zoneinfo/right (1.4 MB) and the sqlite3
+  shell (1.2 MB). Reserved blocks were already 0. post-image.sh now stops a build with less than
+  16 MiB free.
+- **No roaming.** `[Scan] DisableRoamingScan=true` in iwd's main.conf. The frame does not move;
+  with one access point a roam scan can only find the same one, and it takes the radio off
+  channel. RoamThreshold would not help: at -16 dBm the RSSI trigger is not what fires [U];
+  iwd also roams on the driver's packet-loss and beacon-loss events, 2 s after each (iwd 3.0
+  station.c), and `station_cannot_roam` is the one switch over all of them. Joins still rank
+  every access point in range, and a lost link rejoins after a full scan, so a house with
+  several access points gets the best one at each join, just not mid-session.
+- **A fixed Wi-Fi address, per device.** The driver made one up at each load (88:00:33:77 and
+  16 random bits, `rwnx_main.c`; the efuse is empty). iwd's `AddressOverride` was not the way:
+  iwd deletes the driver's wlan0 and creates its own from the wiphy's permanent address, so
+  the made-up address comes back, and AddressOverride is per network profile, so tfctl would
+  have to rewrite every profile and the setup access point would still be random. Instead the
+  driver takes `mac=` (`package/aic8800/mac-param.diff`, efuse still wins) and tfctl loads it
+  with an address derived from the SoC: SHA-256 of a label and the A33's Security ID root key,
+  six bytes, locally administered unicast (`netid.rs`). Mainline's A33 device tree has no SID
+  node, so build.sh adds one (`allwinner,sun4i-a10-sid` at 0x01c23800, read directly, as
+  sunxi-tools does for the A33); U-Boot's `serial-number` in the device tree is the fallback.
+  The ID is fixed in the chip, so the address survives A/B updates, a new card and the eMMC
+  install; nothing is stored. `tfctl netid` shows it. Whether the A33 reads a unique root key
+  this way is [U] until it is read on the frame.
+- **DHCP lease kept.** dhcpcd's database (`/var/db/dhcpcd`) is now `/data/dhcpcd`. The old
+  `ln -sfn ../tmp /var/db` had gone inside the directory dhcpcd's install made, so leases went to
+  the read-only root and were never saved. With the lease, dhcpcd asks for its old address.

@@ -14,6 +14,7 @@
 //!   tfctl status     one screen: uptime, ip, wifi, mem, cog pid, url, temp
 //!   tfctl screenshot FILE  write what the panel shows, page orientation, as a P6 PPM (root)
 //!   tfctl set KEY VALUE   rewrite one key in /etc/thinframe.conf (first pairing)
+//!   tfctl netid      the Wi-Fi address derived from the chip ID, and what wlan0 has
 //!
 //! Config: /etc/thinframe.conf (KEY=VALUE, see image/rootfs/etc/thinframe.conf), or $TFCTL_CONF.
 //! Size budget: release binary under 1 MB. Check with `ls -l` in CI.
@@ -44,6 +45,7 @@ mod kiosk;
 mod light;
 mod logmirror;
 mod logstamp;
+mod netid;
 mod offline;
 mod pair;
 mod png;
@@ -81,7 +83,7 @@ mod fuzz;
 fn usage() -> ExitCode {
     eprintln!(
         "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|clock|\
-         wifi SSID PSK|status|emmc [status|backup|install]|screenshot FILE|light|bench [TAPS]|set KEY VALUE>"
+         wifi SSID PSK|status|emmc [status|backup|install]|screenshot FILE|light|bench [TAPS]|netid|set KEY VALUE>"
     );
     ExitCode::from(2)
 }
@@ -144,6 +146,7 @@ fn main() -> ExitCode {
         Some("clock") => clock::run(),
         Some("emmc") => emmc::run(&args[1..]),
         Some("bench") => bench::run(&cfg, &args[1..]),
+        Some("netid") => netid::run(),
         Some("set") if args.len() == 3 => config::save_overrides(&conf, &[(&args[1], &args[2])]),
         _ => return usage(),
     };
