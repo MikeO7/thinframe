@@ -1,9 +1,11 @@
-//! One-press pairing (TASK 16, server/internal/api/pair.go). A frame without FRAME_TOKEN asks the
-//! server to pair with a random nonce, then shows a local page with a big PAIR button. The button
-//! posts the nonce from cog straight to the server, so only someone at the frame can accept. The
-//! agent polls until the server hands over the frame's own token (once), stores it as FRAME_TOKEN
-//! and opens the dashboard. A 401 later (the admin forgot the frame) clears the token and the
-//! button comes back.
+//! Pairing with a code (TASK 16, server/internal/api/pair.go). A frame without FRAME_TOKEN asks
+//! the server to pair with a random nonce (its request secret). The server answers with a 6-digit
+//! code, which the frame shows on its own screen and nowhere else; the owner types it on the
+//! server's admin page (or tells MCP pair_frame). That proves someone is at the frame: anyone
+//! else on the LAN only learns the code of a request of their own. The agent polls with the nonce
+//! until the server hands over the frame's own token (once), stores it as FRAME_TOKEN and opens
+//! the dashboard. A 401 later (the admin forgot the frame) clears the token and a new code comes
+//! up. A server from before pairing codes answers without one: then the old PAIR button is shown.
 use crate::agent::Agent;
 use crate::http;
 use crate::json::{self, Value};
@@ -21,7 +23,9 @@ pub const REFUSED_RETRY: Duration = Duration::from_secs(30);
 /// What the pairing page says.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Ask {
-    /// The PAIR button.
+    /// The code to type on the server's admin page (`secret` = the 6 digits).
+    Code,
+    /// The PAIR button of servers without codes (`secret` = the nonce it posts).
     Button,
     /// The server already has a token for this frame id.
     Refused,
@@ -39,11 +43,26 @@ fn server_name(url: &str) -> &str {
     url.trim_start_matches("http://").trim_end_matches('/')
 }
 
+/// "482 913": two groups of three are easier to read across a room and to type.
+fn spaced(code: &str) -> String {
+    if code.len() == 6 && code.is_char_boundary(3) {
+        format!("{} {}", &code[..3], &code[3..])
+    } else {
+        code.to_string()
+    }
+}
+
+/// A code as the server sends it: exactly 6 ASCII digits.
+pub fn valid_code(c: &str) -> bool {
+    c.len() == 6 && c.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The pairing page. `secret` is the code for `Ask::Code` and the nonce for `Ask::Button`.
 pub fn render(
     ask: Ask,
     server: &str,
     frame_id: &str,
-    nonce: &str,
+    secret: &str,
     ip: Option<&str>,
     backdrop: Option<&str>,
     dawn: bool,
@@ -57,6 +76,13 @@ pub fn render(
         None => format!("frame {}", esc(frame_id)),
     };
     let body = match ask {
+        Ask::Code => format!(
+            "<h1>Pair this frame</h1><p>Open <b>{}/admin</b> and enter this code for {}:</p>\
+             <div class=\"code\">{}</div>",
+            esc(server_name(server)),
+            esc(frame_id),
+            esc(&spaced(secret))
+        ),
         Ask::Button => format!(
             "<h1>Pair this frame?</h1><p>with the thinframe server at {}</p>\
              <form method=\"post\" action=\"{}/pair/{}/accept\">\
@@ -64,7 +90,7 @@ pub fn render(
             esc(server_name(server)),
             esc(server.trim_end_matches('/')),
             esc(frame_id),
-            esc(nonce)
+            esc(secret)
         ),
         Ask::Refused => format!(
             "<h1>Already paired</h1><p>{} knows this frame already.<br>\
@@ -78,7 +104,7 @@ pub fn render(
             .unwrap_or_default();
         let font = |f: &str| format!("file:///usr/share/fonts/thinframe/{f}");
         return format!(
-            "<!doctype html><html><head><meta charset=\"utf-8\"><title>thinframe</title><style>{}</style></head>\
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>thinframe</title><style>{}{CODE_CSS}</style></head>\
              <body><div class=\"steps\">1 Wi-Fi &middot; <b>2 pair</b></div>\
              <main class=\"card low\">{body}</main><small>{who}</small></body></html>",
             crate::dawnpage::css(
@@ -99,11 +125,15 @@ pub fn render(
          button{{font:7vh Shrikhand,Georgia,serif;color:#f4dcaa;background:#d9662b;border:0;\
          border-radius:999px;padding:.15em 1.4em;box-shadow:0 1vh 0 #5b3a1e}}\
          button:active{{transform:translateY(.8vh);box-shadow:0 .2vh 0 #5b3a1e}}\
-         small{{position:absolute;left:5.8vw;bottom:4vh;font-size:3.4vh}}\
+         small{{position:absolute;left:5.8vw;bottom:4vh;font-size:3.4vh}}{CODE_CSS}\
          .steps{{position:absolute;right:3vw;top:2.4vh;font-size:3vh;background:#f4dcaa;border:.4vh solid #5b3a1e;border-radius:999px;padding:.1em .8em}}.steps b{{color:#b8452a;font-weight:400}}</style></head>\
          <body><div class=\"steps\">1 Wi-Fi &middot; <b>2 pair</b></div><main>{body}</main><small>{who}</small></body></html>"
     )
 }
+
+/// The code, big enough to read from a step back.
+const CODE_CSS: &str =
+    ".code{font-size:13vh;line-height:1.1;letter-spacing:.08em;color:#b8452a;white-space:nowrap}";
 
 /// 32 hex characters from the kernel's RNG.
 pub fn nonce() -> io::Result<String> {
@@ -156,11 +186,18 @@ impl Agent {
         match r.status {
             202 => {
                 self.pair_nonce = Some(n.clone());
-                self.show_pair_page(Ask::Button, &n);
+                let code = json::parse(&String::from_utf8_lossy(&r.body))
+                    .ok()
+                    .and_then(|v| v.field_string("code"))
+                    .filter(|c| valid_code(c));
+                match code {
+                    Some(c) => self.show_pair_page(Ask::Code, &c, &n),
+                    None => self.show_pair_page(Ask::Button, &n, &n),
+                }
                 Ok(POLL)
             }
             409 => {
-                self.show_pair_page(Ask::Refused, "");
+                self.show_pair_page(Ask::Refused, "", &n);
                 Ok(REFUSED_RETRY)
             }
             s => Err(io::Error::other(format!("POST /api/pair: HTTP {s}"))),
@@ -181,10 +218,16 @@ impl Agent {
                 self.paired(&tok);
                 Ok(Duration::ZERO)
             }
-            // Expired, or the server restarted: ask again with a new nonce.
+            // Expired, too many wrong codes, or the server restarted: ask again (a new code).
             404 => {
                 self.pair_nonce = None;
                 Ok(Duration::ZERO)
+            }
+            // Paired some other way meanwhile.
+            409 => {
+                self.pair_nonce = None;
+                self.show_pair_page(Ask::Refused, "", n);
+                Ok(REFUSED_RETRY)
             }
             s => Err(io::Error::other(format!("GET /api/pair: HTTP {s}"))),
         }
@@ -195,14 +238,14 @@ impl Agent {
         self.cfg.token = tok.to_string();
         self.pair_nonce = None;
         self.pair_page_up = false;
-        self.event("pair", "paired with the button on the frame");
+        self.event("pair", "paired with the code on the frame's screen");
         eprintln!("tfctl: agent: paired, opening the dashboard");
         self.on_fallback = false;
         self.on_cached = false;
         let _ = self.send(KioskCmd::SetUrl(self.cfg.url.clone()));
     }
 
-    /// The server no longer accepts our token: forget it, the PAIR button comes back.
+    /// The server no longer accepts our token: forget it, a new pairing code comes up.
     pub(crate) fn unauthorized(&mut self) {
         if self.cfg.token.is_empty() {
             return;
@@ -212,7 +255,8 @@ impl Agent {
         self.cfg.token.clear();
     }
 
-    fn show_pair_page(&mut self, ask: Ask, nonce: &str) {
+    /// Shows the pairing page; `nonce` only makes each request's page URL new.
+    fn show_pair_page(&mut self, ask: Ask, secret: &str, nonce: &str) {
         let st = crate::status::collect();
         let ip = st
             .ips
@@ -228,7 +272,7 @@ impl Agent {
             ask,
             &self.cfg.server_url,
             &self.cfg.frame_id,
-            nonce,
+            secret,
             ip.as_deref(),
             backdrop.as_deref(),
             self.cfg.splash_style == "dawn",
@@ -243,7 +287,7 @@ impl Agent {
         }
         self.on_fallback = true;
         self.pair_page_up = true;
-        // A fresh URL each time: cog reloads, so a new nonce is never stale on screen.
+        // A fresh URL each time: cog reloads, so a new code is never stale on screen.
         let url = format!(
             "file://{}?{}",
             path.display(),
@@ -256,6 +300,35 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_page_shows_the_code_and_no_form() {
+        let h = render(
+            Ask::Code,
+            "http://nas.local:8080/",
+            "kitchen",
+            "482913",
+            Some("192.168.1.20"),
+            None,
+            false,
+        );
+        assert!(h.contains("<div class=\"code\">482 913</div>"));
+        assert!(h.contains("nas.local:8080/admin") && h.contains("code for kitchen"));
+        assert!(!h.contains("<form") && !h.contains("<button>"));
+        assert!(h.contains(".code{font-size:13vh"));
+        let d = render(Ask::Code, "http://a", "k", "000123", None, None, true);
+        assert!(d.contains("000 123") && d.contains(".code{") && !d.contains("<form"));
+    }
+
+    #[test]
+    fn codes_are_six_digits() {
+        assert!(valid_code("012345"));
+        for c in ["", "12345", "1234567", "12a456", "１２３４５６", "<b>xx"] {
+            assert!(!valid_code(c), "{c}");
+        }
+        assert_eq!(spaced("123456"), "123 456");
+        assert_eq!(spaced("12"), "12");
+    }
 
     #[test]
     fn page_posts_the_nonce_to_the_server() {
