@@ -257,11 +257,27 @@ pub fn needs_forced_pass(code: i32) -> bool {
     code >= 0 && code & 4 != 0
 }
 
-/// Whether `dev` is the source of any line in /proc/mounts.
+/// Whether `dev` is the source of any line in /proc/mounts. By name, and by device number: fstab
+/// mounts /data as `/dev/thinframe-data`, a link to p4, so /proc/mounts never says
+/// `/dev/mmcblk0p4` for it.
 pub fn is_mounted(mounts: &str, dev: &str) -> bool {
+    is_mounted_by(mounts, dev, block_rdev)
+}
+
+/// The device number of the block device at `path` (links followed); None for anything else.
+fn block_rdev(path: &str) -> Option<u64> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let m = fs::metadata(path).ok()?;
+    m.file_type().is_block_device().then(|| m.rdev())
+}
+
+/// `is_mounted` with the device-number lookup given.
+pub fn is_mounted_by(mounts: &str, dev: &str, rdev: impl Fn(&str) -> Option<u64>) -> bool {
+    let want = rdev(dev);
     mounts
         .lines()
-        .any(|l| l.split_whitespace().next() == Some(dev))
+        .filter_map(|l| l.split_whitespace().next())
+        .any(|src| src == dev || (want.is_some() && rdev(src) == want))
 }
 
 fn provision_rw() -> io::Result<()> {
@@ -545,6 +561,24 @@ mod tests {
         assert!(!is_mounted(m, "/dev/vda1"));
         assert!(!is_mounted(m, "/data"));
         assert!(!is_mounted("", "/dev/mmcblk0p4"));
+    }
+
+    #[test]
+    fn mounted_through_the_fstab_link_is_mounted() {
+        // What the frame shows: /data comes from the link, the check asks for p4 by name.
+        let m = "/dev/root / ext4 ro 0 0\n/dev/thinframe-data /data ext4 rw,noatime 0 0\n";
+        let rdev = |p: &str| match p {
+            "/dev/mmcblk0p4" | "/dev/thinframe-data" => Some(0xb304),
+            "/dev/mmcblk0p1" | "/dev/thinframe-boot" => Some(0xb301),
+            "/dev/mmcblk2p4" => Some(0xb324),
+            _ => None,
+        };
+        assert!(is_mounted_by(m, "/dev/mmcblk0p4", rdev));
+        assert!(!is_mounted_by(m, "/dev/mmcblk0p1", rdev));
+        assert!(!is_mounted_by(m, "/dev/mmcblk2p4", rdev), "another disk");
+        // Nothing to stat (a missing node): by name only, never "both unknown".
+        assert!(!is_mounted_by(m, "/dev/gone", |_| None));
+        assert!(is_mounted_by(m, "/dev/thinframe-data", |_| None));
     }
 
     #[test]
