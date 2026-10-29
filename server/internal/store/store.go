@@ -277,7 +277,16 @@ func (s *Store) Ensure(id string) (Frame, error) {
 }
 
 // Update applies fn under the lock and persists. Creates the frame if needed.
-func (s *Store) Update(id string, fn func(*Frame)) (Frame, error) {
+func (s *Store) Update(id string, fn func(*Frame)) (Frame, error) { return s.update(id, fn, true) }
+
+// UpdateExisting is Update for a frame that must already exist: ErrNotFound otherwise. Use it
+// for bookkeeping that may race a Delete (a socket closing, a page beacon), so a frame just
+// deleted is not brought back.
+func (s *Store) UpdateExisting(id string, fn func(*Frame)) (Frame, error) {
+	return s.update(id, fn, false)
+}
+
+func (s *Store) update(id string, fn func(*Frame), create bool) (Frame, error) {
 	if !ValidID(id) {
 		return Frame{}, fmt.Errorf("%w %q", ErrInvalidID, id)
 	}
@@ -286,6 +295,8 @@ func (s *Store) Update(id string, fn func(*Frame)) (Frame, error) {
 	var f Frame
 	if cur, ok := s.frames[id]; ok {
 		f = clone(*cur)
+	} else if !create {
+		return Frame{}, ErrNotFound
 	} else {
 		now := time.Now().UTC()
 		f = Frame{ID: id, Config: DefaultConfig(), Layout: DefaultLayout(), FirstSeen: now, LastSeen: now}

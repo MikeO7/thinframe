@@ -196,22 +196,18 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if l := in.Load; l != nil && l.LoadMS > 0 && l.LoadMS < 600000 {
-		if _, err := s.Store.Get(r.PathValue("id")); err == nil {
-			_, _ = s.Store.Update(r.PathValue("id"), func(f *store.Frame) {
-				f.PageLoad = &store.PageLoad{ResponseMS: l.ResponseMS, DOMMS: l.DOMMS, PaintMS: l.PaintMS,
-					LoadMS: l.LoadMS, At: time.Now().UTC()}
-			})
-		}
+		_, _ = s.Store.UpdateExisting(r.PathValue("id"), func(f *store.Frame) {
+			f.PageLoad = &store.PageLoad{ResponseMS: l.ResponseMS, DOMMS: l.DOMMS, PaintMS: l.PaintMS,
+				LoadMS: l.LoadMS, At: time.Now().UTC()}
+		})
 	}
 	if in.LatencyMS > 0 && in.LatencyMS < 10000 {
-		if _, err := s.Store.Get(r.PathValue("id")); err == nil {
-			_, _ = s.Store.Update(r.PathValue("id"), func(f *store.Frame) {
-				if f.Touch == nil {
-					f.Touch = &store.Touch{}
-				}
-				f.Touch.Add(in.LatencyMS, in.PaintedAtMS, time.Now().UTC())
-			})
-		}
+		_, _ = s.Store.UpdateExisting(r.PathValue("id"), func(f *store.Frame) {
+			if f.Touch == nil {
+				f.Touch = &store.Touch{}
+			}
+			f.Touch.Add(in.LatencyMS, in.PaintedAtMS, time.Now().UTC())
+		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

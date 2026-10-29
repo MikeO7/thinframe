@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -352,5 +353,10 @@ func TestDeleteFrameKicksSocket(t *testing.T) {
 			t.Fatal("deleted frame still online")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// The socket's close bookkeeping (it finishes before Online turns false) must not have
+	// recreated the record it writes its "disconnected" event to.
+	if _, err := s.Store.Get("sim"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted frame came back when its socket closed: %v", err)
 	}
 }

@@ -138,3 +138,27 @@ func TestPendingIsCapped(t *testing.T) {
 		t.Fatalf("pending %d, err %v", len(f.Pending), err)
 	}
 }
+
+// UpdateExisting never recreates a deleted frame (the socket-close and beacon paths use it).
+func TestUpdateExistingDoesNotCreate(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if _, err := s.UpdateExisting("gone", func(f *Frame) { f.Name = "x" }); err != ErrNotFound {
+		t.Fatalf("unknown frame: %v, want ErrNotFound", err)
+	}
+	if _, err := s.Ensure("a"); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := s.UpdateExisting("a", func(f *Frame) { f.Name = "Hall" }); err != nil || f.Name != "Hall" {
+		t.Fatalf("existing frame: %+v %v", f, err)
+	}
+	if err := s.Delete("a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateExisting("a", func(f *Frame) {}); err != ErrNotFound {
+		t.Fatalf("deleted frame: %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "frames", "a.json")); !os.IsNotExist(err) {
+		t.Fatalf("deleted frame's file is back: %v", err)
+	}
+}
