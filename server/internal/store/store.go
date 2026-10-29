@@ -42,21 +42,32 @@ func (s *Store) Dir() string { return s.dir }
 
 // Heartbeat is what a frame reports.
 type Heartbeat struct {
-	At            time.Time `json:"at"`
-	UptimeS       int64     `json:"uptime_s"`
-	MemUsedMB     int       `json:"mem_used_mb"`
-	MemTotalMB    int       `json:"mem_total_mb"`
-	IP            string    `json:"ip"`
-	WifiRSSI      int       `json:"wifi_rssi"`
-	TempC         float64   `json:"temp_c"`
-	TfctlVersion  string    `json:"tfctl_version"`
-	SystemVersion string    `json:"system_version"`
-	Slot          string    `json:"slot"`
-	PageURL       string    `json:"page_url"`
-	ScreenState   string    `json:"screen_state"`
-	CogPID        int       `json:"cog_pid"`
-	LoadAvg       float64   `json:"load_avg"`
-	Light         *int      `json:"light,omitempty"` // light sensor 0..63 (dark room 0..3, lit 60..62)
+	At           time.Time `json:"at"`
+	UptimeS      int64     `json:"uptime_s"`
+	MemUsedMB    int       `json:"mem_used_mb"`
+	MemTotalMB   int       `json:"mem_total_mb"`
+	IP           string    `json:"ip"`
+	WifiRSSI     int       `json:"wifi_rssi"`
+	TempC        float64   `json:"temp_c"`
+	TfctlVersion string    `json:"tfctl_version"` // the crate's version, always 0.1.0
+	// SoftwareVersion is what the frame installed (its /etc/thinframe.version), the version
+	// the server's artifacts name.
+	SoftwareVersion string  `json:"software_version,omitempty"`
+	SystemVersion   string  `json:"system_version"`
+	Slot            string  `json:"slot"`
+	PageURL         string  `json:"page_url"`
+	ScreenState     string  `json:"screen_state"`
+	CogPID          int     `json:"cog_pid"`
+	LoadAvg         float64 `json:"load_avg"`
+	Light           *int    `json:"light,omitempty"` // light sensor 0..63 (dark room 0..3, lit 60..62)
+}
+
+// Version is the software the frame runs: its installed version, else the crate's.
+func (h Heartbeat) Version() string {
+	if h.SoftwareVersion != "" {
+		return h.SoftwareVersion
+	}
+	return h.TfctlVersion
 }
 
 // Touch is the page's own touch-to-paint measurement (its beacon), kept beside the heartbeat so a

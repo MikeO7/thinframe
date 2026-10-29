@@ -155,7 +155,7 @@ func (s *Server) recordHeartbeat(id string, hb store.Heartbeat) (store.Frame, er
 	if err == nil {
 		s.sse.publish(id, map[string]any{"widget": "status", "data": map[string]any{
 			"line1": fmt.Sprintf("%s · %s · %.0f°C", f.ID, hb.IP, hb.TempC),
-			"line2": fmt.Sprintf("%d/%d MB · up %s · v%s", hb.MemUsedMB, hb.MemTotalMB, (time.Duration(hb.UptimeS) * time.Second).Round(time.Minute), hb.TfctlVersion),
+			"line2": fmt.Sprintf("%d/%d MB · up %s · v%s", hb.MemUsedMB, hb.MemTotalMB, (time.Duration(hb.UptimeS) * time.Second).Round(time.Minute), hb.Version()),
 		}})
 	}
 	return f, err
@@ -228,8 +228,14 @@ func (s *Server) ReleaseStatus() map[string]any {
 		if f.Last == nil {
 			continue
 		}
-		if s.opts.Artifacts != nil && f.Last.SystemVersion != "" && f.Last.SystemVersion != s.opts.Artifacts.Versions().System {
-			lag = append(lag, map[string]string{"id": f.ID, "system": f.Last.SystemVersion})
+		if s.opts.Artifacts == nil {
+			continue
+		}
+		v := s.opts.Artifacts.Versions()
+		sysLag := f.Last.SystemVersion != "" && v.System != "" && f.Last.SystemVersion != v.System
+		swLag := f.Last.SoftwareVersion != "" && v.Software != "" && f.Last.SoftwareVersion != v.Software
+		if sysLag || swLag {
+			lag = append(lag, map[string]string{"id": f.ID, "system": f.Last.SystemVersion, "software": f.Last.SoftwareVersion})
 		}
 	}
 	out["lagging"] = lag
@@ -319,7 +325,7 @@ func (s *Server) recordHeartbeatSSE(f store.Frame) {
 	hb := f.Last
 	s.sse.publish(f.ID, map[string]any{"widget": "status", "data": map[string]any{
 		"line1": fmt.Sprintf("%s · %s · %.0f°C", f.ID, hb.IP, hb.TempC),
-		"line2": fmt.Sprintf("%d/%d MB · v%s", hb.MemUsedMB, hb.MemTotalMB, hb.TfctlVersion),
+		"line2": fmt.Sprintf("%d/%d MB · v%s", hb.MemUsedMB, hb.MemTotalMB, hb.Version()),
 	}})
 }
 
