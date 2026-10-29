@@ -284,10 +284,19 @@ pub fn confirm_slot(p: &Paths) -> Option<(String, String)> {
     ))
 }
 
-/// `reboot` after a short delay so the ack leaves first.
+/// `reboot` after a short delay so the ack leaves first. While `tfctl emmc install` runs, the
+/// reboot waits for it (a GPU hang, Settings, Restart): a reboot mid-copy wastes the install.
 pub fn reboot_soon() {
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(2));
+        let p = Paths::system();
+        let mut said = false;
+        while let Err(e) = p.no_install_running() {
+            if !std::mem::replace(&mut said, true) {
+                eprintln!("tfctl: reboot waits: {e}");
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
         update::sync_disks();
         let _ = Command::new("reboot").spawn();
     });

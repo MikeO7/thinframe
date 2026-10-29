@@ -38,6 +38,9 @@ fn push_event(kind: &str, text: &str) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum KioskCmd {
     Restart,
+    /// gpuwatch: the GPU's jobs time out. Held while the screen is off or Settings is open (the
+    /// page is paused, or the person is typing), done on wake or close, never dropped.
+    GpuRestart,
     Reload,
     SetUrl(String),
     SetRotation(u8),
@@ -73,6 +76,74 @@ fn reap_group(pgid: u32) {
     while sys::send_group(pgid, 0).is_ok() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// (pid, ppid, pgrp) from the text of /proc/PID/stat. The name in parentheses may hold spaces
+/// and parentheses itself, so the fields are counted from the last ')'.
+fn parse_stat(text: &str) -> Option<(u32, u32, u32)> {
+    let pid = text.split_whitespace().next()?.parse().ok()?;
+    let mut f = text.get(text.rfind(')')? + 1..)?.split_whitespace();
+    let _state = f.next()?;
+    Some((pid, f.next()?.parse().ok()?, f.next()?.parse().ok()?))
+}
+
+/// Every process now (empty without /proc).
+fn proc_table() -> Vec<(u32, u32, u32)> {
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    dir.flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        })
+        .filter_map(|e| parse_stat(&fs::read_to_string(e.path().join("stat")).ok()?))
+        .collect()
+}
+
+/// cog's helpers: the members of its process group (cog leads it, see `command`) and any
+/// descendant that left it, without cog itself. WPEWebProcess and WPENetworkProcess run the page.
+fn helpers_of(root: u32, procs: &[(u32, u32, u32)]) -> Vec<u32> {
+    let mut tree = vec![root];
+    loop {
+        let before = tree.len();
+        for &(pid, ppid, pgrp) in procs {
+            if !tree.contains(&pid) && (pgrp == root || tree.contains(&ppid)) {
+                tree.push(pid);
+            }
+        }
+        if tree.len() == before {
+            break;
+        }
+    }
+    tree.retain(|&p| p != root);
+    tree.sort_unstable();
+    tree
+}
+
+/// Pause cog and its helpers: cog first, so it never sees a stopped web process as hung while it
+/// still runs, then the whole group at once, then helpers outside the group.
+fn stop_tree(pid: u32) -> bool {
+    if sys::send(pid, sys::SIGSTOP).is_err() {
+        return false;
+    }
+    let _ = sys::send_group(pid, sys::SIGSTOP);
+    for h in helpers_of(pid, &proc_table()) {
+        let _ = sys::send(h, sys::SIGSTOP);
+    }
+    true
+}
+
+/// Resume in the other order: the helpers first, so the web process answers whatever cog asks
+/// as soon as cog runs, then cog, then the group as a catch-all (no /proc: the helpers).
+fn cont_tree(pid: u32) {
+    for h in helpers_of(pid, &proc_table()) {
+        let _ = sys::send(h, sys::SIGCONT);
+    }
+    let _ = sys::send(pid, sys::SIGCONT);
+    let _ = sys::send_group(pid, sys::SIGCONT);
 }
 
 /// The dashboard's dark background (server page.css `--bg`).
@@ -143,9 +214,9 @@ pub fn cap_log(path: &str, max: u64, keep: u64) -> io::Result<()> {
 pub fn run(cfg: &Config) -> io::Result<()> {
     crate::logstamp::start();
     sys::trap_term();
-    crate::watchdog::start();
-    // TASK 11 rollback: two fast crashes after an update put tfctl.prev back; exit so the
-    // respawn runs it.
+    crate::watchdog::start(); // already running when started from main
+                              // TASK 11 rollback: two fast crashes after an update put tfctl.prev back; exit so the
+                              // respawn runs it.
     if let StartCheck::RolledBack(v) = update::record_start(&Paths::system()) {
         eprintln!("tfctl: kiosk: software {v} rolled back, exiting for respawn");
         return Ok(());
@@ -342,6 +413,8 @@ pub struct Kiosk {
     pending_tried: Instant,
     /// A reload asked for while the screen was off (a new layout): done on wake, not dropped.
     reload_on_wake: bool,
+    /// A GPU-hang restart held while the screen was off or Settings was open.
+    gpu_restart: bool,
 }
 
 impl Kiosk {
@@ -388,6 +461,7 @@ impl Kiosk {
             pending: None,
             pending_tried: Instant::now(),
             reload_on_wake: false,
+            gpu_restart: false,
         }
     }
 
@@ -407,7 +481,10 @@ impl Kiosk {
             },
         };
         match splash::show(&look) {
-            Ok(s) => self.splash = Some(s),
+            Ok(s) => {
+                s.pause(!SCREEN_ON.load(Ordering::SeqCst));
+                self.splash = Some(s);
+            }
             Err(e) => eprintln!("tfctl: splash: {e}"),
         }
     }
@@ -524,7 +601,7 @@ impl Kiosk {
     fn kill_child(&mut self) {
         if let Some(mut c) = self.child.take() {
             if self.stopped {
-                let _ = sys::send(c.id(), sys::SIGCONT);
+                cont_tree(c.id());
             }
             let _ = c.kill();
             let _ = c.wait();
@@ -539,9 +616,34 @@ impl Kiosk {
         self.next_spawn = Instant::now();
     }
 
+    /// A held GPU restart, once nothing holds it any more.
+    fn gpu_restart_if_held(&mut self) {
+        if self.gpu_restart && !self.stopped && self.back_to.is_none() {
+            self.gpu_restart_now();
+        }
+    }
+
+    /// A new cog on the page asked for last (kill_child resumes a paused one to end it); only
+    /// this counts toward gpuwatch's reboot.
+    fn gpu_restart_now(&mut self) {
+        eprintln!("tfctl: kiosk: GPU restart");
+        self.gpu_restart = false;
+        if let Some(u) = self.pending.take() {
+            self.url = u;
+        }
+        self.reload_on_wake = false;
+        self.restart();
+        crate::gpuwatch::restarted();
+    }
+
     fn set_screen(&mut self, on: bool) {
         SCREEN_ON.store(on, Ordering::SeqCst);
         crate::speed::cpu_governor(on);
+        // A boot inside the off hours pauses cog before its first frame, so the splash is never
+        // replaced: without this the dawn animation drew all night behind a dark backlight.
+        if let Some(s) = &self.splash {
+            s.pause(!on);
+        }
         if on {
             if let Err(e) = screen::set_brightness(self.backlight) {
                 eprintln!("tfctl: backlight: {e}");
@@ -549,9 +651,13 @@ impl Kiosk {
             // The paused page carries on where it was: its picture is back with the backlight,
             // and page.js sees the gap in its timers and reconnects its stream, which replays every
             // source. A restart here cost ~7 s of splash and reload per wake [V 2026-10-27].
+            if self.stopped && self.gpu_restart && self.back_to.is_none() {
+                // The GPU hung meanwhile: a new cog instead of the paused one.
+                self.gpu_restart_now();
+            }
             if self.stopped {
                 if let Some(c) = &self.child {
-                    let _ = sys::send(c.id(), sys::SIGCONT);
+                    cont_tree(c.id());
                 }
                 self.stopped = false;
                 if std::mem::take(&mut self.reload_on_wake) && self.pending.is_none() {
@@ -569,7 +675,7 @@ impl Kiosk {
                 eprintln!("tfctl: backlight: {e}");
             }
             if let Some(c) = &self.child {
-                if !self.stopped && sys::send(c.id(), sys::SIGSTOP).is_ok() {
+                if !self.stopped && stop_tree(c.id()) {
                     self.stopped = true;
                 }
             }
@@ -579,6 +685,16 @@ impl Kiosk {
     pub fn handle(&mut self, cmd: KioskCmd) {
         eprintln!("tfctl: kiosk: {cmd:?}");
         match cmd {
+            KioskCmd::GpuRestart if self.stopped || self.back_to.is_some() => {
+                eprintln!(
+                    "tfctl: kiosk: GPU restart held until the screen is on and Settings closed"
+                );
+                self.gpu_restart = true;
+            }
+            KioskCmd::GpuRestart => {
+                self.gpu_restart = true;
+                self.gpu_restart_if_held();
+            }
             // The server's page watchdog sees the dashboard go quiet while Settings is up: the
             // person at the screen comes first, the dashboard reloads when Settings closes.
             KioskCmd::Restart | KioskCmd::Reload if self.back_to.is_some() => {
@@ -672,7 +788,12 @@ impl Kiosk {
                     crate::settings::close(st);
                 }
                 if let Some(u) = self.back_to.take() {
-                    self.go(u);
+                    if self.gpu_restart && !self.stopped {
+                        self.pending = Some(u);
+                        self.gpu_restart_if_held();
+                    } else {
+                        self.go(u);
+                    }
                 }
             }
         }
@@ -1110,6 +1231,137 @@ mod tests {
         k.set_screen(true);
         assert!(!k.stopped && !k.reload_on_wake);
         k.kill_child();
+    }
+
+    #[test]
+    fn helpers_are_the_group_and_the_descendants() {
+        assert_eq!(
+            parse_stat("812 (WPEWebProcess) S 800 800 800 0 -1 4194560 1 0"),
+            Some((812, 800, 800))
+        );
+        assert_eq!(
+            parse_stat("9 (a) b (c)) R 1 9 9"),
+            Some((9, 1, 9)),
+            "odd name"
+        );
+        assert_eq!(parse_stat("junk"), None);
+        let procs = [
+            (1, 0, 1),     // init
+            (700, 1, 700), // tfctl
+            (800, 700, 800),
+            (812, 800, 800), // WPEWebProcess
+            (813, 800, 800), // WPENetworkProcess
+            (820, 812, 820), // a helper that made its own group
+            (900, 700, 700), // dbus-daemon: tfctl's, not cog's
+            (950, 1, 800),   // reparented to init, still in cog's group
+        ];
+        assert_eq!(helpers_of(800, &procs), vec![812, 813, 820, 950]);
+        assert!(helpers_of(800, &[]).is_empty());
+    }
+
+    /// ps's state letter for `pid` ("T" stopped); ps is on the Mac and on Linux.
+    fn state(pid: u32) -> String {
+        let o = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    }
+
+    fn comm(pid: u32) -> String {
+        let o = Command::new("ps")
+            .args(["-o", "comm=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    }
+
+    fn wait_state(pid: u32, stopped: bool) -> bool {
+        let end = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < end {
+            if state(pid).starts_with('T') == stopped {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[test]
+    fn screen_off_pauses_cogs_helpers_too() {
+        use std::io::BufRead;
+        // Like cog: a group leader with a helper process.
+        let mut c = Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!; wait"])
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(c.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let helper: u32 = line.trim().parse().unwrap();
+        // Wait for the helper to be `sleep`: on the Mac a stop that lands between the shell's
+        // fork and its exec was lost about one run in ten under a loaded test run.
+        let end = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < end && !comm(helper).contains("sleep") {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let mut k = Kiosk::new(&Config::default());
+        let pid = c.id();
+        k.child = Some(c);
+        k.set_screen(false);
+        assert!(k.stopped);
+        assert!(wait_state(pid, true), "cog stopped: {}", state(pid));
+        assert!(
+            wait_state(helper, true),
+            "helper stopped: {}",
+            state(helper)
+        );
+        k.set_screen(true);
+        assert!(!k.stopped);
+        assert!(
+            wait_state(helper, false),
+            "helper running: {}",
+            state(helper)
+        );
+        assert!(wait_state(pid, false), "cog running: {}", state(pid));
+        k.kill_child();
+        assert!(sys::send_group(pid, 0).is_err(), "group gone");
+    }
+
+    #[test]
+    fn a_gpu_restart_waits_for_the_wake_or_the_end_of_settings() {
+        let mut k = Kiosk::new(&Config::default());
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        let pid = k.child.as_ref().unwrap().id();
+        k.set_screen(false);
+        k.handle(KioskCmd::GpuRestart);
+        assert!(k.gpu_restart, "held while off");
+        assert_eq!(k.child.as_ref().map(Child::id), Some(pid));
+        k.handle(KioskCmd::SetUrl("http://server/frame/other".into()));
+        k.set_screen(true);
+        assert!(!k.gpu_restart && !k.stopped);
+        assert!(k.child.is_none(), "restarted on wake");
+        assert_eq!(
+            k.url, "http://server/frame/other",
+            "on the page asked for last"
+        );
+        assert!(k.next_spawn <= Instant::now());
+        // Settings open: held until it closes, then a new cog on the page Settings covered.
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        k.back_to = Some("http://server/frame/k".into());
+        k.url = "http://127.0.0.1:41008/settings".into();
+        k.handle(KioskCmd::GpuRestart);
+        assert!(k.gpu_restart && k.child.is_some());
+        k.handle(KioskCmd::CloseSettings);
+        assert!(!k.gpu_restart && k.child.is_none());
+        assert_eq!(k.url, "http://server/frame/k");
+        // Nothing holds it: at once.
+        k.child = Some(Command::new("sleep").arg("30").spawn().unwrap());
+        k.handle(KioskCmd::GpuRestart);
+        assert!(!k.gpu_restart && k.child.is_none());
     }
 
     #[test]

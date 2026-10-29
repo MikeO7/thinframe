@@ -49,7 +49,69 @@ const MMC_IOC_CMD: std::ffi::c_ulong = 0xc048_b300;
 pub const EXT_CSD_BOOT_BUS: usize = 177;
 pub const EXT_CSD_PART_CONFIG: usize = 179;
 
+/// What the install destroys and `backup` (the user area) does not cover, saved once before the
+/// first change: boot0's first 64 KiB (the install zeroes them) and the EXT_CSD boot bytes (it
+/// sets PARTITION_CONFIG to 0). An existing copy is never overwritten: a second install over
+/// thinframe would save only zeros.
+pub const ORIG_BOOT0: &str = "/data/thinframe/emmc-boot0-orig.bin";
+pub const ORIG_CSD: &str = "/data/thinframe/emmc-ext-csd-orig.txt";
+const BOOT0_CLEARED: usize = 64 << 10;
+
+/// Held by `emmc install` for its whole run, with its pid: while a live tfctl holds it the agent
+/// starts no software or system update, no rollback and no reboot (`reboot_soon` waits), since
+/// each of them can change the root or the boot partition in the middle of the raw copy.
+pub const INSTALL_LOCK: &str = "/run/thinframe/emmc-install";
+
 type R<T> = io::Result<T>;
+
+/// The install lock; removed on drop. A crash (panic=abort skips drop) leaves the file, which
+/// `holder` then sees as stale: its pid is gone or no longer a tfctl.
+pub struct InstallLock(PathBuf);
+
+impl Drop for InstallLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// The pid in a lock file's text when that process still runs tfctl (`comm` reads its name).
+pub fn live_holder(text: &str, comm: impl Fn(u32) -> Option<String>) -> Option<u32> {
+    let pid: u32 = text.trim().parse().ok()?;
+    (pid > 0 && comm(pid).is_some_and(|c| c.trim().starts_with("tfctl"))).then_some(pid)
+}
+
+fn proc_comm(pid: u32) -> Option<String> {
+    fs::read_to_string(format!("/proc/{pid}/comm")).ok()
+}
+
+/// Who holds the install lock at `path`, if anyone alive does.
+pub fn holder(path: &Path) -> Option<u32> {
+    live_holder(&fs::read_to_string(path).ok()?, proc_comm)
+}
+
+/// Take the lock at `path` for `pid`; a stale file is replaced, a live holder refuses.
+fn lock_with(path: &Path, pid: u32, comm: impl Fn(u32) -> Option<String>) -> R<InstallLock> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    for _ in 0..2 {
+        match OpenOptions::new().write(true).create_new(true).open(path) {
+            Ok(mut f) => {
+                f.write_all(format!("{pid}\n").as_bytes())?;
+                return Ok(InstallLock(path.to_path_buf()));
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                let text = fs::read_to_string(path).unwrap_or_default();
+                if let Some(p) = live_holder(&text, &comm) {
+                    return Err(err(format!("another eMMC install is running (pid {p})")));
+                }
+                let _ = fs::remove_file(path);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(err(format!("cannot take {}", path.display())))
+}
 
 fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())
@@ -268,12 +330,25 @@ pub fn emmc_mbr(card: &[u8; 512], emmc_sectors: u64) -> R<[u8; 512]> {
     Ok(m)
 }
 
-/// An extlinux.conf for the eMMC: every root on the card's signature moves to the eMMC's.
+/// An extlinux.conf for the eMMC: every root on the card's signature moves to the eMMC's, and
+/// the last-resort `min` label boots `pmic.dtb` instead. min.dtb has no eMMC node (it lacks the
+/// PMIC regulators the eMMC needs, image/build.sh), so on the eMMC it would wait at rootwait
+/// forever; pmic.dtb has the eMMC on and is a different file, so it still covers a full.dtb that
+/// does not load, which is what the label is for. Its command line (debug log) stays.
 pub fn retarget_extlinux(conf: &str) -> String {
     conf.replace(
         &format!("PARTUUID={:08x}-", slot::DISK_SIG),
         &format!("PARTUUID={:08x}-", slot::EMMC_SIG),
     )
+    .lines()
+    .map(|l| match l.trim() {
+        "LABEL min" => l.replace("LABEL min", "LABEL pmic"),
+        t if t.starts_with("FDT ") && t.ends_with("-min.dtb") => l.replace("-min.dtb", "-pmic.dtb"),
+        _ => l.to_string(),
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+        + if conf.ends_with('\n') { "\n" } else { "" }
 }
 
 fn drop_caches() {
@@ -427,7 +502,50 @@ fn mounted(dev_prefix: &str) -> bool {
         })
 }
 
+/// The text saved next to boot0's copy: the EXT_CSD bytes the install changes, and what held
+/// the eMMC then (`thinframe` when an earlier install already cleared them).
+pub fn orig_csd_text(csd: &[u8; 512], boot0_sha: Option<&str>, held: &str, now: i64) -> String {
+    format!(
+        "# EXT_CSD before tfctl emmc install. Back to the vendor boot: write these bytes back\n\
+         # (mmc-utils or the CMD6 tfctl uses) and emmc-boot0-orig.bin to mmcblk2boot0.\n\
+         partition_config={:#04x}\nboot_bus_conditions={:#04x}\nboot0_first_64k_sha256={}\n\
+         emmc_held={held}\nsaved_unix={now}\n",
+        csd[EXT_CSD_PART_CONFIG],
+        csd[EXT_CSD_BOOT_BUS],
+        boot0_sha.unwrap_or("none (no boot0 device)"),
+    )
+}
+
+/// Save boot0's head and the EXT_CSD text unless a copy is there already; each file is synced
+/// before this returns. Err means the install must not go on.
+fn save_originals(bin: &Path, txt: &Path, boot0: Option<&[u8]>, text: &str) -> R<()> {
+    if let Some(dir) = txt.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    if let Some(b) = boot0 {
+        if bin.exists() {
+            say(&format!("{} kept from an earlier install", bin.display()));
+        } else {
+            crate::update::write_synced(bin, b)?;
+            say(&format!(
+                "boot0's first {} KiB saved to {}",
+                b.len() >> 10,
+                bin.display()
+            ));
+        }
+    }
+    if txt.exists() {
+        say(&format!("{} kept from an earlier install", txt.display()));
+    } else {
+        crate::update::write_synced(txt, text.as_bytes())?;
+        say(&format!("EXT_CSD boot bytes saved to {}", txt.display()));
+    }
+    Ok(())
+}
+
 fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
+    // 0. Hold the agent off (updates, rollback, reboots) until this returns.
+    let _lock = lock_with(Path::new(INSTALL_LOCK), std::process::id(), proc_comm)?;
     // 1. Where we are and what we would write.
     if slot::running_from_emmc() {
         return Err(err(
@@ -498,6 +616,37 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     if mounted(&edev) {
         return Err(err(format!("something on {edev} is mounted")));
     }
+    // What no backup holds, before anything changes it (read-only: EXT_CSD by CMD8, boot0).
+    let csd = read_ext_csd(&File::open(&emmc)?)?;
+    let b0 = boot0_of(&emmc);
+    let boot0_head = if b0.exists() {
+        let mut v = vec![0u8; BOOT0_CLEARED];
+        File::open(&b0)?.read_exact_at(&mut v, 0)?;
+        Some(v)
+    } else {
+        None
+    };
+    let sha = boot0_head.as_deref().map(|b| {
+        let mut h = Sha256::new();
+        h.update(b);
+        h.finish_hex()
+    });
+    let held = match holds(&emmc_head, &emmc_egon) {
+        Holds::Thinframe => "thinframe",
+        _ => "vendor",
+    };
+    let text = orig_csd_text(&csd, sha.as_deref(), held, crate::clock::now());
+    save_originals(
+        Path::new(ORIG_BOOT0),
+        Path::new(ORIG_CSD),
+        boot0_head.as_deref(),
+        &text,
+    )
+    .map_err(|e| {
+        err(format!(
+            "cannot save boot0 and EXT_CSD to /data ({e}); not installing"
+        ))
+    })?;
 
     // 2. Open the eMMC for writing, exclusively (fails if any of it is in use).
     let force_ro = format!("/sys/block/{}/force_ro", sys_name(&emmc));
@@ -525,12 +674,11 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
             return Err(err(format!("PARTITION_CONFIG still {now:#04x}")));
         }
     }
-    let b0 = boot0_of(&emmc);
     if b0.exists() {
         let ro = format!("/sys/block/{}/force_ro", sys_name(&b0));
         fs::write(&ro, "0\n")?;
         let r = OpenOptions::new().write(true).open(&b0).and_then(|f| {
-            f.write_all_at(&vec![0u8; 64 << 10], 0)
+            f.write_all_at(&vec![0u8; BOOT0_CLEARED], 0)
                 .and_then(|_| f.sync_all())
         });
         let _ = fs::write(&ro, "1\n");
@@ -593,7 +741,10 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     let u = crate::update::sh("umount", &[&mnt.to_string_lossy()]);
     r.and(u)?;
 
-    // 7. Last: U-Boot. Only now can the eMMC start.
+    // 7. A read-only check of what was written; any doubt and the eMMC gets no boot code.
+    check_filesystems(&emmc)?;
+
+    // 8. Last: U-Boot. Only now can the eMMC start.
     say("writing U-Boot");
     let w = OpenOptions::new()
         .read(true)
@@ -617,6 +768,42 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
          Keep the card: with it inserted the frame starts from the card again.",
         running.name()
     );
+    Ok(())
+}
+
+/// e2fsck -f -n on partitions 2 to 4 (exit 0 only), fsck.vfat -n on partition 1 when the image
+/// has it (it ships e2fsprogs; dosfstools is a host tool only, and p1 was compared by hash).
+fn check_filesystems(emmc: &Path) -> R<()> {
+    say("checking the file systems on the eMMC (read-only)");
+    let run = |tool: &str, args: &[&str], dev: &Path| -> R<Option<()>> {
+        let d = dev.to_string_lossy().to_string();
+        let out = match Command::new(tool).args(args).arg(&d).output() {
+            Ok(o) => o,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if out.status.success() {
+            return Ok(Some(()));
+        }
+        let text = String::from_utf8_lossy(&out.stdout).to_string()
+            + &String::from_utf8_lossy(&out.stderr);
+        let tail: Vec<&str> = text.lines().rev().take(4).collect();
+        Err(err(format!(
+            "{tool} {} {d}: {}: {}; U-Boot not written, the eMMC does not start",
+            args.join(" "),
+            out.status,
+            tail.into_iter().rev().collect::<Vec<_>>().join(" / ")
+        )))
+    };
+    for n in 2..=4u8 {
+        if run("e2fsck", &["-f", "-n"], &slot::part_n(emmc, n))?.is_none() {
+            return Err(err("no e2fsck in this image; U-Boot not written"));
+        }
+    }
+    if run("fsck.vfat", &["-n"], &slot::part_n(emmc, 1))?.is_none() {
+        say("no fsck.vfat in this image; partition 1 was checked by hash");
+    }
+    say("file systems clean");
     Ok(())
 }
 
@@ -733,10 +920,85 @@ mod tests {
         assert!(e.contains("root=PARTUUID=50463045-03 ro"));
         assert!(e.contains("root=PARTUUID=50463045-02 ro"));
         assert!(!e.contains("50463037"));
+        assert!(e.ends_with('\n'));
+        // The card's conf as post-image.sh renders it: min.dtb has no eMMC, so pmic.dtb.
+        let card = include_str!("../../image/boot/extlinux.conf.in")
+            .replace("@SLOT@", "b")
+            .replace("@PART@", "3")
+            .replace("@OTHER@", "a")
+            .replace("@OTHERPART@", "2")
+            .replace("@CMDLINE@", "quiet");
+        let e = retarget_extlinux(&card);
+        assert!(!e.contains("-min.dtb") && !e.contains("LABEL min"), "{e}");
+        assert!(e.contains("LABEL pmic\n\tKERNEL /zImage.b\n\tFDT /sun8i-a33-pf1007l-pmic.dtb\n"));
+        assert!(
+            e.contains("\tFDT /sun8i-a33-pf1007l-full.dtb\n"),
+            "full untouched"
+        );
+        assert!(e.contains("root=PARTUUID=50463045-03 rootfstype=ext4 rootwait ro console=ttyGS0"));
+        assert_eq!(e.lines().count(), card.lines().count());
         assert_eq!(
             slot::from_cmdline("root=PARTUUID=50463045-03 ro"),
             Some(Slot::B)
         );
+    }
+
+    #[test]
+    fn install_lock_refuses_a_live_holder_and_replaces_a_stale_one() {
+        let dir = std::env::temp_dir().join(format!("tfctl-emmc-lock-{}", std::process::id()));
+        let path = dir.join("run/thinframe/emmc-install");
+        let alive = |p: u32| (p == 4242).then(|| "tfctl\n".to_string());
+        let l = lock_with(&path, 4242, alive).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "4242\n");
+        let e = lock_with(&path, 5000, alive).err().unwrap().to_string();
+        assert!(e.contains("pid 4242"), "{e}");
+        drop(l);
+        assert!(!path.exists(), "released on drop");
+        // Left by a crashed install: the pid is gone, or now runs something else.
+        fs::write(&path, "4243\n").unwrap();
+        let l = lock_with(&path, 5000, |p| (p == 4243).then(|| "sh\n".into())).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "5000\n");
+        drop(l);
+        assert_eq!(live_holder("7\n", |_| Some("tfctl".into())), Some(7));
+        assert_eq!(live_holder("7\n", |_| None), None, "gone");
+        assert_eq!(live_holder("x", |_| Some("tfctl".into())), None);
+        assert_eq!(live_holder("0", |_| Some("tfctl".into())), None);
+        assert_eq!(holder(&path), None, "no file");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn originals_are_saved_once_and_never_overwritten() {
+        let dir = std::env::temp_dir().join(format!("tfctl-emmc-orig-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (bin, txt) = (dir.join("thinframe/b0.bin"), dir.join("thinframe/csd.txt"));
+        let mut csd = [0u8; 512];
+        csd[EXT_CSD_PART_CONFIG] = 0x48;
+        csd[EXT_CSD_BOOT_BUS] = 0x01;
+        let t = orig_csd_text(&csd, Some("ab"), "vendor", 1_793_000_000);
+        assert!(
+            t.contains("partition_config=0x48\nboot_bus_conditions=0x01\n"),
+            "{t}"
+        );
+        assert!(
+            t.contains("boot0_first_64k_sha256=ab\nemmc_held=vendor\n"),
+            "{t}"
+        );
+        let vendor = vec![7u8; BOOT0_CLEARED];
+        save_originals(&bin, &txt, Some(&vendor), &t).unwrap();
+        assert_eq!(fs::read(&bin).unwrap(), vendor);
+        assert_eq!(fs::read_to_string(&txt).unwrap(), t);
+        // A later install (boot0 already zeroed, PARTITION_CONFIG 0) keeps the first copy.
+        csd[EXT_CSD_PART_CONFIG] = 0;
+        let t2 = orig_csd_text(&csd, None, "thinframe", 1_793_000_100);
+        save_originals(&bin, &txt, Some(&[0u8; BOOT0_CLEARED]), &t2).unwrap();
+        assert_eq!(fs::read(&bin).unwrap(), vendor);
+        assert_eq!(fs::read_to_string(&txt).unwrap(), t);
+        // Nowhere to write (/data read-only or gone): the install must stop.
+        let blocked = dir.join("file");
+        fs::write(&blocked, "x").unwrap();
+        assert!(save_originals(&blocked.join("b"), &blocked.join("t"), Some(&vendor), &t).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

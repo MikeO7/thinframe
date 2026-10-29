@@ -301,7 +301,23 @@ impl Ctx {
                 }
                 see_other("/settings/server")
             }
-            ("POST", "/settings/reboot") => {
+            // Restart asks for a second tap, like Reset: a brush against the frame must not
+            // reboot it. A form from an older page posts here: it gets the question too.
+            ("POST", "/settings/reboot") => see_other("/settings/reboot"),
+            ("GET", "/settings/reboot") => html(page(
+                "Restart",
+                "/settings",
+                &format!(
+                    "<div class=\"card col\"><div class=\"row\"><span class=\"ic frame\">{ICON_RESTART}</span>\
+                     <div class=\"t\"><div class=\"v\">Restart this frame?</div><div class=\"sub\">It is back \
+                     in about a minute, with everything as it is now.</div></div></div>\
+                     <div class=\"row end\"><a class=\"btn btn2\" href=\"/settings\">Cancel</a>\
+                     <form method=\"post\" action=\"/settings/reboot/yes\"><button>\
+                     {ICON_RESTART}Restart</button></form></div></div>"
+                ),
+                None,
+            )),
+            ("POST", "/settings/reboot/yes") => {
                 eprintln!("tfctl: settings: restart asked on the screen");
                 crate::sysupdate::reboot_soon();
                 html(page(
@@ -558,7 +574,7 @@ impl Ctx {
              <div class=\"card\"><span class=\"ic frame\">{ic_frame}</span><div class=\"t\"><b>This frame</b>\
              <div class=\"v\">{id}</div><div class=\"sub\">Software {sw} &middot; up {up}</div>\
              <div class=\"sub\">System {sys} &middot; slot {slot}</div></div>\
-             <form method=\"post\" action=\"/settings/reboot\"><button class=\"btn2\">{ic_restart}Restart</button></form>\
+             <a class=\"btn btn2\" href=\"/settings/reboot\">{ic_restart}Restart</a>\
              <a class=\"btn danger\" href=\"/settings/reset\">{ic_reset}Reset</a></div>\
              <p class=\"tip\">{ic_hand}Hold the screen for 5 seconds anywhere, or tap the gear on the dashboard, to come back here.</p>",
             note = self.take_note(),
@@ -959,6 +975,15 @@ mod tests {
         assert!(body.contains("den") && body.contains("Not set"), "{body}");
         assert_eq!(get(port, "/settings", "evil.example").0, 404, "rebinding");
         assert_eq!(get(port, "/settings/server/edit", &me).0, 200);
+        // Restart takes two taps: the home page links to the question, which posts the yes.
+        assert!(body.contains("href=\"/settings/reboot\""), "{body}");
+        assert!(
+            !body.contains("action=\"/settings/reboot\""),
+            "no one-tap form"
+        );
+        let (code, ask) = get(port, "/settings/reboot", &me);
+        assert_eq!(code, 200);
+        assert!(ask.contains("action=\"/settings/reboot/yes\"") && ask.contains("Cancel"));
         // Done asks the kiosk to close.
         use std::io::{Read, Write};
         let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -1020,6 +1045,12 @@ mod tests {
             s.read_to_string(&mut out).unwrap();
             out[9..12].parse::<u16>().unwrap()
         };
+        assert_eq!(
+            post("/settings/reboot", &format!("http://{me}")),
+            303,
+            "asks, no reboot"
+        );
+        assert_eq!(post("/settings/reboot/yes", "http://server.nox:41007"), 404);
         assert_eq!(post("/settings/close", "http://server.nox:41007"), 404);
         assert_eq!(post("/settings/close", "null"), 404);
         assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Empty));

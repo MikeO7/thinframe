@@ -150,7 +150,7 @@ frame's slot, version and last-good in `/admin`.
 Boot-state invariants (boot.cmd.patch, slot.rs, sysupdate.rs):
 - A fresh card has `slot=a tries=0` (image/boot/uEnv.txt), no `zImage.b` and an all-zero p3 **[V]**
   (read from image/out/thinframe-sd.img). With tries=0 U-Boot never writes uEnv.txt and never flips,
-  and the agent's unconfirmed-slot reboot needs tries>0, so a frame waiting at the Wi-Fi page is never
+  and the unconfirmed-slot reboot (watchdog.rs) needs tries>0, so a frame waiting at the Wi-Fi page is never
   rebooted towards the empty slot. `rollback` refuses while the other slot has no kernel.
 - uEnv.txt that names no slot (lost in a power cut: FAT has no journal) falls back to `uEnv.bak`, the
   copy tfctl keeps of the state before its last write; tfctl reads the same fallback
@@ -506,6 +506,14 @@ timer armed only until the respawned tfctl reopens it, and a frame with no tfctl
 dark rather than rebooting every 16 s. Upstream saw the reset work on this board (ormarch E041).
 QEMU exercises the same code with the virt machine's `i6300esb` (`-watchdog-action reset`). [V] in
 QEMU, [U] on the frame until the first hang.
+
+The unconfirmed-slot reboot lives in the same thread (2026-10-28), not in the agent loop: a new
+slot whose tfctl died before the agent ran (config, Kiosk::new, the splash) was respawned by
+init, each instance petted the watchdog, and nothing ever rebooted it back. The watchdog starts
+first in `tfctl kiosk` (before the config is read), checks once synchronously at start and then
+every 30 s: uEnv `tries` > 0 naming the running slot, 10 min of uptime and no server answer in
+10 min means `reboot`, and the petting stops so a hung reboot still ends in a reset. tries=0
+(confirmed) is never rebooted. [U] until a broken slot is tried on the frame.
 
 The README budgets (rootfs 200 MB, 300 MB with the page up, tfctl under 1 MB) were our own
 targets, not hardware limits: each root slot is 1 GB and the board has 1 GB of RAM. They stay as
@@ -897,7 +905,7 @@ Every layer now has a way back that needs no computer where one is possible.
 | tfctl's loop stuck | Hardware watchdog is petted only while the kiosk loop beats (120 s), so the SoC resets |
 | tfctl crashes or bad tfctl update | init respawns; two fast crashes after an update put `tfctl.prev` back |
 | Bad system update | U-Boot tries count down to the other slot; a slot that never reaches the server is rebooted after 10 min |
-| /data corrupt | `e2fsck -p`, then `-y`; still not mounting and either no ext4 superblock or errors left uncorrected: formatted fresh with the shipped config, frame starts like new. Never on a read error, never on another disk |
+| /data corrupt | `e2fsck -p`, then `-y`; still not mounting and no ext4 superblock anywhere (primary or the group-1 backups): formatted fresh with the shipped config, frame starts like new. An ext4 that will not mount is left alone (its files can still be read off the card). Never on a read error, never when e2fsck or the kernel log shows I/O errors for the disk, never on another disk (2026-10-28) |
 | Root slot full | Updates are atomic renames; RESBLKS=0 frees the reserved 5 % in the next image (the 190 MB image gate stays) |
 | Display memory | CMA 64 → 128 MB (`cma=128M`) in the next image: 4 screen buffers of 4 MB plus WebKit's left 6 MB free and `eglSwapBuffers` failed with EGL_BAD_ALLOC during page changes [V 2026-10-26] |
 | Everything above fails | Pull the card (card system) / insert the rescue card (eMMC system, see below); USB-C link 192.168.7.2 with SSH |
@@ -941,7 +949,7 @@ from `mmc ${mmc_bootdev}:1` (`board/sunxi/board.c`: 0 = card, 1 = eMMC; its DT a
 to the eMMC). The script stops if the config differs from build L in anything else (the
 fastboot default device follows the slot; fastboot never runs). One `boot.scr` serves both:
 every `mmc 0:1` reads `${pf_dev}`, which is `mmc_bootdev` or 0. The kernel DTBs `full` and
-`pmic` have the eMMC on; `min` stays card-only.
+`pmic` have the eMMC on; `min` stays card-only, so on the eMMC the install renames the last-resort `min` label to `pmic` and boots pmic.dtb (min.dtb there would wait at rootwait forever) [U: the label has not been booted from the eMMC].
 
 **Install** (`tfctl emmc install --backup-sha256 HEX`): only from the card, the eMMC opened
 `O_EXCL`, the running slot confirmed, HEX equal to the recorded backup. Order: clear the vendor
@@ -949,9 +957,13 @@ eGON at 8 KiB; PARTITION_CONFIG to 0 (read back) and boot0's header cleared, so 
 reads the user area as on any A33 with a fresh eMMC; the MBR; p1 to p3 copied from the card and
 read back by hash with the page cache dropped; on p1 the extlinux roots move to `50463045`,
 `boot.scr` and the DTBs come from the image, uEnv names the running slot with tries 0;
-`mkfs.ext4` p4 and a copy of /data; U-Boot last, read back. Until that last write the eMMC has
+`mkfs.ext4` p4 and a copy of /data; `e2fsck -f -n` on p2 to p4 (fsck.vfat is not in the image,
+p1 is checked by hash), any error stops here; U-Boot last, read back. Until that last write the eMMC has
 no boot code, so a cut or an error midway leaves a frame that starts from the card (or FEL),
-never a half system.
+never a half system. For its whole run the install holds `/run/thinframe/emmc-install` (its
+pid; a dead pid is stale): the agent then refuses update-software, update-system, rollback and
+reboot with an error ack, defers automatic updates, and `reboot_soon` (GPU hang, Settings)
+waits for the install to end. [U] until the next install on the frame.
 
 | Fails | Way back |
 |---|---|
@@ -959,7 +971,7 @@ never a half system.
 | eMMC system broken later | Rescue card, then `tfctl emmc install` again (no backup needed over thinframe) |
 | Rescue card lost | Flash a new one on the Mac with `scripts/flash.sh` |
 | No card works | FEL over USB-C from the Mac (`sunxi-fel`, ormarch docs) |
-| Back to Android | From the card: the image to `/dev/mmcblk2`, `boot0.bin` to `mmcblk2boot0`, PARTITION_CONFIG 0x48 [U: not tested, it needs a second frame] |
+| Back to Android | From the card: the image to `/dev/mmcblk2`, `boot0.bin` to `mmcblk2boot0`, PARTITION_CONFIG 0x48 [U: not tested, it needs a second frame]. The install itself saves boot0's first 64 KiB and the old PARTITION_CONFIG / BOOT_BUS_CONDITIONS to `/data/thinframe/emmc-boot0-orig.bin` and `emmc-ext-csd-orig.txt` before it changes them (once, never overwritten; no save, no install) |
 
 ## Speed (2026-10-27)
 
@@ -976,9 +988,13 @@ paints its first frame in about 1.3 s; a warm one in about 0.17 s. So:
   with a `<base>` to the server, written after each connect and page version change), else on
   the status page. The live page then replaces it with `cogctl open`, in place. With no Wi-Fi
   for 10 s or no server after 3 tries the cached page gives way to the status page.
-- **In place, not restarts.** Page version changes `cogctl reload`; wake sends SIGCONT and the
+- **In place, not restarts.** Page version changes `cogctl reload`; screen off stops cog and then its
+  group (WPEWebProcess, WPENetworkProcess; until 2026-10-28 only cog stopped, so the page most
+  likely ran on [U]), wake continues the helpers, then cog, and the
   page's resume detector (a gap over 10 s in a 1 s timer) repaints the clock and reconnects.
-  Restarts asked for while the screen is off are dropped.
+  Restarts asked for while the screen is off are dropped, except gpuwatch's: a GPU-hang restart
+  is held while the screen is off or Settings is open and done on wake or close, and only a
+  restart that ran counts toward the reboot (2026-10-28).
 - **Wi-Fi early.** `tfctl boot fsck` (the first sysinit line) starts `modprobe aic8800_fdrv`
   in the background, so the firmware loads while udev settles. No rejoin kick while associated
   (DHCP is running) for 30 s.

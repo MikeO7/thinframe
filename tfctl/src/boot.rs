@@ -145,14 +145,56 @@ fn has_ext4_magic(head: &[u8]) -> bool {
     head.get(1080..1082) == Some(&[0x53, 0xef][..])
 }
 
-/// Format only a data partition that is provably beyond repair: readable (a card throwing read
-/// errors keeps what it has), and either no ext4 superblock at all or one `e2fsck -y` still
-/// reports uncorrected (exit bit 4) while the mount keeps failing.
-fn should_format(readable: bool, ext4: bool, fsck_code: Option<i32>) -> bool {
-    readable && (!ext4 || fsck_code.is_some_and(|c| c >= 0 && c & 4 != 0))
+/// Where ext4 keeps the first backup superblock (block group 1), by block size 1, 2 and 4 KiB.
+/// A primary superblock lost to a torn write leaves these, and e2fsck repairs from them.
+const BACKUP_SUPERBLOCKS: [u64; 3] = [8193 * 1024, 16384 * 2048, 32768 * 4096];
+
+/// An ext4 magic at any backup superblock of `f`. Past the end is "no"; a read error is Err.
+fn backup_ext4_magic(f: &fs::File) -> io::Result<bool> {
+    for off in BACKUP_SUPERBLOCKS {
+        let mut m = [0u8; 2];
+        match f.read_exact_at(&mut m, off + 56) {
+            Ok(()) if m == [0x53, 0xef] => return Ok(true),
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(false)
 }
 
-/// Last resort when /data still does not mount after `tfctl boot fsck`: format it fresh, seed
+/// e2fsck said it could not read the device.
+pub fn e2fsck_io_errors(out: &str) -> bool {
+    ["Input/output error", "short read", "Error reading block"]
+        .iter()
+        .any(|p| out.contains(p))
+}
+
+/// The kernel log reports an I/O error on `disk` (`mmcblk0`) or one of its partitions.
+pub fn kernel_io_errors(log: &str, disk: &str) -> bool {
+    log.lines().any(|l| {
+        let io = l.contains("I/O error")
+            || l.contains("transferring data")
+            || l.contains("recovery failed");
+        io && l.match_indices(disk).any(|(i, _)| {
+            !l[i + disk.len()..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+        })
+    })
+}
+
+/// Format only a data partition that is plainly blank: every superblock place read without an
+/// error, no I/O error from e2fsck or in the kernel log for that disk, and no ext4 superblock
+/// anywhere, primary or backup. A file system that is there but will not mount is left alone
+/// (its files may still be read off the card); a card throwing read errors keeps what it has.
+fn should_format(readable: bool, io_errors: bool, ext4_anywhere: bool) -> bool {
+    readable && !io_errors && !ext4_anywhere
+}
+
+/// Last resort when /data still does not mount after `tfctl boot fsck` and p4 holds no file
+/// system at all (`should_format`; an ext4 gets one more `e2fsck -y`): format it fresh, seed
 /// the shipped config and redo the bind mounts. Without it the frame had no config, no Wi-Fi
 /// profiles, nowhere to save new ones and no way back on the screen. After it, the frame starts
 /// like a new one: Wi-Fi setup on screen, the server found on the network, a pairing code;
@@ -181,25 +223,40 @@ fn ensure_data() -> io::Result<()> {
         )));
     }
     let mut head = [0u8; 2048];
-    let readable = fs::File::open(&p4)
-        .and_then(|f| f.read_exact_at(&mut head, 0))
-        .is_ok();
-    let ext4 = has_ext4_magic(&head);
-    let mut code = None;
+    let read = fs::File::open(&p4).and_then(|f| {
+        f.read_exact_at(&mut head, 0)?;
+        backup_ext4_magic(&f)
+    });
+    let (readable, backup) = match read {
+        Ok(b) => (true, b),
+        Err(_) => (false, false),
+    };
+    let ext4 = has_ext4_magic(&head) || backup;
+    let (mut code, mut io_errors) = (None, false);
     if readable && ext4 {
-        let c = e2fsck("-y", &dev)?;
+        let (c, out) = e2fsck("-y", &dev)?;
+        io_errors = e2fsck_io_errors(&out);
         note(&format!("data: mount failed; e2fsck -y {dev}: exit {c}"));
         if sh("mount", &["/data"]).is_ok() {
             return sh("mount", &["-a"]);
         }
         code = Some(c);
     }
-    if !should_format(readable, ext4, code) {
+    let dmesg = Command::new("dmesg")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let disk_name = disk.file_name().unwrap_or_default().to_string_lossy();
+    io_errors |= kernel_io_errors(&dmesg, &disk_name);
+    if !should_format(readable, io_errors, ext4) {
         return Err(io::Error::other(format!(
-            "{dev} does not mount (readable {readable}, ext4 {ext4}, e2fsck {code:?}); not formatting"
+            "{dev} does not mount (readable {readable}, I/O errors {io_errors}, ext4 {ext4}, \
+             e2fsck {code:?}); not formatting"
         )));
     }
-    note(&format!("/data is beyond repair; formatting {dev} fresh"));
+    note(&format!(
+        "/data holds no file system; formatting {dev} fresh"
+    ));
     sh("mkfs.ext4", &["-F", "-q", "-L", "data", &dev])?;
     sh("mount", &["/data"])?;
     for d in DATA_DIRS {
@@ -236,19 +293,22 @@ pub fn fsck_data() -> io::Result<()> {
         note(&format!("fsck: {p4} is mounted, skipped"));
         return Ok(());
     }
-    let code = e2fsck("-p", &p4)?;
+    let (code, _) = e2fsck("-p", &p4)?;
     note(&format!("fsck: e2fsck -p {p4}: exit {code}"));
     if needs_forced_pass(code) {
-        let code = e2fsck("-y", &p4)?;
+        let (code, _) = e2fsck("-y", &p4)?;
         note(&format!("fsck: e2fsck -y {p4}: exit {code}"));
     }
     Ok(())
 }
 
-/// e2fsck's exit status (-1 when killed by a signal). Output goes to the console.
-fn e2fsck(mode: &str, dev: &str) -> io::Result<i32> {
-    let st = Command::new("e2fsck").args([mode, dev]).status()?;
-    Ok(st.code().unwrap_or(-1))
+/// e2fsck's exit status (-1 when killed by a signal) and what it printed, which also goes to
+/// the console as before.
+fn e2fsck(mode: &str, dev: &str) -> io::Result<(i32, String)> {
+    let o = Command::new("e2fsck").args([mode, dev]).output()?;
+    let out = String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
+    eprint!("{out}");
+    Ok((o.status.code().unwrap_or(-1), out))
 }
 
 /// After `e2fsck -p`: bit 4 means errors left uncorrected (preen refused), so answer yes to all.
@@ -257,11 +317,27 @@ pub fn needs_forced_pass(code: i32) -> bool {
     code >= 0 && code & 4 != 0
 }
 
-/// Whether `dev` is the source of any line in /proc/mounts.
+/// Whether `dev` is the source of any line in /proc/mounts. By name, and by device number: fstab
+/// mounts /data as `/dev/thinframe-data`, a link to p4, so /proc/mounts never says
+/// `/dev/mmcblk0p4` for it.
 pub fn is_mounted(mounts: &str, dev: &str) -> bool {
+    is_mounted_by(mounts, dev, block_rdev)
+}
+
+/// The device number of the block device at `path` (links followed); None for anything else.
+fn block_rdev(path: &str) -> Option<u64> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let m = fs::metadata(path).ok()?;
+    m.file_type().is_block_device().then(|| m.rdev())
+}
+
+/// `is_mounted` with the device-number lookup given.
+pub fn is_mounted_by(mounts: &str, dev: &str, rdev: impl Fn(&str) -> Option<u64>) -> bool {
+    let want = rdev(dev);
     mounts
         .lines()
-        .any(|l| l.split_whitespace().next() == Some(dev))
+        .filter_map(|l| l.split_whitespace().next())
+        .any(|src| src == dev || (want.is_some() && rdev(src) == want))
 }
 
 fn provision_rw() -> io::Result<()> {
@@ -442,27 +518,69 @@ mod tests {
     }
 
     #[test]
-    fn formats_only_a_readable_partition_beyond_repair() {
-        assert!(should_format(true, false, None), "no file system at all");
-        assert!(should_format(true, true, Some(4)), "e2fsck left errors");
-        assert!(should_format(true, true, Some(12)));
+    fn formats_only_a_blank_partition_that_reads_cleanly() {
+        assert!(should_format(true, false, false), "no file system at all");
         assert!(
-            !should_format(false, false, None),
+            !should_format(false, false, false),
             "read errors: keep what is there"
         );
         assert!(
-            !should_format(true, true, Some(1)),
-            "fixed, mount failed for another reason"
+            !should_format(true, true, false),
+            "kernel or e2fsck saw I/O errors"
         );
-        assert!(!should_format(true, true, Some(8)), "e2fsck could not run");
-        assert!(!should_format(true, true, Some(-1)), "e2fsck killed");
-        assert!(!should_format(true, true, None));
+        assert!(
+            !should_format(true, false, true),
+            "an ext4 that e2fsck could not fix is left alone"
+        );
+        let e2 = "Error reading block 1234 (Input/output error) while getting next inode.\n";
+        assert!(e2fsck_io_errors(e2));
+        assert!(e2fsck_io_errors(
+            "e2fsck: Attempt to read block from filesystem resulted in short read"
+        ));
+        assert!(!e2fsck_io_errors(
+            "data: 11/4096 files, 1234/16384 blocks\n"
+        ));
+        let k = "[  3.1] I/O error, dev mmcblk0, sector 4202498 op 0x0:(READ) flags 0x0\n\
+                 [  3.2] Buffer I/O error on dev mmcblk0p4, logical block 0, async page read\n";
+        assert!(kernel_io_errors(k, "mmcblk0"));
+        assert!(kernel_io_errors(
+            "mmcblk0: error -110 transferring data, sector 8, nr 8",
+            "mmcblk0"
+        ));
+        assert!(!kernel_io_errors(k, "mmcblk2"), "another disk");
+        assert!(!kernel_io_errors(
+            "I/O error, dev mmcblk01, sector 1",
+            "mmcblk0"
+        ));
+        assert!(!kernel_io_errors("mmcblk0: p1 p2 p3 p4\n", "mmcblk0"));
         let mut sb = [0u8; 2048];
         assert!(!has_ext4_magic(&sb));
         sb[1080] = 0x53;
         sb[1081] = 0xef;
         assert!(has_ext4_magic(&sb));
         assert!(!has_ext4_magic(&sb[..1000]));
+    }
+
+    #[test]
+    fn finds_a_backup_superblock_when_the_primary_is_gone() {
+        let p = std::env::temp_dir().join(format!("tfctl-sb-{}", std::process::id()));
+        let f = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .write(true)
+            .open(&p)
+            .unwrap();
+        f.set_len(1 << 20).unwrap();
+        assert!(
+            !backup_ext4_magic(&f).unwrap(),
+            "small and blank: past the ends is no"
+        );
+        f.set_len(200 << 20).unwrap();
+        assert!(!backup_ext4_magic(&f).unwrap());
+        f.write_all_at(&[0x53, 0xef], 32768 * 4096 + 56).unwrap();
+        assert!(backup_ext4_magic(&f).unwrap(), "4 KiB blocks, group 1");
+        fs::remove_file(&p).unwrap();
     }
 
     #[test]
@@ -545,6 +663,24 @@ mod tests {
         assert!(!is_mounted(m, "/dev/vda1"));
         assert!(!is_mounted(m, "/data"));
         assert!(!is_mounted("", "/dev/mmcblk0p4"));
+    }
+
+    #[test]
+    fn mounted_through_the_fstab_link_is_mounted() {
+        // What the frame shows: /data comes from the link, the check asks for p4 by name.
+        let m = "/dev/root / ext4 ro 0 0\n/dev/thinframe-data /data ext4 rw,noatime 0 0\n";
+        let rdev = |p: &str| match p {
+            "/dev/mmcblk0p4" | "/dev/thinframe-data" => Some(0xb304),
+            "/dev/mmcblk0p1" | "/dev/thinframe-boot" => Some(0xb301),
+            "/dev/mmcblk2p4" => Some(0xb324),
+            _ => None,
+        };
+        assert!(is_mounted_by(m, "/dev/mmcblk0p4", rdev));
+        assert!(!is_mounted_by(m, "/dev/mmcblk0p1", rdev));
+        assert!(!is_mounted_by(m, "/dev/mmcblk2p4", rdev), "another disk");
+        // Nothing to stat (a missing node): by name only, never "both unknown".
+        assert!(!is_mounted_by(m, "/dev/gone", |_| None));
+        assert!(is_mounted_by(m, "/dev/thinframe-data", |_| None));
     }
 
     #[test]

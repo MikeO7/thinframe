@@ -6,12 +6,33 @@
 //! once per COOLDOWN. A single timeout is left alone: lima usually recovers from one.
 //! That night the hang outlasted two cog restarts, so the guard escalates: a hang again within
 //! ESCALATE of its own restart reboots the frame (a GPU reset at power-on always works).
+//! The kiosk holds a GPU restart while the screen is off or Settings is open and does it on wake
+//! or close (`KioskCmd::GpuRestart`); only a restart it really did (`restarted`) counts toward
+//! the reboot, so a held one never turns into a reboot two minutes later.
 use crate::kiosk::KioskCmd;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
+
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+/// Milliseconds after EPOCH (plus one, 0 = never) of the kiosk's last GPU restart.
+static RESTARTED_MS: AtomicU64 = AtomicU64::new(0);
+
+/// The kiosk restarted cog for a GPU hang just now.
+pub fn restarted() {
+    let e = EPOCH.get_or_init(Instant::now);
+    RESTARTED_MS.store(e.elapsed().as_millis() as u64 + 1, Ordering::SeqCst);
+}
+
+fn last_restart() -> Option<Instant> {
+    let ms = RESTARTED_MS.load(Ordering::SeqCst);
+    let e = EPOCH.get()?;
+    (ms > 0).then(|| *e + Duration::from_millis(ms - 1))
+}
 
 const KMSG: &str = "/dev/kmsg";
 const HANG_WINDOW: Duration = Duration::from_secs(30);
@@ -31,15 +52,16 @@ fn is_timeout(rec: &str) -> bool {
 }
 
 /// Decides when to restart: the second timeout within HANG_WINDOW, not within COOLDOWN of the
-/// last restart.
+/// last restart asked for. It reboots only when the kiosk really restarted (`restarted`, given
+/// as `done`) and the hang is back within ESCALATE of that.
 #[derive(Default)]
 struct Hang {
     last_timeout: Option<Instant>,
-    last_restart: Option<Instant>,
+    last_ask: Option<Instant>,
 }
 
 impl Hang {
-    fn timeout(&mut self, now: Instant) -> Act {
+    fn timeout(&mut self, now: Instant, done: Option<Instant>) -> Act {
         let repeat = self
             .last_timeout
             .is_some_and(|t| now.duration_since(t) <= HANG_WINDOW);
@@ -47,15 +69,21 @@ impl Hang {
         if !repeat {
             return Act::Nothing;
         }
-        match self.last_restart {
-            Some(t) if now.duration_since(t) < COOLDOWN => Act::Nothing,
-            Some(t) if now.duration_since(t) < ESCALATE => Act::Reboot,
-            _ => {
-                self.last_restart = Some(now);
-                self.last_timeout = None;
-                Act::Restart
-            }
+        match done.map(|t| now.saturating_duration_since(t)) {
+            Some(d) if d < COOLDOWN => return Act::Nothing,
+            Some(d) if d < ESCALATE => return Act::Reboot,
+            _ => {}
         }
+        // Asked, and the kiosk is holding it (screen off, Settings open): ask again later.
+        if self
+            .last_ask
+            .is_some_and(|t| now.duration_since(t) < COOLDOWN)
+        {
+            return Act::Nothing;
+        }
+        self.last_ask = Some(now);
+        self.last_timeout = None;
+        Act::Restart
     }
 }
 
@@ -85,13 +113,13 @@ pub fn start(tx: Sender<KioskCmd>) {
                         if !is_timeout(&rec) {
                             continue;
                         }
-                        match hang.timeout(Instant::now()) {
+                        match hang.timeout(Instant::now(), last_restart()) {
                             Act::Nothing => {}
                             Act::Restart => {
                                 eprintln!(
                                     "tfctl: gpuwatch: GPU jobs time out, restarting the kiosk"
                                 );
-                                if tx.send(KioskCmd::Restart).is_err() {
+                                if tx.send(KioskCmd::GpuRestart).is_err() {
                                     return;
                                 }
                             }
@@ -129,29 +157,64 @@ mod tests {
         let t0 = Instant::now();
         let s = |n: u64| t0 + Duration::from_secs(n);
         let mut h = Hang::default();
-        assert_eq!(h.timeout(s(0)), Act::Nothing, "one timeout is left alone");
-        assert_eq!(h.timeout(s(60)), Act::Nothing, "too far apart");
-        assert_eq!(h.timeout(s(70)), Act::Restart, "second within the window");
-        assert_eq!(h.timeout(s(80)), Act::Nothing);
         assert_eq!(
-            h.timeout(s(90)),
+            h.timeout(s(0), None),
+            Act::Nothing,
+            "one timeout is left alone"
+        );
+        assert_eq!(h.timeout(s(60), None), Act::Nothing, "too far apart");
+        assert_eq!(
+            h.timeout(s(70), None),
+            Act::Restart,
+            "second within the window"
+        );
+        // The kiosk restarted at once.
+        let done = Some(s(70));
+        assert_eq!(h.timeout(s(80), done), Act::Nothing);
+        assert_eq!(
+            h.timeout(s(90), done),
             Act::Nothing,
             "the restart gets its chance"
         );
-        assert_eq!(h.timeout(s(200)), Act::Nothing);
+        assert_eq!(h.timeout(s(200), done), Act::Nothing);
         assert_eq!(
-            h.timeout(s(210)),
+            h.timeout(s(210), done),
             Act::Reboot,
             "still hung after the restart"
         );
         let mut h = Hang::default();
-        h.timeout(s(0));
-        assert_eq!(h.timeout(s(10)), Act::Restart);
-        h.timeout(s(1000));
+        h.timeout(s(0), None);
+        assert_eq!(h.timeout(s(10), None), Act::Restart);
+        h.timeout(s(1000), Some(s(10)));
         assert_eq!(
-            h.timeout(s(1010)),
+            h.timeout(s(1010), Some(s(10))),
             Act::Restart,
             "a new hang much later restarts again"
         );
+    }
+
+    #[test]
+    fn a_held_restart_is_asked_again_and_never_escalates() {
+        let t0 = Instant::now();
+        let s = |n: u64| t0 + Duration::from_secs(n);
+        let mut h = Hang::default();
+        h.timeout(s(0), None);
+        assert_eq!(h.timeout(s(10), None), Act::Restart);
+        // Screen off: the kiosk holds it. Timeouts go on, no reboot, no flood of asks.
+        h.timeout(s(130), None);
+        assert_eq!(
+            h.timeout(s(135), None),
+            Act::Restart,
+            "asked again after the cooldown"
+        );
+        h.timeout(s(140), None);
+        assert_eq!(h.timeout(s(145), None), Act::Nothing);
+        // On wake the kiosk restarts (s(300)); a hang that outlives it reboots.
+        h.timeout(s(310), Some(s(300)));
+        assert_eq!(h.timeout(s(320), Some(s(300))), Act::Nothing, "its chance");
+        h.timeout(s(430), Some(s(300)));
+        assert_eq!(h.timeout(s(440), Some(s(300))), Act::Reboot);
+        restarted();
+        assert!(last_restart().is_some_and(|t| t.elapsed() < Duration::from_secs(5)));
     }
 }
