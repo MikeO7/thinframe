@@ -4,6 +4,12 @@
  * switched back on, for a frame that runs from the eMMC (tfctl emmc install). Everything else
  * is build L: no Wi-Fi, no UART pins, no display. U-Boot numbers the MMC devices in bind order:
  * mmc 0 = card, mmc 1 = eMMC; mmc_bootdev (board/sunxi/board.c) says which one booted.
+ *
+ * The eMMC runs at 4-bit, 26 MHz here, not the 8-bit, 52 MHz of the board DTS. At 8-bit, 52 MHz
+ * U-Boot read boot.scr and wrote pf/uboot.env, then failed loading the 6 MB kernel and could
+ * not write the failure mark either (2026-10-29, docs/log.md). Large U-Boot reads at that speed
+ * fail on some of these frames (ormarch docs/experiments.md E019, Wes's issues #18/#24/#27).
+ * Linux sets its own bus speed, so only U-Boot's 6 MB load gets slower (about 0.5 s).
  */
 
 #include "sun8i-a33-pf1007l-linux.dts"
@@ -14,4 +20,6 @@
 
 &mmc2 {
 	status = "okay";
+	bus-width = <4>;
+	max-frequency = <26000000>;
 };
