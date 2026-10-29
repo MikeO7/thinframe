@@ -35,12 +35,18 @@ func New() *Hub { return &Hub{conns: map[string]*conn{}} }
 func (h *Hub) Add(ctx context.Context, id string, ws *websocket.Conn) (done func()) {
 	c := &conn{ws: ws, send: make(chan []byte, 32)}
 	h.mu.Lock()
-	if old, ok := h.conns[id]; ok {
+	old, replaced := h.conns[id]
+	if replaced {
 		close(old.send)
-		_ = old.ws.Close(websocket.StatusPolicyViolation, "replaced by a newer connection")
 	}
 	h.conns[id] = c
 	h.mu.Unlock()
+	if replaced {
+		// Close waits up to 5 s for the peer's close frame, and a frame that reconnected
+		// usually left a dead socket behind: never under h.mu (it would stall Send, Online
+		// and Kick for every frame), and not on this new connection's setup path either.
+		go func() { _ = old.ws.Close(websocket.StatusPolicyViolation, "replaced by a newer connection") }()
+	}
 	go func() {
 		for b := range c.send {
 			wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
