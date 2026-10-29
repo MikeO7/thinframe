@@ -23,6 +23,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HEARTBEAT: Duration = Duration::from_secs(60);
 const PING: Duration = Duration::from_secs(30);
 const DEAD: Duration = Duration::from_secs(90);
+/// The Wi-Fi link down this long ends a server session at once. Without it the agent noticed a
+/// lost access point only when the socket went quiet for DEAD, and rejoined 91 s after the drop
+/// [V 2026-10-28]; now the rejoin follows the link (`kick_wifi`, KICK_AFTER).
+const LINK_LOST: Duration = Duration::from_secs(3);
 const FALLBACK_AFTER: u32 = 3;
 const STABLE_SESSION: Duration = Duration::from_secs(30);
 /// A slot U-Boot still counts tries for that has not reached the server this long after the
@@ -446,6 +450,9 @@ impl Agent {
     pub(crate) fn leave_cached(&mut self, why: &str) {
         if self.on_cached && !self.cfg.fallback_url.is_empty() {
             self.on_cached = false;
+            // On the status page now: the next answer from the server must bring the dashboard
+            // back, or after a re-pair (on_fallback already false) it stayed until a reboot.
+            self.on_fallback = true;
             eprintln!("tfctl: agent: {why}, showing the status page");
             self.write_status_page();
             let _ = self.send(KioskCmd::SetUrl(self.cfg.fallback_url.clone()));
@@ -590,6 +597,7 @@ impl Agent {
         c.send_text(&self.hello().to_string())?;
         let (mut last_hb, mut last_ping, mut last_rx) =
             (Instant::now(), Instant::now(), Instant::now());
+        let mut link_down_since: Option<Instant> = None;
         loop {
             if sys::term_requested() {
                 c.close();
@@ -639,6 +647,10 @@ impl Agent {
                 c.ping()?;
                 last_ping = Instant::now();
             }
+            if self.link_lost(&mut link_down_since) {
+                c.close();
+                return Err(io::Error::other("Wi-Fi link down, leaving the session"));
+            }
             if last_rx.elapsed() >= DEAD {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -646,6 +658,25 @@ impl Agent {
                 ));
             }
         }
+    }
+
+    /// The Wi-Fi link has been down for LINK_LOST while the server is on a network address
+    /// (over the USB-C link Wi-Fi does not matter). The down time counts toward the rejoin.
+    fn link_lost(&mut self, since: &mut Option<Instant>) -> bool {
+        if !self.radio.link_down()
+            || Url::parse(&self.cfg.server_url)
+                .and_then(|u| u.host.parse().ok())
+                .is_some_and(crate::discover::is_usb)
+        {
+            *since = None;
+            return false;
+        }
+        let t = *since.get_or_insert_with(Instant::now);
+        if !link_lost_for(t.elapsed()) {
+            return false;
+        }
+        self.wifi_down_since.get_or_insert(t);
+        true
     }
 
     fn on_message(&mut self, c: &mut ws::Client, text: &str) -> io::Result<()> {
@@ -707,6 +738,11 @@ impl Agent {
 }
 
 /// Whole seconds since boot from the text of /proc/uptime ("123.45 678.90").
+/// Whether a Wi-Fi link down for `down_for` ends the server session.
+fn link_lost_for(down_for: Duration) -> bool {
+    down_for >= LINK_LOST
+}
+
 pub fn uptime_s(text: &str) -> Option<u64> {
     let first = text.split_whitespace().next()?;
     first.split('.').next()?.parse().ok()
@@ -732,6 +768,13 @@ fn set_clock(t: i64) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_lost_wifi_link_ends_the_session_within_seconds() {
+        assert!(!link_lost_for(Duration::from_secs(2)), "a blip");
+        assert!(link_lost_for(LINK_LOST));
+        assert!(LINK_LOST < DEAD / 10, "far sooner than a quiet socket");
+    }
+
     use super::*;
 
     const T: u64 = UNCONFIRMED_REBOOT_S;

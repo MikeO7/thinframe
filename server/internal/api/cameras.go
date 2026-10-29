@@ -183,5 +183,7 @@ func (s *Server) camerasData(w store.Widget) map[string]any {
 	if cams == nil {
 		cams = []protect.Camera{}
 	}
-	return map[string]any{"cameras": cams}
+	// The page merges each message into what it has: name error and setup as cleared, or a
+	// past "cameras unavailable" outlived Protect's recovery (QA 2026-10-28).
+	return map[string]any{"cameras": cams, "error": nil, "setup": nil}
 }
