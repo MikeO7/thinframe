@@ -71,6 +71,13 @@ step_inputs() {
 		printf '\n/* thinframe: eMMC on (TASKS E) */\n&mmc2 {\n\tstatus = "okay";\n};\n' \
 			>> "$in/dts/allwinner/sun8i-a33-pf1007l-$d.dts"
 	done
+	# The A33's Security ID (per-chip root key, 0x01c23800 in sunxi-tools' soc_info, read
+	# directly as on the A10), which mainline's A23/A33 tree lacks: tfctl derives the Wi-Fi
+	# address from it (netid.rs). Every DTB, so the address is the same whichever one booted.
+	for d in full pmic min; do
+		printf '\n/* thinframe: Security ID for a stable Wi-Fi address (tfctl netid) */\n&{/soc} {\n\tefuse@1c23800 {\n\t\tcompatible = "allwinner,sun4i-a10-sid";\n\t\treg = <0x01c23800 0x10>;\n\t};\n};\n' \
+			>> "$in/dts/allwinner/sun8i-a33-pf1007l-$d.dts"
+	done
 	bash "$HERE/uboot-emmc.sh"
 	(cd "$in" && find . -type f | LC_ALL=C sort | xargs shasum -a 256) > "$OUT/inputs.sha256"
 	cat "$OUT/inputs.sha256"
@@ -118,7 +125,7 @@ step_check() {
 	local br="$HERE/buildroot" f
 	for f in external.desc external.mk Config.in configs/pf1007l_defconfig \
 		board/pf1007l/{genimage.cfg,post-build.sh,post-image.sh,boot.cmd.patch,linux.fragment,busybox.fragment,debug.fragment,qemu.fragment,linux-qemu.fragment,users.txt} \
-		package/tfctl/{Config.in,tfctl.mk} package/aic8800/{Config.in,aic8800.mk}; do
+		package/tfctl/{Config.in,tfctl.mk} package/aic8800/{Config.in,aic8800.mk,mac-param.diff}; do
 		[ -f "$br/$f" ] || stop "missing buildroot/$f"
 	done
 	grep -q "disk-signature = 0x$SIG" "$br/board/pf1007l/genimage.cfg" || stop "genimage signature != $SIG"

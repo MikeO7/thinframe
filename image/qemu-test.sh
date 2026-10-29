@@ -36,6 +36,12 @@ curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application
 check "splash text and logo pushed by the server land on /data" \
 	wait_for 60 r 'grep -q "SPLASH_TEXT=\"QEMU frame\"" /etc/thinframe.conf && test -s /data/thinframe/splash.png'
 check "tfctl status reads its IP from /proc" r 'tfctl status | grep -q "^ip *: 10.0.2.15"'
+# The H3 that QEMU emulates has a Security ID (the A33 gets its node from build.sh): the Wi-Fi
+# address the driver would be given, same derivation as on the frame.
+check "Wi-Fi address derived from the Security ID" \
+	r 'tfctl netid | grep -qE "^address : ([0-9a-f]{2}:){5}[0-9a-f]{2} \(from sunxi-sid\)$"'
+check "dhcpcd keeps its leases on /data" r 'test "$(readlink /var/db)" = /data && test -d /data/dhcpcd'
+r 'tfctl netid' | tee -a "$RES" || true
 check "no syslogd/klogd/crond running" r '! ps -o comm | grep -qxE "syslogd|klogd|crond"'
 r 'ps -o pid,user,vsz,comm | grep -v "\[" ; free -m; df -h / /data /boot' > "$W/guest-state.txt" 2>&1 || true
 echo "rootfs.ext4: $(wc -c < "$HERE/out/rootfs.ext4") bytes" | tee -a "$RES"
