@@ -269,6 +269,11 @@ pub trait Radio: Send + Sync {
     fn associated(&self) -> bool {
         false
     }
+    /// The station's link is down: it left or lost its access point. Only a real station says
+    /// so; the default never does, so a radio that cannot tell never ends a server session.
+    fn link_down(&self) -> bool {
+        false
+    }
     /// Ask for a fresh scan, wait for it, return what is in range.
     fn scan(&self) -> Vec<Net>;
     /// Join `ssid` (passphrase for psk, None for open); the error is what to show.
@@ -363,6 +368,11 @@ impl Radio for Iwctl {
     fn associated(&self) -> bool {
         fs::read_to_string(Path::new("/sys/class/net").join(STATION).join("operstate"))
             .is_ok_and(|s| s.trim() == "up")
+    }
+
+    fn link_down(&self) -> bool {
+        fs::read_to_string(Path::new("/sys/class/net").join(STATION).join("operstate"))
+            .is_ok_and(|s| s.trim() != "up")
     }
 
     fn scan(&self) -> Vec<Net> {
