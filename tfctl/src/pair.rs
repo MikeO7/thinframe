@@ -198,6 +198,7 @@ impl Agent {
         self.event("pair", "paired with the button on the frame");
         eprintln!("tfctl: agent: paired, opening the dashboard");
         self.on_fallback = false;
+        self.on_cached = false;
         let _ = self.send(KioskCmd::SetUrl(self.cfg.url.clone()));
     }
 

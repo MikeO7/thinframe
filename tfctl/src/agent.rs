@@ -450,6 +450,9 @@ impl Agent {
     pub(crate) fn leave_cached(&mut self, why: &str) {
         if self.on_cached && !self.cfg.fallback_url.is_empty() {
             self.on_cached = false;
+            // On the status page now: the next answer from the server must bring the dashboard
+            // back, or after a re-pair (on_fallback already false) it stayed until a reboot.
+            self.on_fallback = true;
             eprintln!("tfctl: agent: {why}, showing the status page");
             self.write_status_page();
             let _ = self.send(KioskCmd::SetUrl(self.cfg.fallback_url.clone()));
