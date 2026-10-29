@@ -63,7 +63,12 @@ BR2_PACKAGE_READLINE=y
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
 BR2_TARGET_ROOTFS_EXT2_LABEL="rootfs"
+# 190M: the gate is rootfs.ext4 under 200 MB (TASKS 2), the slots are 1 GiB. Headroom comes
+# from the inode tables: mke2fs's default for a small fs gave 48576 inodes (12 MB of tables) for
+# 2381 files; 8192 is 3x the files for 2 MB. No reserved blocks (read-only root, no root user
+# filling it). post-image.sh stops the build below 16 MiB free.
 BR2_TARGET_ROOTFS_EXT2_SIZE="190M"
+BR2_TARGET_ROOTFS_EXT2_INODES=8192
 BR2_TARGET_ROOTFS_EXT2_RESBLKS=0
 # BR2_TARGET_ROOTFS_TAR is not set
 BR2_PACKAGE_HOST_DOSFSTOOLS=y

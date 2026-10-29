@@ -16,6 +16,13 @@ S="$B/stage"
 CMDLINE="console=ttyGS0,115200 console=tty1 quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0"
 CMDLINE="$CMDLINE fbcon=map:9 panic=10 cma=128M psi=1 g_cdc.dev_addr=02:50:46:10:07:01 g_cdc.host_addr=02:50:46:10:07:02"
 
+# Room left in the root fs: debug edits, a bigger WebKit or one more package must fit without a
+# new partition layout (the frame ran 99 % full, 1.3 MB free, on 2026-10-28).
+free=$("$HOST_DIR/sbin/dumpe2fs" -h "$B/rootfs.ext4" 2>/dev/null |
+	awk -F: '/^Free blocks:/ {f=$2} /^Block size:/ {b=$2} END {printf "%d", f*b/1048576}')
+echo "post-image: rootfs.ext4 has $free MiB free (gate: 16 MiB)"
+[ "$free" -ge 16 ] || { echo "post-image: root fs under 16 MiB free" >&2; exit 1; }
+
 rm -rf "$S" && mkdir -p "$S"
 cp "$B/zImage" "$S/zImage.a"
 cp "$B"/sun8i-a33-pf1007l-{full,min,pmic}.dtb "$IN/u-boot-pf1007l-L.bin" "$B/rootfs.ext4" "$S/"
