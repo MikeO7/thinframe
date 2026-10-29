@@ -330,12 +330,25 @@ pub fn emmc_mbr(card: &[u8; 512], emmc_sectors: u64) -> R<[u8; 512]> {
     Ok(m)
 }
 
-/// An extlinux.conf for the eMMC: every root on the card's signature moves to the eMMC's.
+/// An extlinux.conf for the eMMC: every root on the card's signature moves to the eMMC's, and
+/// the last-resort `min` label boots `pmic.dtb` instead. min.dtb has no eMMC node (it lacks the
+/// PMIC regulators the eMMC needs, image/build.sh), so on the eMMC it would wait at rootwait
+/// forever; pmic.dtb has the eMMC on and is a different file, so it still covers a full.dtb that
+/// does not load, which is what the label is for. Its command line (debug log) stays.
 pub fn retarget_extlinux(conf: &str) -> String {
     conf.replace(
         &format!("PARTUUID={:08x}-", slot::DISK_SIG),
         &format!("PARTUUID={:08x}-", slot::EMMC_SIG),
     )
+    .lines()
+    .map(|l| match l.trim() {
+        "LABEL min" => l.replace("LABEL min", "LABEL pmic"),
+        t if t.starts_with("FDT ") && t.ends_with("-min.dtb") => l.replace("-min.dtb", "-pmic.dtb"),
+        _ => l.to_string(),
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+        + if conf.ends_with('\n') { "\n" } else { "" }
 }
 
 fn drop_caches() {
@@ -907,6 +920,23 @@ mod tests {
         assert!(e.contains("root=PARTUUID=50463045-03 ro"));
         assert!(e.contains("root=PARTUUID=50463045-02 ro"));
         assert!(!e.contains("50463037"));
+        assert!(e.ends_with('\n'));
+        // The card's conf as post-image.sh renders it: min.dtb has no eMMC, so pmic.dtb.
+        let card = include_str!("../../image/boot/extlinux.conf.in")
+            .replace("@SLOT@", "b")
+            .replace("@PART@", "3")
+            .replace("@OTHER@", "a")
+            .replace("@OTHERPART@", "2")
+            .replace("@CMDLINE@", "quiet");
+        let e = retarget_extlinux(&card);
+        assert!(!e.contains("-min.dtb") && !e.contains("LABEL min"), "{e}");
+        assert!(e.contains("LABEL pmic\n\tKERNEL /zImage.b\n\tFDT /sun8i-a33-pf1007l-pmic.dtb\n"));
+        assert!(
+            e.contains("\tFDT /sun8i-a33-pf1007l-full.dtb\n"),
+            "full untouched"
+        );
+        assert!(e.contains("root=PARTUUID=50463045-03 rootfstype=ext4 rootwait ro console=ttyGS0"));
+        assert_eq!(e.lines().count(), card.lines().count());
         assert_eq!(
             slot::from_cmdline("root=PARTUUID=50463045-03 ro"),
             Some(Slot::B)

@@ -949,7 +949,7 @@ from `mmc ${mmc_bootdev}:1` (`board/sunxi/board.c`: 0 = card, 1 = eMMC; its DT a
 to the eMMC). The script stops if the config differs from build L in anything else (the
 fastboot default device follows the slot; fastboot never runs). One `boot.scr` serves both:
 every `mmc 0:1` reads `${pf_dev}`, which is `mmc_bootdev` or 0. The kernel DTBs `full` and
-`pmic` have the eMMC on; `min` stays card-only.
+`pmic` have the eMMC on; `min` stays card-only, so on the eMMC the install renames the last-resort `min` label to `pmic` and boots pmic.dtb (min.dtb there would wait at rootwait forever) [U: the label has not been booted from the eMMC].
 
 **Install** (`tfctl emmc install --backup-sha256 HEX`): only from the card, the eMMC opened
 `O_EXCL`, the running slot confirmed, HEX equal to the recorded backup. Order: clear the vendor
