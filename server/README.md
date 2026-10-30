@@ -116,6 +116,12 @@ only when it changes should set `stale_s`. When the page's stream has been down 
 `SERVICES_SSH=<host>` (native runs only: the container has no ssh) reads the container list every
 `SERVICES_EVERY` (1m) into the source `services`. An unchanged list is not re-sent.
 
+With `SONARR_URL`, `SONARR_API_KEY`, `RADARR_URL` and `RADARR_API_KEY` all set, the server builds
+the sources `shows` (the next 7 days from the Sonarr and Radarr calendars, and the 6 newest imports,
+one per show or movie) and `today` (episodes and movies out today, plus sunrise and sunset at
+`WEATHER_LAT`, `WEATHER_LON`) every `FEEDS_EVERY` (5m), in the `TZ` time zone. It logs once when the
+refresh starts failing and once when it works again. The keys go only in the server's env file.
+
 `forecast` shows the week from the weather adapter (`WEATHER_LAT`, `WEATHER_LON`; `WEATHER_UNITS=f`
 for °F); the hero shows the current temperature, icon and today's high and low, and with
 `props.health` set to a services source its badge reads "21 / 22 containers up".
@@ -163,6 +169,10 @@ MCP). The MCP tool `app_guide` is the full reference; the design is in `docs/dec
 **2026-07-28** (`server/discover`, no handshake) and falls back per client to 2025-11-25, 2025-06-18,
 2025-03-26 and 2024-11-05. Official Go SDK v1.8.0. Tools carry titles and read-only/destructive
 hints, results are JSON objects (structuredContent), and browser requests from other sites are refused.
+
+`MCP_TOKENS` adds bearer tokens that open `/mcp` and nothing else (comma or space separated, at least
+32 characters each). Give each MCP client its own, and remove one to revoke that client without
+changing `FRAME_TOKEN`.
 
 Claude Code:
 ```sh

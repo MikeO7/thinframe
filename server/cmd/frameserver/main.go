@@ -11,6 +11,8 @@
 //	PORT          default 41007 (tcp, the same number as DISCOVERY's udp port)
 //	DATA_DIR      default /data
 //	FRAME_TOKEN   bearer token for /api and /mcp, Basic password for /admin; empty disables auth (LAN dev only)
+//	MCP_TOKENS    extra bearer tokens for /mcp only (comma or space separated, 32+ characters each);
+//	              give each MCP client its own and drop it to revoke that client
 //	PHOTOS_DIR    folder photo source; unset = photo widget shows nothing
 //	ARTIFACTS_DIR default /artifacts; tfctl-armv7, system-*.tar, versions.json
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter (current and 7-day forecast)
@@ -29,6 +31,10 @@
 //	SERVICES_SSH  ssh destination whose `docker ps` feeds the source "services" (key auth only)
 //	SERVICES_DOCKER docker socket path read instead (in a container: mount the host's socket); wins over SERVICES_SSH
 //	SERVICES_EVERY  how often to poll (default 1m, Go duration)
+//	SONARR_URL, SONARR_API_KEY, RADARR_URL, RADARR_API_KEY  with all four set, the server builds the
+//	              sources "shows" and "today" itself (feeds package); sunrise and sunset use
+//	              WEATHER_LAT/WEATHER_LON, times use TZ
+//	FEEDS_EVERY   how often to refresh them (default 5m, Go duration, at least 1m)
 //	DISCOVERY     udp address frames probe to find this server (default :41007, "off" disables;
 //	              needs host networking in a container)
 package main
@@ -51,6 +57,7 @@ import (
 	"github.com/MikeO7/thinframe/server/internal/api"
 	"github.com/MikeO7/thinframe/server/internal/artifacts"
 	"github.com/MikeO7/thinframe/server/internal/discover"
+	"github.com/MikeO7/thinframe/server/internal/feeds"
 	"github.com/MikeO7/thinframe/server/internal/mcp"
 	"github.com/MikeO7/thinframe/server/internal/photos"
 	"github.com/MikeO7/thinframe/server/internal/protect"
@@ -79,6 +86,10 @@ func main() {
 	}
 	opts := api.Options{Token: os.Getenv("FRAME_TOKEN"), Version: Version, Artifacts: artifacts.New(env("ARTIFACTS_DIR", "/artifacts")),
 		Reports: filepath.Join(dataDir, "reports"), Hosts: api.ParseHosts(os.Getenv("SERVER_HOSTS"))}
+	if t, bad := api.ParseTokens(os.Getenv("MCP_TOKENS")); len(t) > 0 || bad > 0 {
+		opts.MCPTokens = t
+		log.Printf("mcp: %d extra token(s) from MCP_TOKENS, %d refused (under 32 characters)", len(t), bad)
+	}
 	if len(opts.Hosts) > 0 {
 		log.Printf("host check: also answering to %s", strings.Join(opts.Hosts, ", "))
 	}
@@ -145,6 +156,14 @@ func main() {
 	}
 	go srv.RunPolls(ctx)
 	go srv.RunProtect(ctx)
+	if fc := feedsConfig(); fc.Enabled() {
+		every, err := time.ParseDuration(env("FEEDS_EVERY", "5m"))
+		if err != nil || every < time.Minute {
+			every = 5 * time.Minute
+		}
+		go feeds.Run(ctx, fc, every, srv.SetSource)
+		log.Printf("feeds: shows and today from sonarr and radarr every %s", every)
+	}
 	every, err := time.ParseDuration(env("SERVICES_EVERY", "1m"))
 	if err != nil || every < 10*time.Second {
 		every = time.Minute
@@ -212,4 +231,20 @@ func calendars() api.Calendars {
 		log.Printf("calendar: caldav %s enabled (%d calendar name(s))", base, len(names))
 	}
 	return cs
+}
+
+// feedsConfig is the shows/today refresher's settings from the environment.
+func feedsConfig() feeds.Config {
+	loc, err := time.LoadLocation(env("TZ", "UTC"))
+	if err != nil {
+		log.Printf("feeds: time zone %q: %v; using UTC", os.Getenv("TZ"), err)
+		loc = time.UTC
+	}
+	lat, _ := strconv.ParseFloat(os.Getenv("WEATHER_LAT"), 64)
+	lon, _ := strconv.ParseFloat(os.Getenv("WEATHER_LON"), 64)
+	return feeds.Config{
+		SonarrURL: os.Getenv("SONARR_URL"), SonarrKey: os.Getenv("SONARR_API_KEY"),
+		RadarrURL: os.Getenv("RADARR_URL"), RadarrKey: os.Getenv("RADARR_API_KEY"),
+		Lat: lat, Lon: lon, Loc: loc,
+	}
 }
