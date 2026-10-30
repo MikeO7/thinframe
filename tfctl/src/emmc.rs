@@ -892,20 +892,119 @@ fn fix_boot(mnt: &Path, files: &Path, boot_scr: &[u8], uenv: &UEnv, running: Slo
             fs::copy(&p, mnt.join(p.file_name().unwrap()))?;
         }
     }
-    fs::write(mnt.join("uEnv.txt"), uenv.render(running, 0))?;
-    for stale in ["uEnv.bak", "uEnv.tmp", "pf/uboot.env", "pf/linux-ok.env"] {
+    // uEnv.bak too: boot.cmd.patch falls back to it when a power cut during an update leaves
+    // uEnv.txt naming no slot. Without it U-Boot would take slot a with no pf_mode.
+    let env = uenv.render(running, 0);
+    fs::write(mnt.join("uEnv.txt"), &env)?;
+    fs::write(mnt.join("uEnv.bak"), &env)?;
+    for stale in ["uEnv.tmp", "pf/uboot.env", "pf/linux-ok.env"] {
         let _ = fs::remove_file(mnt.join(stale));
     }
-    // boot.scr counts its starts in pf/uboot.env (fatwrite makes no directories): with the
-    // directory there, a start from the eMMC leaves a mark the card can read afterwards.
+    // What a Mac or an earlier experiment left on the card's partition 1: nothing reads it.
+    for e in fs::read_dir(mnt)? {
+        let e = e?;
+        if is_junk(&e.file_name().to_string_lossy()) {
+            let p = e.path();
+            let _ = if e.file_type()?.is_dir() {
+                fs::remove_dir_all(&p)
+            } else {
+                fs::remove_file(&p)
+            };
+        }
+    }
+    // boot.scr writes pf/uboot.env only after a failed load (fatwrite makes no directories):
+    // with the directory there, that mark is readable afterwards.
     fs::create_dir_all(mnt.join("pf"))?;
     let _ = Command::new("sync").status();
     Ok(())
 }
 
+/// Top-level entries of partition 1 that nothing reads: macOS metadata (AppleDouble `._*`,
+/// Spotlight, fsevents, Trashes) and DTBs of earlier experiments. extlinux names only the
+/// full and pmic DTBs; the min DTB stays because the card image ships it.
+fn is_junk(name: &str) -> bool {
+    name.starts_with("._")
+        || matches!(
+            name,
+            ".Spotlight-V100"
+                | ".fseventsd"
+                | ".Trashes"
+                | ".metadata_never_index"
+                | "sun8i-a33-pf1007l-emmc.dtb"
+        )
+        || name.ends_with(".noemmc")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fix_boot_writes_both_slot_files_and_drops_junk() {
+        let base = crate::update::tests::tmp_base("emmc-fix-boot");
+        let (mnt, files) = (base.join("p1"), base.join("files"));
+        fs::create_dir_all(mnt.join("extlinux")).unwrap();
+        fs::create_dir_all(mnt.join(".Spotlight-V100/Store")).unwrap();
+        fs::create_dir_all(&files).unwrap();
+        fs::write(
+            mnt.join("extlinux/slot-b.conf"),
+            "APPEND root=PARTUUID=50463037-03\n",
+        )
+        .unwrap();
+        fs::write(mnt.join("zImage.b"), b"kernel").unwrap();
+        fs::write(mnt.join("uEnv.bak"), "slot=a\ntries=2\n").unwrap();
+        fs::write(mnt.join("._uEnv.txt"), b"apple").unwrap();
+        fs::write(mnt.join("sun8i-a33-pf1007l-full.dtb.noemmc"), b"old").unwrap();
+        fs::write(mnt.join("gsl_m86_hd.fw"), b"fw").unwrap();
+        fs::write(files.join("sun8i-a33-pf1007l-full.dtb"), b"dtb").unwrap();
+        let uenv = UEnv::parse("pf_mode=linux\nslot=b\ntries=0\n");
+        fix_boot(&mnt, &files, b"scr", &uenv, Slot::B).unwrap();
+        let txt = fs::read_to_string(mnt.join("uEnv.txt")).unwrap();
+        assert!(txt.contains("slot=b") && txt.contains("tries=0") && txt.contains("pf_mode=linux"));
+        assert_eq!(fs::read_to_string(mnt.join("uEnv.bak")).unwrap(), txt);
+        assert_eq!(fs::read(mnt.join("zImage.a")).unwrap(), b"kernel");
+        assert_eq!(fs::read(mnt.join("boot.scr")).unwrap(), b"scr");
+        assert!(mnt.join("pf").is_dir() && mnt.join("gsl_m86_hd.fw").exists());
+        for gone in [
+            ".Spotlight-V100",
+            "._uEnv.txt",
+            "sun8i-a33-pf1007l-full.dtb.noemmc",
+        ] {
+            assert!(!mnt.join(gone).exists(), "{gone}");
+        }
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn only_junk_is_dropped_from_partition_1() {
+        for j in [
+            "._boot.scr",
+            ".Spotlight-V100",
+            ".fseventsd",
+            ".metadata_never_index",
+            "sun8i-a33-pf1007l-full.dtb.noemmc",
+            "sun8i-a33-pf1007l-emmc.dtb",
+        ] {
+            assert!(is_junk(j), "{j}");
+        }
+        for k in [
+            "boot.scr",
+            "boot.cmd",
+            "uEnv.txt",
+            "uEnv.bak",
+            "zImage.a",
+            "zImage.b",
+            "pf",
+            "extlinux",
+            "gsl_m86_hd.fw",
+            "provision.txt",
+            "sun8i-a33-pf1007l-full.dtb",
+            "sun8i-a33-pf1007l-pmic.dtb",
+            "sun8i-a33-pf1007l-min.dtb",
+        ] {
+            assert!(!is_junk(k), "{k}");
+        }
+    }
 
     fn card_mbr() -> [u8; 512] {
         let mut m = [0u8; 512];
