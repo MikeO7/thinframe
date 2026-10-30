@@ -8,7 +8,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PORT:-18080}"; TOKEN=e2e-token; ID=e2e
 TMP="$(mktemp -d)"; PIDS=()
-cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; rm -rf "$TMP"; }
+# Wait for each process: a frameserver writes frame files while it shuts down, racing rm -rf.
+cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; for p in "${PIDS[@]:-}"; do wait "$p" 2>/dev/null || true; done; rm -rf "$TMP"; }
 trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; tail -n 20 "$TMP"/*.log >&2 || true; exit 1; }
 api() { curl -fsS -H "Authorization: Bearer $TOKEN" "$@"; }
