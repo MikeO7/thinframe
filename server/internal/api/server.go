@@ -702,6 +702,9 @@ func logRequests(next http.Handler) http.Handler {
 		if code == 0 {
 			code = http.StatusOK
 		}
+		if r.URL.Path == "/healthz" && code == http.StatusOK {
+			return // the container HEALTHCHECK probes every 30s; log only failures
+		}
 		log.Printf("%s %s %d %s %s", r.Method, r.URL.Path, code, sourceIP(r), time.Since(t).Round(time.Millisecond))
 	})
 }

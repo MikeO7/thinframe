@@ -69,6 +69,9 @@ func env(k, def string) string {
 
 func main() {
 	log.SetFlags(log.Ltime)
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck(listenPort(), os.Stdout))
+	}
 	dataDir := env("DATA_DIR", "/data")
 	st, err := store.Open(dataDir)
 	if err != nil {
@@ -113,7 +116,7 @@ func main() {
 	}
 	srv := api.New(st, opts)
 	// TCP on the same number as discovery's UDP port: "thinframe lives on 41007".
-	port := env("PORT", strconv.Itoa(discover.Port))
+	port := listenPort()
 	hs := newHTTPServer(":"+port, handler(srv))
 	go func() {
 		log.Printf("frameserver %s listening on %s (data %s)", Version, hs.Addr, dataDir)
