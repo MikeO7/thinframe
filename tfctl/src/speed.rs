@@ -2,7 +2,7 @@
 //!
 //! - The Wi-Fi driver loads at the first sysinit line instead of when udev reaches it.
 //! - BFQ on the frame's disks, so small reads are not stuck behind the prewarm's bulk reads.
-//! - The CPU at full clock while the screen is on, schedutil while it is off.
+//! - The CPU at full clock while the screen is on, schedutil while it is off; the GPU likewise.
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -10,6 +10,7 @@ use std::process::{Command, Stdio};
 const WIFI_MODULE: &str = "aic8800_fdrv";
 const DISKS: [&str; 3] = ["mmcblk0", "mmcblk1", "mmcblk2"];
 const CPUFREQ: &str = "/sys/devices/system/cpu/cpufreq";
+const DEVFREQ: &str = "/sys/class/devfreq";
 
 /// Start loading the Wi-Fi driver in the background, from `tfctl boot fsck` (the first sysinit
 /// line, ~0.7 s). udev loaded it at ~2.0 s, and its firmware upload then took 1.2 s before iwd
@@ -45,6 +46,7 @@ pub fn use_bfq() {
 /// change never waits for schedutil to raise the clock; `schedutil` while it is off. The frame
 /// runs on mains power. No cpufreq (QEMU, the Mac): nothing.
 pub fn cpu_governor(screen_on: bool) {
+    gpu_floor(Path::new(DEVFREQ), screen_on);
     let want = governor(screen_on);
     let Ok(rd) = fs::read_dir(CPUFREQ) else {
         return;
@@ -56,6 +58,46 @@ pub fn cpu_governor(screen_on: bool) {
                 eprintln!("tfctl: cpufreq: {}: {err}", p.display());
             }
         }
+    }
+}
+
+/// The GPU's lowest clock: its highest step while the screen is on, its lowest while it is off.
+/// lima's devfreq has only simple_ondemand, which starts at 144 MHz and samples every 50 ms, so
+/// the first frames after a quiet spell (a tap, a tab change) drew at 144 of 384 MHz
+/// [V 2026-10-29, /sys/class/devfreq/1c40000.gpu]. Only GPU devices (name ends in ".gpu").
+fn gpu_floor(devfreq: &Path, screen_on: bool) {
+    let Ok(rd) = fs::read_dir(devfreq) else {
+        return;
+    };
+    for e in rd.flatten() {
+        if !e.file_name().to_string_lossy().ends_with(".gpu") {
+            continue;
+        }
+        let d = e.path();
+        let steps = fs::read_to_string(d.join("available_frequencies")).unwrap_or_default();
+        let Some(f) = floor(&steps, screen_on) else {
+            continue;
+        };
+        let p = d.join("min_freq");
+        if fs::read_to_string(&p).is_ok_and(|c| c.trim().parse() != Ok(f)) {
+            if let Err(err) = fs::write(&p, f.to_string()) {
+                eprintln!("tfctl: devfreq: {}: {err}", p.display());
+            }
+        }
+    }
+}
+
+/// The step to pin as the floor, from `available_frequencies`.
+fn floor(steps: &str, screen_on: bool) -> Option<u64> {
+    let mut v: Vec<u64> = steps
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    v.sort_unstable();
+    if screen_on {
+        v.last().copied()
+    } else {
+        v.first().copied()
     }
 }
 
@@ -75,5 +117,31 @@ mod tests {
     fn full_clock_only_while_the_screen_is_on() {
         assert_eq!(governor(true), "performance");
         assert_eq!(governor(false), "schedutil");
+        let steps = "144000000 240000000 384000000\n";
+        assert_eq!(floor(steps, true), Some(384_000_000));
+        assert_eq!(floor(steps, false), Some(144_000_000));
+        assert_eq!(floor("", true), None);
+    }
+
+    #[test]
+    fn gpu_floor_sets_only_gpus() {
+        let d = std::env::temp_dir().join(format!("tfctl-devfreq-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        for n in ["1c40000.gpu", "dmc"] {
+            fs::create_dir_all(d.join(n)).unwrap();
+            fs::write(
+                d.join(n).join("available_frequencies"),
+                "144000000 384000000",
+            )
+            .unwrap();
+            fs::write(d.join(n).join("min_freq"), "144000000").unwrap();
+        }
+        gpu_floor(&d, true);
+        let read = |n: &str| fs::read_to_string(d.join(n).join("min_freq")).unwrap();
+        assert_eq!(read("1c40000.gpu"), "384000000");
+        assert_eq!(read("dmc"), "144000000");
+        gpu_floor(&d, false);
+        assert_eq!(read("1c40000.gpu"), "144000000");
+        let _ = fs::remove_dir_all(&d);
     }
 }

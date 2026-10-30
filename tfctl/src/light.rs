@@ -191,6 +191,20 @@ pub struct Touch {
     hold: Hold,
     /// The last open error went to the log (once, not every minute on a host without a panel).
     told: bool,
+    /// Failed opens so far: the first ones come a second apart (see `retry_after`).
+    tries: u32,
+}
+
+/// Wait before the next look for the panel. The silead driver binds after its firmware loads,
+/// a second or two after tfctl starts: a minute's wait left tap-to-wake and the Settings press
+/// dead until 63 s after boot [V 2026-10-29, thinframe.log]. Every second for two minutes, then
+/// once a minute (a host with no panel).
+fn retry_after(tries: u32) -> Duration {
+    if tries < 120 {
+        Duration::from_secs(1)
+    } else {
+        Duration::from_secs(60)
+    }
 }
 
 /// struct input_event: two longs of time, then type, code, value (16 bytes on the frame's
@@ -251,7 +265,7 @@ pub fn parse_event(b: &[u8]) -> Option<(u16, u16, i32)> {
 }
 
 impl Touch {
-    /// Not open yet; `touched` looks for the device once a minute until it is there.
+    /// Not open yet; `touched` looks for the device until it is there (`retry_after`).
     pub fn closed() -> Touch {
         Touch {
             f: None,
@@ -259,6 +273,7 @@ impl Touch {
             part: Vec::new(),
             hold: Hold::default(),
             told: false,
+            tries: 0,
         }
     }
 
@@ -266,7 +281,8 @@ impl Touch {
     pub fn touched(&mut self) -> bool {
         use std::io::Read;
         if self.f.is_none() && Instant::now() >= self.next_try {
-            self.next_try = Instant::now() + Duration::from_secs(60);
+            self.next_try = Instant::now() + retry_after(self.tries);
+            self.tries = self.tries.saturating_add(1);
             self.f = match open_touch() {
                 Ok(f) => {
                     eprintln!("tfctl: touch: reading the panel");
@@ -354,6 +370,13 @@ fn touch_event(devices: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_panel_is_looked_for_every_second_at_first() {
+        assert_eq!(retry_after(0), Duration::from_secs(1));
+        assert_eq!(retry_after(119), Duration::from_secs(1));
+        assert_eq!(retry_after(120), Duration::from_secs(60));
+    }
 
     fn feed(d: &mut Dark, v: u8, t0: Instant, secs: u64) -> Vec<(u64, bool)> {
         (0..secs)

@@ -3,8 +3,14 @@
 //! libraries paged in from the card by page faults, in small random reads. Read in order and in
 //! big blocks while the frame waits for the network anyway, they are in memory when cog starts.
 //! Reading only: nothing is written, and a missing file is skipped.
+//!
+//! Each file is read once by inode: Mesa installs one 11 MB driver under 33 hard-linked names in
+//! /usr/lib/dri, and reading every name made this 464 MB in 4.1 s, all of it while cog started,
+//! against ~115 MB of distinct files [V 2026-10-29, `ls -li /usr/lib/dri`, thinframe.log].
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 /// Most needed first: what cog maps at start, then the rest of the libraries, ICU's data last.
@@ -20,8 +26,10 @@ const LAST: &str = "libicudata";
 /// The files to read, in order, from `lib` (the library directory) and the FIRST entries.
 pub fn plan(lib: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
-    let push = |p: PathBuf, out: &mut Vec<PathBuf>| {
-        if p.is_file() && !out.contains(&p) {
+    let mut seen: HashSet<(u64, u64)> = HashSet::new();
+    let mut push = |p: PathBuf, out: &mut Vec<PathBuf>| {
+        let Ok(m) = fs::metadata(&p) else { return };
+        if m.is_file() && seen.insert((m.dev(), m.ino())) {
             out.push(p);
         }
     };
@@ -131,6 +139,21 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
             .collect();
         assert_eq!(names, ["liba.so.1", "libz.so.1", "libicudata.so.73"]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_hard_linked_file_is_read_once() {
+        let d = std::env::temp_dir().join(format!("tfctl-prewarm-hl-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("liblima_dri.so"), b"x").unwrap();
+        for n in ["libexynos_dri.so", "libmeson_dri.so"] {
+            fs::hard_link(d.join("liblima_dri.so"), d.join(n)).unwrap();
+        }
+        fs::write(d.join("libz.so.1"), b"y").unwrap();
+        let n = plan(&d).iter().filter(|p| p.starts_with(&d)).count();
+        assert_eq!(n, 2, "one per inode");
         let _ = fs::remove_dir_all(&d);
     }
 }
