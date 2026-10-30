@@ -47,8 +47,15 @@ func TestDemoLayoutRenders(t *testing.T) {
 	}
 	l.Theme = "aurora"
 	b, _ = Render(store.Frame{ID: "demo", Config: store.DefaultConfig(), Layout: l})
-	if !strings.Contains(string(b), "[data-mood=car]") || !strings.Contains(string(b), "/api/data/asset/inter.woff2") {
+	if !strings.Contains(string(b), "[data-mood=car]") || !strings.Contains(string(b), ".clock-time{font-weight:300}") {
 		t.Error("aurora renders without its CSS on top of obsidian")
+	}
+	// Manrope only: aurora asking for the Inter file it does not use got a 404 on every load.
+	if strings.Contains(string(b), "inter.woff2") || !strings.Contains(string(b), "font-display:swap}") {
+		t.Error("aurora still loads Inter, or blocks text on Manrope")
+	}
+	if strings.Contains(string(b), "<feTurbulence") || !strings.Contains(string(b), "/static/grain-") {
+		t.Error("aurora's grain is not the baked tile")
 	}
 	l.Nav = "bottom"
 	b, _ = Render(store.Frame{ID: "demo", Config: store.DefaultConfig(), Layout: l})

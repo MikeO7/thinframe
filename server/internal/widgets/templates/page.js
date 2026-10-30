@@ -584,6 +584,13 @@
   const dirty = new Set();
   TF.perf = { draws: 0, ms: 0, skipped: 0 };
   function visible(sec) { const pg = sec.closest('.page'); return !pg || pg.classList.contains('on'); }
+  // App widgets (sandboxed iframes, below) load when their page is first shown, or 3 s after
+  // the page has loaded: an app document (the cars app, ~400 ms on the frame) does not hold up
+  // the first paint of a page that does not show it.
+  const appFrames = Array.from(document.querySelectorAll('iframe.app'));
+  function loadApp(f) { if (f._loaded) return; f._loaded = true; f.src = f.dataset.src; appWait(f); }
+  function loadApps(all) { appFrames.forEach(f => { if (all || visible(f)) loadApp(f); }); }
+  if (appFrames.length) addEventListener('load', () => setTimeout(loadApps, 3000, true));
   function draw(sec) {
     const r = R[sec.dataset.type];
     if (!r) return;
@@ -674,6 +681,7 @@
   function showPage(id) {
     document.querySelectorAll('.page').forEach(p => p.classList.toggle('on', p.dataset.page === id));
     dirty.forEach(sec => { if (visible(sec)) draw(sec); });
+    loadApps();
   }
   function show(id) { highlight(id); showPage(id); }
   if (grid && grid.classList.contains('tabbed')) {
@@ -704,6 +712,7 @@
     addEventListener('tf-activity', arm);
   }
   drawAll();
+  loadApps();
   tickClock();
   // Car and home controls are display-only for now: say so instead of doing nothing.
   addEventListener('click', e => { if (e.target.closest('[data-act]')) window.toast('Controls are not connected yet'); });
@@ -712,28 +721,44 @@
   const emitPath = '/api/frames/' + encodeURIComponent(TF.frame) + '/emit';
   const emitURL = emitPath + (TF.k ? '?k=' + encodeURIComponent(TF.k) : '');
   // A room's switch: the hook room_on or room_off gets {"area_id"} (Home Assistant's light
-  // service takes it as it is). Without such a hook on the server, say so; nothing flips.
-  addEventListener('click', e => {
+  // service takes it as it is). The card flips on touch-down, like the tabs, and only the tile
+  // repaints; the hook (it can take seconds) answers in the background. If it fails, or there is
+  // no such hook on the server, the tile flips back with a red edge and the toast says why.
+  function flipRoom(t, on) {
+    t.classList.toggle('lit', on);
+    const sw = t.querySelector('.sw'), ln = t.querySelector('.ln span');
+    if (sw) sw.classList.toggle('on', on);
+    if (ln) ln.textContent = on ? 'On' : 'Off';
+  }
+  addEventListener('pointerdown', e => {
     const t = e.target.closest('.room[data-room]');
     if (!t || t._busy || !t.dataset.area) return;
     const on = !t.dataset.on, sec = t.closest('.w'), name = t.dataset.room;
     t._busy = true;
+    clearTimeout(t._failT); t.classList.remove('fail');
+    flipRoom(t, on);
+    const failed = msg => {
+      flipRoom(t, !on); t.classList.add('fail'); window.toast(msg);
+      t._failT = setTimeout(() => t.classList.remove('fail'), 2500);
+    };
     fetch(emitURL, { method: 'POST',
       body: JSON.stringify({ name: on ? 'room_on' : 'room_off', data: { area_id: t.dataset.area } }) })
       .then(r => r.json()).then(res => {
-        if (!res.status && res.error) { window.toast(name + ': ' + res.error); return; }
-        if (!res.status) { window.toast('Room lights are not connected yet'); return; }
-        if (!res.ok) { window.toast(name + ': ' + (res.error || 'failed')); return; }
-        // Show it now; the next rooms update brings the real state.
+        if (!res.status && res.error) { failed(name + ': ' + res.error); return; }
+        if (!res.status) { failed('Room lights are not connected yet'); return; }
+        if (!res.ok) { failed(name + ': ' + (res.error || 'failed')); return; }
+        // Kept until the next rooms update brings the real state (no redraw of the card now).
+        t.dataset.on = on ? '1' : '';
+        if (!on) { const b = t.querySelector('.bar'); if (b) b.remove(); }
         const st = state[sec.id] = state[sec.id] || {}, list = merge(props(sec).rooms, st.rooms);
         const r = list.find(x => x.name === name);
-        if (r) { r.on = on; r.lights = on ? 'On' : 'Off'; if (!on) r.brightness = null; st.rooms = list; sec._last = {}; draw(sec); }
-      }, () => window.toast('No answer from the server')).finally(() => { t._busy = false; });
-  });
+        if (r) { r.on = on; r.lights = on ? 'On' : 'Off'; if (!on) r.brightness = null; st.rooms = list; sec._last = {}; }
+        if (!t.isConnected) draw(sec); // an update redrew the card meanwhile
+      }, () => failed('No answer from the server')).finally(() => { t._busy = false; });
+  }, { passive: true });
 
   // App widgets: sandboxed iframes running the app SDK (server/internal/api/appsdk.js). They
   // reach the server through this page, so the page keeps the only event stream.
-  const appFrames = Array.from(document.querySelectorAll('iframe.app'));
   const toApps = m => appFrames.forEach(f => f.contentWindow && f.contentWindow.postMessage({ tf: 1, op: 'server', msg: m }, '*'));
   // Every app says hello once its script runs (the SDK is in every app document). One that has
   // not after 15 s (the server unreachable, an error page, a broken app) gets a note in its place
@@ -753,7 +778,6 @@
       f._t = setTimeout(check, 30000, true);
     }, 15000, false);
   }
-  appFrames.forEach(appWait);
   if (appFrames.length) {
     addEventListener('message', e => {
       const f = appFrames.find(x => x.contentWindow === e.source), m = e.data;
@@ -875,7 +899,7 @@
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.reload || (m.page_version && m.page_version !== TF.pageVersion)) { location.reload(); return; }
       if (m.source || m.app_state || m.app_event) { toApps(m); return; }
-      if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload) { f.src = f.src; appWait(f); } }); return; }
+      if (m.app_reload) { appFrames.forEach(f => { if (f.dataset.app === m.app_reload && f._loaded) { f.src = f.src; appWait(f); } }); return; }
       if (m.doorbell) { ring(m.doorbell); return; }
       if (m.gesture) { gesture(m.gesture); return; }
       if (!m.widget) return;

@@ -50,6 +50,7 @@ import (
 	"github.com/MikeO7/thinframe/server/internal/artifacts"
 	"github.com/MikeO7/thinframe/server/internal/photos"
 	"github.com/MikeO7/thinframe/server/internal/store"
+	"github.com/MikeO7/thinframe/server/internal/widgets"
 )
 
 const (
@@ -271,6 +272,8 @@ func rows() []row {
 		{pattern: "GET /", method: "GET", path: "/", class: public, ok: http.StatusFound},
 		{pattern: "GET /healthz", method: "GET", path: "/healthz", class: public, ok: 200},
 		{pattern: "GET /frame/{id}", method: "GET", path: "/frame/kitchen", class: public, ok: 200},
+		{pattern: "GET /static/{name}", method: "GET", path: "/static/" + widgets.ScriptName(), class: public, ok: 200},
+		{method: "GET", path: "/static/page-000000000000.js", class: public, ok: 404},
 		{pattern: "GET /api/stream/{id}", method: "GET", path: "/api/stream/kitchen", class: public, ok: 200},
 		{pattern: "GET /api/data/photo/next", method: "GET", path: "/api/data/photo/next?frame=kitchen", class: public, ok: 200},
 		{pattern: "GET /api/data/weather", method: "GET", path: "/api/data/weather", class: public, ok: 200},

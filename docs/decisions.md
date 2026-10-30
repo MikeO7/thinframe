@@ -1104,3 +1104,41 @@ roam-scanning twice a minute at -16 dBm, a new Wi-Fi address and DHCP lease at e
 - **DHCP lease kept.** dhcpcd's database (`/var/db/dhcpcd`) is now `/data/dhcpcd`. The old
   `ln -sfn ../tmp /var/db` had gone inside the directory dhcpcd's install made, so leases went to
   the read-only root and were never saved. With the lease, dhcpcd asks for its old address.
+
+## Page speed: cached assets, gzip, one background layer (2026-10-29)
+Measured from the frame [V 2026-10-29]: `/frame/office` was 97,881 B of HTML (32 KB CSS and
+58 KB JS inline), `no-store` and uncompressed, about 2.2 s from Loading to Loaded, so every load
+parsed and ran all of it again on the A7. Time to first byte 18 ms: the network is not the cost.
+
+- **CSS and JS are static files named by their content** (`/static/page-<hash>.css|js`,
+  `server/internal/widgets/assets.go`), `Cache-Control: public, max-age=31536000, immutable`.
+  The page (still `no-store`) links them, so WebKit keeps them in its disk cache
+  (`/data/thinframe/web-cache`) and a reload fetches only the HTML. A new server build changes
+  the names. Office layout: HTML 97,881 to about 9,300 B [U, the saved page with the two blocks
+  replaced by links; measure on the frame with the page_load beacon].
+- **The saved page stays whole.** tfctl's copy for a boot with no server (`offline.rs`) asks
+  with `User-Agent: tfctl`, and the server inlines the CSS and JS for that request (also
+  `?inline=1`), so the boot page needs nothing from the server but fonts and pictures, as
+  before. No tfctl change.
+- **gzip** (standard library `compress/gzip`, no new dependency) for the page, the static
+  files, the TTF font and the public JSON endpoints, when the client accepts it. Not the event
+  stream. tfctl sends no Accept-Encoding, so it still gets plain bodies. Office page: 29.6 KB
+  gzipped before, about 2.3 KB after [V, gzip of the saved page]; the demo page in Aurora
+  10.2 KB to 2.3 KB, its CSS 32 KB to 9.3 KB, its JS 58 KB to 20 KB [V, local server].
+- **Fonts.** Manrope `font-display: swap` instead of `block` (text no longer invisible until the
+  font arrives). Aurora no longer carries obsidian's Inter `@font-face`: the frame asked for
+  `/api/data/asset/inter.woff2` on each load and got 404 [V]. Obsidian keeps it.
+- **One background layer.** Aurora's light (four radial gradients on `body::before`, its own
+  layer through `will-change`) and grain (`body::after`, an SVG feTurbulence tile at 7 %
+  opacity) are now the root element's own opaque background: the gradients unchanged, the grain
+  a baked 180 px PNG (11 KB, seeded, white at alpha 2 to 9 of 255, the same mean strength).
+  `isolation: isolate` left the cards (no blend modes or negative z-index inside them). Side by
+  side in a desktop browser at 1280x800 the page looks the same [V]; on the Mali-400 [U]: the
+  2026-10-26 run without those layers drew the first frame in 175 instead of 238 ms.
+- **Rooms flip on touch-down.** The tile lights (only that tile repaints) and the hook runs in
+  the background; on an error, or no `room_on`/`room_off` hook, it flips back with a red edge
+  and the toast says why [V, desktop browser]. A successful switch no longer redraws the card.
+- **App widgets load late**: when their page is first shown, or 3 s after the page has loaded
+  (the cars app cost about 400 ms of the load [V]).
+- **Stream replay** already skipped unchanged messages (`sec._last`, page.js), so a wake's
+  replay of every source redraws only cards whose data changed. Left as it is.

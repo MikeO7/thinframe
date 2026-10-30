@@ -151,6 +151,7 @@ MCP). The MCP tool `app_guide` is the full reference; the design is in `docs/dec
 | `GET /apps/{name}/{path}` | public, sandboxed (CSP) | the app's files; the SDK is injected into HTML (with `?frame=` it carries that frame's emit key, and the document gets no CORS header) |
 | `GET /apps-sdk.js` | public | `window.thinframe` |
 | `GET /fonts/{name}` | public | bundled fonts (`manrope.woff2`, OFL) |
+| `GET /static/{name}` | public | the dashboard's CSS, JS and grain image at content-hashed names, cached for a year (`immutable`); `/frame/{id}` links them, and inlines them for tfctl's saved copy (User-Agent `tfctl`) or `?inline=1` |
 | `GET /api/data/source/{key}` | public | one source, for apps |
 | `GET /api/apps/{name}/state`, `POST .../state/{key}` | public, rate limited | app state (JSON, null deletes) |
 | `POST /api/frames/{id}/emit?k=` | the frame's emit key, rate limited | `{app,name,data}`; runs the hook `name`. The key (HMAC of `FRAME_TOKEN` and the id) is only in the page and full-screen apps the server serves; no token, no key |

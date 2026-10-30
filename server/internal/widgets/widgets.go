@@ -15,7 +15,7 @@ import (
 	"github.com/MikeO7/thinframe/server/internal/store"
 )
 
-//go:embed templates/*.html templates/page.css templates/page.js templates/obsidian.css templates/aurora.css
+//go:embed templates/*.html templates/page.css templates/page.js templates/obsidian.css templates/obsidian-font.css templates/aurora.css
 var files embed.FS
 
 // Fonts the themes use, served at /fonts/<name>. Manrope: SIL OFL 1.1 (fonts/OFL.txt).
@@ -117,9 +117,12 @@ type Page struct {
 	Layout      store.Layout
 	Config      store.Config
 	PageVersion int
-	CSS         template.CSS
-	JS          template.JS
-	Widgets     []template.HTML
+	// CSS and JS are the inline page's; CSSHref and JSSrc the linked one's (Options.Inline).
+	CSS     template.CSS
+	JS      template.JS
+	CSSHref string
+	JSSrc   string
+	Widgets []template.HTML
 	// Pages are the tabs' grids in tab order; empty when the layout has no tabs (Widgets is
 	// then the one grid). Buttons are the top-level tabs with their child pages.
 	Pages   []TabPage
@@ -144,28 +147,30 @@ type TabButton struct {
 	Pages []store.Tab
 }
 
-// Render produces the whole page for a frame.
-func Render(f store.Frame) ([]byte, error) { return RenderSim(f, "", 0, 0, 0, 0) }
+// Render produces the whole page for a frame, CSS and JS inline.
+func Render(f store.Frame) ([]byte, error) { return RenderWith(f, Options{Inline: true}) }
 
-// RenderSim renders with the frame's emit key (Page.EmitKey) and an optional simulated panel
-// size (simW x simH) scaled to fit a surface of fitW x fitH (see Page.SimW). fit 0 means
-// scale 1.
-func RenderSim(f store.Frame, emitKey string, simW, simH, fitW, fitH int) ([]byte, error) {
+// Options are how RenderWith renders a page.
+type Options struct {
+	// EmitKey is the frame's emit key (Page.EmitKey).
+	EmitKey string
+	// SimW x SimH is a simulated panel size scaled to fit a surface of FitW x FitH (see
+	// Page.SimW). Fit 0 means scale 1.
+	SimW, SimH, FitW, FitH int
+	// Inline puts the CSS and JS in the page. Otherwise the page links them at their
+	// content-hashed /static/ names (Asset), which a browser keeps for good. The frame's
+	// saved copy (tfctl offline.rs) is inline: it must show with no server.
+	Inline bool
+}
+
+// RenderWith renders a frame's page.
+func RenderWith(f store.Frame, o Options) ([]byte, error) {
+	simW, simH := o.SimW, o.SimH
 	scale := 1.0
-	if simW > 0 && fitW > 0 && fitH > 0 {
-		scale = min(float64(fitW)/float64(simW), float64(fitH)/float64(simH))
+	if simW > 0 && o.FitW > 0 && o.FitH > 0 {
+		scale = min(float64(o.FitW)/float64(simW), float64(o.FitH)/float64(simH))
 	}
-	css, _ := files.ReadFile("templates/page.css")
-	// obsidian is a theme of its own and the base of aurora.
-	if lay := f.Layout; lay.Theme == "obsidian" || lay.Theme == "aurora" {
-		ob, _ := files.ReadFile("templates/obsidian.css")
-		css = append(append(css, '\n'), ob...)
-		if lay.Theme == "aurora" {
-			au, _ := files.ReadFile("templates/aurora.css")
-			css = append(append(css, '\n'), au...)
-		}
-	}
-	js, _ := files.ReadFile("templates/page.js")
+	css := cssFor(f.Layout.Theme)
 	lay := f.Layout
 	if lay.Cols <= 0 || lay.Rows <= 0 {
 		lay = store.DefaultLayout()
@@ -184,12 +189,16 @@ func RenderSim(f store.Frame, emitKey string, simW, simH, fitW, fitH int) ([]byt
 		idle = 90
 	}
 	var out bytes.Buffer
-	err := tmpl.ExecuteTemplate(&out, "page.html", Page{
-		FrameID: f.ID, EmitKey: emitKey, Layout: lay, Config: f.Config, PageVersion: f.Config.PageVersion,
-		CSS: template.CSS(css), JS: template.JS(js), Widgets: ws, //nolint:gosec // embedded assets
+	p := Page{
+		FrameID: f.ID, EmitKey: o.EmitKey, Layout: lay, Config: f.Config, PageVersion: f.Config.PageVersion,
+		CSSHref: "/static/" + css, JSSrc: "/static/" + jsName, Widgets: ws,
 		Pages: pages, Buttons: buttons, IdleS: idle,
 		SimW: simW, SimH: simH, SimScale: scale,
-	})
+	}
+	if o.Inline {
+		p.CSS, p.JS = template.CSS(assets[css].body), template.JS(assets[jsName].body) //nolint:gosec // embedded assets
+	}
+	err := tmpl.ExecuteTemplate(&out, "page.html", p)
 	return out.Bytes(), err
 }
 

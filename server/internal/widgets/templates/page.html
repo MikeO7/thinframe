@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="thinframe-page-version" content="{{.PageVersion}}">
 <title>thinframe {{.FrameID}}</title>
-<style>{{.CSS}}</style>
+{{if .CSS}}<style>{{.CSS}}</style>{{else}}<link rel="stylesheet" href="{{.CSSHref}}">{{end}}
 {{if gt .SimW 0}}<style>#grid{width:{{.SimW}}px;height:{{.SimH}}px;transform-origin:0 0;transform:scale({{printf "%.5f" .SimScale}})}html{font-size:{{printf "%.3f" (simrem .SimH)}}px}</style>{{end}}
 </head>
 <body>
@@ -20,6 +20,6 @@
 </main>
 {{end}}<div id="toast"></div><div id="offline" hidden>Offline · showing the last data</div>
 <script>window.TF = {frame: {{.FrameID}}, pageVersion: {{.PageVersion}}, k: {{.EmitKey}}};</script>
-<script>{{.JS}}</script>
+{{if .JS}}<script>{{.JS}}</script>{{else}}<script src="{{.JSSrc}}"></script>{{end}}
 </body>
 </html>

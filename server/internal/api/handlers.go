@@ -43,7 +43,12 @@ func (s *Server) handleFramePage(w http.ResponseWriter, r *http.Request) {
 	fitW, fitH := parseSize(r.URL.Query().Get("fit"))
 	// The page carries the frame's emit key: no other origin may read it (no CORS header) or
 	// frame it (pageCSP).
-	b, err := widgets.RenderSim(f, EmitKey(s.opts.Token, id), simW, simH, fitW, fitH)
+	// The page links its CSS and JS (/static/, which the browser keeps), except the copy tfctl
+	// saves for a boot with no server (tfctl offline.rs, User-Agent tfctl): that one must carry
+	// them. ?inline=1 asks for it too.
+	inline := r.Header.Get("User-Agent") == "tfctl" || r.URL.Query().Get("inline") == "1"
+	b, err := widgets.RenderWith(f, widgets.Options{EmitKey: EmitKey(s.opts.Token, id),
+		SimW: simW, SimH: simH, FitW: fitW, FitH: fitH, Inline: inline})
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -51,6 +56,23 @@ func (s *Server) handleFramePage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", pageCSP)
 	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(b)
+}
+
+// handleStatic serves the page's CSS, JS and images at their content-hashed names
+// (widgets.Asset): a name never changes content, so the browser keeps them for a year without
+// asking again. Any origin may read them, like the fonts (the saved page is file://).
+func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+	b, ct, ok := widgets.Asset(r.PathValue("name"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", ct)
+	h.Set("Cache-Control", "public, max-age=31536000, immutable")
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(b)
 }
 
