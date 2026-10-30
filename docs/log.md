@@ -983,3 +983,14 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   at 22:35:44 [V]. Successful probes are no longer access-logged.
 - Rollback: set the image back to `local/thinframe-server:8675852` (still on Nox) and rerun the same
   command.
+
+## 2026-10-30 shows/today feeds move into the server (PR #166)
+- `local/thinframe-server:efd468e` on Nox, recreated 16:35 MT (only the image tag in compose.yml
+  changed; old compose `/home/nox/docker/archive/thinframe-compose.yml.20261030T223507Z`) [V].
+  Env gained SONARR_URL/SONARR_API_KEY/RADARR_URL/RADARR_API_KEY (Home Ops) and MCP_TOKENS [V].
+- Log: "feeds: shows and today from sonarr and radarr every 5m0s"; the server wrote shows.json and
+  today.json at 16:35:13 and 16:40:13 with no PUT in the access log, so the writes came from the server itself [V].
+- Parity with Hermes's thinframe_feeds.py at its 16:36:25 push: `upcoming` and today `events`
+  identical, `added` identical except one "5 h ago" vs "6 h ago" (73 s apart). The server's 16:40:13
+  write says "6 h ago" [V]. Sun times use WEATHER_LAT/LON instead of the script's 40.465,-111.876 [V].
+- MCP_TOKENS: OpenBot's key → POST /mcp initialize 200; same key on /api/frames 401; no key 401 [V].
