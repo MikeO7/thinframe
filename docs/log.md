@@ -922,3 +922,54 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   `update-software`, log `software-updated: 2026.10.28-08022e9`, live page loaded 3.5 s later.
 - Nox host backup has failed since 2026-10-21 (`home-nox-media.automount` failed, so
   `nox-update.service` stops) [V]; thinframe's data on Nox is not backed up. Needs the owner.
+
+## 2026-10-29 Second QA pass deployed (PRs #153 to #157)
+- Server d3b67c5 on Nox [V]: `SERVER_HOSTS=server.nox` added to the env file; a foreign Host
+  gets 421 (`curl -H 'Host: evil.example.com' /frame/office`), a foreign Origin gets no CORS header.
+- System 2026.10.29-c99c0020-debug by `update-system` [V]: written to slot b, back online 24 s
+  later. Root fs 27.2 MB free (was 1.3 MB). Wi-Fi MAC 4a:e2:58:9a:d1:b3, the same in the driver
+  and on wlan0 (`tfctl netid`: from the device-tree serial number); the 2026-10-28 boots had
+  88:00:33:77:xx:xx, new each boot. `/var/db -> /data`, `/data/dhcpcd/*.lease` present. No roam
+  lines in iwd.log in the first 15 min.
+- Software 2026.10.29-f4bba1d by `update-software` [V]. Screen off: cog, WPEWebProcess and
+  WPENetworkProcess all in state T; screen on: all S, page shown (`/proc/*/status`).
+- Before the system update [V]: 7.2.10, panel bound (DSI-1), 117 MB used with the page up
+  (`free -m`), root 99 % full.
+- A card pulled while running took /sbin/reboot with it: the `reboot` action acked and the frame
+  stayed up [V]. Fixed in #157 (reboot(2) fallback).
+- Nox backup [V]: `home-nox-media.automount` failed because the NFS share was already mounted;
+  reset. The backup's own preflight also counted the folders tar excludes (84 GiB, so it wanted
+  126 GiB free of 108); it now counts what the archive keeps (50.9 GiB). `nox-update run
+  --dry-run` passes; the first archive with thinframe is the 04:16 run.
+
+## 2026-10-29 eMMC boot: why the card-out start failed, and the change
+- No card-out start ever reached Linux [V]: the eMMC's /data had mount count 1, last mounted
+  by the installer (2026-10-27 05:45), so init never ran from the eMMC.
+- What was written was right [V]: U-Boot at 8 KiB = build E (353d56e6), eGON checksum valid;
+  MBR signature 50463045, p1 to p4 as the card; boot.scr uses `mmc_bootdev`; extlinux roots
+  50463045-02/-03; DTBs equal to the card's (dtc). EXT_CSD: RST_n_FUNCTION 0x01, BOOT_INFO 0x07.
+- What differed from the vendor's working eMMC [V]: Android had PARTITION_CONFIG 0x48 and eGON
+  at offset 0 of boot0 (and at sector 16); the install set 0 and cleared boot0. A whycan report
+  fixed A33 eMMC boot by enabling partition boot [D]. Inference [U]: this boot ROM reads the eMMC
+  only through the boot operation, which returns nothing with partition boot off.
+- Reinstall with #157 [V]: `tfctl emmc install` exit 0, partitions read back equal, e2fsck
+  clean, U-Boot at 8 KiB and at boot0 offset 0, PARTITION_CONFIG 0x48 (boot0, BOOT_ACK),
+  BOOT_BUS_CONDITIONS 0x01; `tfctl emmc status` shows it. Slot b (2026.10.29) in both eMMC slots.
+  boot0's saved copy is the zeros of the first install; the vendor's boot0 is in the Mac backup.
+
+## 2026-10-29 First card-out start to Linux (PRs #159, #160)
+- After #157, the card-out start got through the boot ROM, SPL and U-Boot from the eMMC [V]:
+  boot.scr wrote /pf/uboot.env (pf_last=linux) but no kernel started, no `loadfail` mark was
+  written, and U-Boot ended in ums. The same p1, copied to an image, boots to "Starting kernel"
+  in QEMU (orangepi-pc), so the files and the script were fine [V].
+- Two changes, both installed by `tfctl emmc install` (exit 0, read back equal) [V]:
+  #159 U-Boot build E drives the eMMC at 4-bit, 26 MHz (ormarch E019: some units fail U-Boot
+  eMMC reads at 8-bit, 52 MHz [D]); #160 boot.scr runs `mmc rescan` before sysboot and tries
+  twice before writing `loadfail` (QEMU: both the normal and the no-kernel path [V]).
+- Card out, frame on the Mac's USB, `reboot` from the prod MCP at 19:26:41 [V]: USB gone at
+  :42, Linux gadget 0525:a4aa at :47, ping at :55. cmdline `root=PARTUUID=50463045-03`, only
+  /dev/mmcblk2* present, `tfctl emmc status`: "running from: eMMC". cog, dropbear and the agent
+  up, Wi-Fi joined (new DHCP lease 192.168.1.184; the eMMC /data has its own lease file).
+  /pf/uboot.env: pf_boots=1, pf_last=linux, pf_prev_ok=no (the start before it never reached
+  Linux, so that is expected).
+- Which of the two changes fixed it is [U]: U-Boot's console is not visible with no card.
