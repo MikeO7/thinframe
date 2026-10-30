@@ -1,6 +1,19 @@
---- a/boot.cmd	2026-10-29 18:02:17
-+++ b/boot.cmd	2026-10-29 18:02:17
-@@ -30,6 +30,35 @@
+--- a/boot.cmd
++++ b/boot.cmd
+@@ -14,7 +14,11 @@
+ # This script writes only to "mmc 0:1" (the SD card). Build L has no eMMC device.
+ 
+ setenv pf_script L1
+-setenv pf_mode auto
++# thinframe: Linux by default. ormarch's "auto" (USB disk mode after a start Linux did not
++# confirm) needs /pf/linux-ok.env, which thinframe never writes, so it would send every second
++# start to USB disk mode once uEnv.txt and uEnv.bak were both lost. pf_mode=auto in uEnv.txt
++# still turns it on.
++setenv pf_mode linux
+ setenv pf_extlinux /extlinux/extlinux.conf
+ setenv pf_boots 0
+ setenv pf_last none
+@@ -30,6 +34,35 @@
  	env import -t -r ${ramdisk_addr_r} ${filesize}
  fi
  
@@ -36,19 +49,33 @@
  # Did Linux confirm the last start? It copies pf_boots into pf_ok.
  setenv pf_prev_ok no
  if test "${pf_ok}" = "${pf_boots}"; then setenv pf_prev_ok yes; fi
-@@ -47,8 +76,18 @@
+@@ -42,13 +75,30 @@
+ 
+ setexpr pf_boots ${pf_boots} + 1
+ setenv pf_last ${pf_next}
+-env export -t ${ramdisk_addr_r} pf_script pf_boots pf_last pf_prev_ok pf_mode
+-fatwrite mmc 0:1 ${ramdisk_addr_r} /pf/uboot.env ${filesize}
++# thinframe: a normal start writes nothing. FAT has no journal, and a power cut in the middle
++# of a write can tear the FAT table that also maps the kernels and this script; power is cut
++# most often in the first seconds after the plug goes in, which is when this ran. Only "auto"
++# needs the mark (it reads pf_last above), so only "auto" writes it.
++if test "${pf_mode}" = "auto"; then
++	env export -t ${ramdisk_addr_r} pf_script pf_boots pf_last pf_prev_ok pf_mode
++	fatwrite mmc 0:1 ${ramdisk_addr_r} /pf/uboot.env ${filesize}
++fi
  echo "pf1007l: start ${pf_boots} (hex), last start confirmed: ${pf_prev_ok}, now: ${pf_next}"
  
  if test "${pf_next}" = "linux"; then
-+	# A fresh start of the storage device before each try: on the eMMC the write just above is
-+	# the first one of the start, and a device left busy or stuck by it would fail every later
-+	# load (2026-10-29: pf_last=linux on the eMMC, no loadfail mark, no kernel). mmc rescan
-+	# starts the device again from idle; it costs a few milliseconds on the card.
++	# A fresh start of the storage device before each try: on the eMMC a write before this point
++	# (uEnv.txt during an update) could leave the device busy or stuck for every later load
++	# (2026-10-29: pf_last=linux on the eMMC, no loadfail mark, no kernel). mmc rescan starts
++	# the device again from idle; it costs a few milliseconds on the card.
 +	mmc dev ${pf_dev}
 +	mmc rescan
  	sysboot mmc 0:1 any ${pxefile_addr_r} ${pf_extlinux}
 -	# Only reached when no label could load its files.
-+	# Only reached when no label could load its files. One more try from a fresh start.
++	# Only reached when no label could load its files. One more try from a fresh start, then a
++	# loadfail mark: a start that failed anyway is the one time a write is worth its risk.
 +	echo "pf1007l: no label loaded, starting the device again"
 +	mmc rescan
 +	sysboot mmc 0:1 any ${pxefile_addr_r} ${pf_extlinux}
