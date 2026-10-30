@@ -973,3 +973,13 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   /pf/uboot.env: pf_boots=1, pf_last=linux, pf_prev_ok=no (the start before it never reached
   Linux, so that is expected).
 - Which of the two changes fixed it is [U]: U-Boot's console is not visible with no card.
+
+## 2026-10-29 Server healthcheck deployed (PR #164)
+- `local/thinframe-server:45b26b2` on Nox, recreated 22:35 MT with `docker compose -p thinframe up -d`
+  in `/home/nox/docker/apps/thinframe` (only the image tag in compose.yml changed; old compose in
+  `/home/nox/docker/archive/thinframe-compose.yml.20261030T043532Z`) [V].
+- Image HEALTHCHECK `/frameserver healthcheck` (GET /healthz on loopback, 30s interval): container
+  `healthy` 3 s after start, failing streak 0 [V]. The office frame reloaded `/frame/office` (200)
+  at 22:35:44 [V]. Successful probes are no longer access-logged.
+- Rollback: set the image back to `local/thinframe-server:8675852` (still on Nox) and rerun the same
+  command.
