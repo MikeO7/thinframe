@@ -329,6 +329,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       always works.
       (2026-10-27: eMMC installed, card in, reboot: root=PARTUUID=50463037-02, the card.)
 - Gate: frame boots thinframe with no card; rescue card boots; backup restores Android on a test unit.
+  (2026-10-29: no card [V], to Linux from the eMMC, log "First card-out start". Rescue card [V]
+  per E4. Android restore: no test unit yet, so the gate stays open.)
 
 ## 9. Polish (optional, after everything above)
 - [x] (Superseded by TASK 15's cmdline, `loglevel=0`.) Boot splash: `extlinux.conf` `quiet loglevel=3 vt.global_cursor_default=0`, blank

@@ -956,3 +956,20 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   clean, U-Boot at 8 KiB and at boot0 offset 0, PARTITION_CONFIG 0x48 (boot0, BOOT_ACK),
   BOOT_BUS_CONDITIONS 0x01; `tfctl emmc status` shows it. Slot b (2026.10.29) in both eMMC slots.
   boot0's saved copy is the zeros of the first install; the vendor's boot0 is in the Mac backup.
+
+## 2026-10-29 First card-out start to Linux (PRs #159, #160)
+- After #157, the card-out start got through the boot ROM, SPL and U-Boot from the eMMC [V]:
+  boot.scr wrote /pf/uboot.env (pf_last=linux) but no kernel started, no `loadfail` mark was
+  written, and U-Boot ended in ums. The same p1, copied to an image, boots to "Starting kernel"
+  in QEMU (orangepi-pc), so the files and the script were fine [V].
+- Two changes, both installed by `tfctl emmc install` (exit 0, read back equal) [V]:
+  #159 U-Boot build E drives the eMMC at 4-bit, 26 MHz (ormarch E019: some units fail U-Boot
+  eMMC reads at 8-bit, 52 MHz [D]); #160 boot.scr runs `mmc rescan` before sysboot and tries
+  twice before writing `loadfail` (QEMU: both the normal and the no-kernel path [V]).
+- Card out, frame on the Mac's USB, `reboot` from the prod MCP at 19:26:41 [V]: USB gone at
+  :42, Linux gadget 0525:a4aa at :47, ping at :55. cmdline `root=PARTUUID=50463045-03`, only
+  /dev/mmcblk2* present, `tfctl emmc status`: "running from: eMMC". cog, dropbear and the agent
+  up, Wi-Fi joined (new DHCP lease 192.168.1.184; the eMMC /data has its own lease file).
+  /pf/uboot.env: pf_boots=1, pf_last=linux, pf_prev_ok=no (the start before it never reached
+  Linux, so that is expected).
+- Which of the two changes fixed it is [U]: U-Boot's console is not visible with no card.
