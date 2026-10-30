@@ -18,4 +18,8 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifica
 COPY artifacts/ /artifacts/
 VOLUME /data
 EXPOSE 41007
+# `frameserver healthcheck` GETs /healthz on loopback (scratch has no curl). Works with host
+# networking too, since the probe runs in the container's own network namespace.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
+	CMD ["/frameserver", "healthcheck"]
 ENTRYPOINT ["/frameserver"]
