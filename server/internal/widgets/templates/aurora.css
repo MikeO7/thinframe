@@ -7,7 +7,7 @@
    100 to 150 ms per switch), no blurred shadows, no gradient-clipped text, flat card fills:
    each redraw of a card or page is drawn by the Mali-400, and those made it 25 to 50 % slower.
    The nav rail has its own layer, so lighting a tab redraws only the rail. */
-@font-face{font-family:"Manrope";src:url("/fonts/manrope.woff2") format("woff2"),url("/fonts/manrope.ttf") format("truetype");font-weight:200 800;font-display:block}
+@font-face{font-family:"Manrope";src:url("/fonts/manrope.woff2") format("woff2"),url("/fonts/manrope.ttf") format("truetype");font-weight:200 800;font-display:swap}
 :root{--bg:#04050a;--fg:#f7f8fc;--dim:rgba(236,239,250,.66);--faint:rgba(236,239,250,.58);
   --card:rgba(255,255,255,.05);--chip:rgba(255,255,255,.065);--chip2:rgba(255,255,255,.12);--sel:rgba(255,255,255,.14);
   --edge:rgba(255,255,255,.085);--ok:#3ff0b0;--warn:#ffb648;--bad:#ff5f78;--lit:#ffc56e;
@@ -26,22 +26,22 @@ html[data-mood=home][data-daypart=night]{--g1:rgba(78,62,230,.58);--g2:rgba(18,1
 [data-mood=camera]{--g1:rgba(255,58,92,.46);--g2:rgba(64,88,255,.44);--g3:rgba(255,150,90,.12);--accent:#ff5470;--accent2:#6f7dff;--glow:rgba(255,84,112,.36)}
 [data-mood=bolt]{--g1:rgba(255,214,10,.42);--g2:rgba(255,110,50,.46);--accent:#ffd60a;--accent2:#ff7a45;--glow:rgba(255,214,10,.3)}
 
-html{background:var(--bg)}
-html,body{font-family:"Manrope",system-ui,"DejaVu Sans",sans-serif;font-feature-settings:"tnum" 1}
-body{background:transparent}
-/* the light: one layer, drawn once. It used to drift (a stepped transform); the running
-   animation kept the compositor busy and cost 100 to 150 ms on every tab switch [V 2026-10-26]. */
-body::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;will-change:transform;
-  background:radial-gradient(48% 58% at 14% 10%,var(--g1),transparent 72%),
+/* The light and the film grain (it breaks up gradient banding on the panel) are the page's own
+   opaque background, one layer with the page. They were two full-screen layers of their own
+   over it (body::before with will-change, body::after an SVG feTurbulence tile at 7 % opacity),
+   blended on the Mali-400 in every frame; the grain is now a baked PNG of the same strength
+   (assets.go grainPNG). The light used to drift (a stepped transform); the running animation
+   kept the compositor busy and cost 100 to 150 ms on every tab switch [V 2026-10-26]. */
+html{background:url("/static/grain.png"),
+    radial-gradient(48% 58% at 14% 10%,var(--g1),transparent 72%),
     radial-gradient(46% 56% at 92% 92%,var(--g2),transparent 72%),
     radial-gradient(34% 44% at 72% 14%,var(--g3),transparent 72%),
-    radial-gradient(40% 40% at 30% 96%,var(--g3),transparent 72%)}
-/* film grain: breaks up gradient banding on the panel, adds texture */
-body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.07;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+    radial-gradient(40% 40% at 30% 96%,var(--g3),transparent 72%),var(--bg)}
+html,body{font-family:"Manrope",system-ui,"DejaVu Sans",sans-serif;font-feature-settings:"tnum" 1}
+body{background:transparent}
 
 /* cards: glass with a sheen in the corner and a lit top edge in the tab's colour */
-.w,.car,.svc .panel{position:relative;isolation:isolate;border-radius:2.8rem;border:1px solid var(--edge);
+.w,.car,.svc .panel{position:relative;border-radius:2.8rem;border:1px solid var(--edge);
   background:rgba(255,255,255,.05);box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
 .w::after,.car::after,.svc .panel::after{content:"";position:absolute;left:14%;right:14%;top:-1px;height:1px;pointer-events:none;
   background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.8}

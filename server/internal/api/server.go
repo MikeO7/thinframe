@@ -146,16 +146,18 @@ func (s *Server) Routes() http.Handler {
 	fn := func(pattern string, h http.HandlerFunc) { handle(pattern, s.checkHost(h)) }
 	fn("GET /", s.handleIndex)
 	fn("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	fn("GET /frame/{id}", s.handleFramePage)
+	// gzipped: text and JSON go compressed to a client that accepts it (gzip.go).
+	fn("GET /frame/{id}", gzipped(s.handleFramePage))
+	fn("GET /static/{name}", gzipped(s.handleStatic))
 	// Page plane: the dashboard has no token (cog loads a plain URL, sendBeacon cannot set
 	// headers), so these are public like the page itself.
 	fn("GET /api/stream/{id}", s.handleSSE)
-	fn("GET /api/data/photo/next", s.handlePhotoNext)
-	fn("GET /api/data/weather", s.handleDataWeather)
-	fn("GET /api/data/calendar", s.handleDataCalendar)
+	fn("GET /api/data/photo/next", gzipped(s.handlePhotoNext))
+	fn("GET /api/data/weather", gzipped(s.handleDataWeather))
+	fn("GET /api/data/calendar", gzipped(s.handleDataCalendar))
 	fn("GET /api/data/asset/{name}", s.handleAsset)
 	fn("GET /api/data/img", s.handleImage)
-	fn("GET /fonts/{name}", s.handleFont)
+	fn("GET /fonts/{name}", gzipped(s.handleFont))
 	fn("GET /api/data/camera/{id}", s.handleCamera)
 	fn("POST /api/frames/{id}/beacon", s.handleBeacon)
 	fn("POST /api/frames/{id}/alive", s.handleAlive)
@@ -163,9 +165,9 @@ func (s *Server) Routes() http.Handler {
 	// page, none of these carries a token; emit and state writes are rate limited.
 	fn("GET /apps/{name}/{path...}", s.handleAppFile)
 	fn("GET /apps-sdk.js", s.handleAppSDK)
-	fn("GET /api/data/source/{key}", s.handleDataSource)
+	fn("GET /api/data/source/{key}", gzipped(s.handleDataSource))
 	fn("POST /api/frames/{id}/emit", s.handleEmit)
-	fn("GET /api/apps/{name}/state", s.handleGetAppState)
+	fn("GET /api/apps/{name}/state", gzipped(s.handleGetAppState))
 	fn("POST /api/apps/{name}/state/{key}", s.handleSetAppState)
 	// Pairing: a frame without a token asks for one and shows a code; the owner types it on
 	// /admin (pair.go). /pair/{id}/accept shows the code to a frame with an older tfctl.
