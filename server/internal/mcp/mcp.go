@@ -24,7 +24,7 @@ const Instructions = "thinframe manages wall-mounted picture frames. Each frame 
 	"For anything the widgets cannot do, write an app: any web page (HTML/CSS/JS) with live data, buttons and server-side API calls, " +
 	"shown full screen (show_app) or as a widget. Read app_guide, then put_app, show_app and screenshot to see the result."
 
-// Handler returns the /mcp http.Handler with bearer auth matching the REST API.
+// Handler returns the /mcp http.Handler with bearer auth: the REST API token or an MCP-only one.
 // Streamable HTTP, stateless: speaks MCP 2026-07-28 (server/discover, per-request _meta) and the
 // older initialize handshake (2025-11-25 back to 2024-11-05), negotiated per client by the SDK.
 func Handler(s *api.Server, version string) http.Handler {
@@ -39,7 +39,7 @@ func Handler(s *api.Server, version string) http.Handler {
 		MaxRequestBodyBytes:   8 << 20, // put_app carries up to 4 MB of files, base64 for binaries
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.TokenOK(r) {
+		if !s.MCPTokenOK(r) {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="thinframe", error="invalid_token"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return

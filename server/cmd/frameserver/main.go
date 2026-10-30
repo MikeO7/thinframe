@@ -11,6 +11,8 @@
 //	PORT          default 41007 (tcp, the same number as DISCOVERY's udp port)
 //	DATA_DIR      default /data
 //	FRAME_TOKEN   bearer token for /api and /mcp, Basic password for /admin; empty disables auth (LAN dev only)
+//	MCP_TOKENS    extra bearer tokens for /mcp only (comma or space separated, 32+ characters each);
+//	              give each MCP client its own and drop it to revoke that client
 //	PHOTOS_DIR    folder photo source; unset = photo widget shows nothing
 //	ARTIFACTS_DIR default /artifacts; tfctl-armv7, system-*.tar, versions.json
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter (current and 7-day forecast)
@@ -84,6 +86,10 @@ func main() {
 	}
 	opts := api.Options{Token: os.Getenv("FRAME_TOKEN"), Version: Version, Artifacts: artifacts.New(env("ARTIFACTS_DIR", "/artifacts")),
 		Reports: filepath.Join(dataDir, "reports"), Hosts: api.ParseHosts(os.Getenv("SERVER_HOSTS"))}
+	if t, bad := api.ParseTokens(os.Getenv("MCP_TOKENS")); len(t) > 0 || bad > 0 {
+		opts.MCPTokens = t
+		log.Printf("mcp: %d extra token(s) from MCP_TOKENS, %d refused (under 32 characters)", len(t), bad)
+	}
 	if len(opts.Hosts) > 0 {
 		log.Printf("host check: also answering to %s", strings.Join(opts.Hosts, ", "))
 	}

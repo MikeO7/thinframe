@@ -98,3 +98,16 @@ func appCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", o)
 	}
 }
+
+// ParseTokens reads MCP_TOKENS: tokens separated by commas, spaces or newlines. Tokens shorter
+// than 32 characters are refused, so a typo cannot open /mcp to a guessable key.
+func ParseTokens(v string) (tokens []string, refused int) {
+	for _, t := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' || r == '\r' }) {
+		if len(t) < 32 {
+			refused++
+			continue
+		}
+		tokens = append(tokens, t)
+	}
+	return tokens, refused
+}

@@ -46,6 +46,9 @@ type Options struct {
 	// Hosts: extra Host names the public routes answer to (SERVER_HOSTS), besides IP literals,
 	// localhost, single-label and local names and the container's hostname (hosts.go).
 	Hosts []string
+	// MCPTokens: extra bearer tokens accepted on /mcp only (MCP_TOKENS), so an MCP client gets a key
+	// of its own that can be revoked without changing Token.
+	MCPTokens []string
 }
 
 // Server holds the dependencies and implements every operation once.
@@ -295,6 +298,19 @@ func tokenOK(r *http.Request, want string) bool {
 
 // TokenOK exposes the check for other packages (MCP).
 func (s *Server) TokenOK(r *http.Request) bool { return s.opts.Token == "" || tokenOK(r, s.opts.Token) }
+
+// MCPTokenOK is TokenOK plus the MCP-only tokens.
+func (s *Server) MCPTokenOK(r *http.Request) bool {
+	if s.TokenOK(r) {
+		return true
+	}
+	for _, t := range s.opts.MCPTokens {
+		if tokenOK(r, t) {
+			return true
+		}
+	}
+	return false
+}
 
 // ---- operations shared by REST, admin and MCP ------------------------------
 

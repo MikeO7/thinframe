@@ -170,6 +170,10 @@ MCP). The MCP tool `app_guide` is the full reference; the design is in `docs/dec
 2025-03-26 and 2024-11-05. Official Go SDK v1.8.0. Tools carry titles and read-only/destructive
 hints, results are JSON objects (structuredContent), and browser requests from other sites are refused.
 
+`MCP_TOKENS` adds bearer tokens that open `/mcp` and nothing else (comma or space separated, at least
+32 characters each). Give each MCP client its own, and remove one to revoke that client without
+changing `FRAME_TOKEN`.
+
 Claude Code:
 ```sh
 claude mcp add --transport http thinframe http://nas.local:41007/mcp --header "Authorization: Bearer $FRAME_TOKEN"
