@@ -4,8 +4,9 @@
 # The host keeps: DIR/compose.yml (written here), DIR/env (FRAME_TOKEN and your settings,
 # made once, mode 600, never overwritten), DIR/data (frames, sources, assets).
 # The container uses host networking (HTTP on PORT from DIR/env, default 41007; frames find
-# it by UDP discovery on 41007, whose reply carries that port) and reads
-# the container list from the host's Docker socket for the services widget.
+# it by UDP discovery on 41007, whose reply carries that port). It reads the container list for
+# the services widget through docker-proxy, a networkless socket proxy that alone holds the host's
+# Docker socket and allows only GET /containers/json (socket in DIR/run).
 # Frames that reach the server by a name outside .local/.lan/.home.arpa/.internal (for example
 # server.nox) need it in DIR/env as SERVER_HOSTS=server.nox, or their dashboard gets 421.
 # Tagged local/thinframe-server: update managers that skip local/* leave it alone.
@@ -21,6 +22,8 @@ case $(ssh -o BatchMode=yes "$host" uname -m) in
 	x86_64) arch=amd64 ;;
 	*) echo "unsupported host architecture" >&2; exit 1 ;;
 esac
+# The socket proxy joins the group that owns the host's Docker socket.
+gid=$(ssh -o BatchMode=yes "$host" stat -c %g /var/run/docker.sock)
 ver=$(git -C "$root" rev-parse --short HEAD)
 tag=local/thinframe-server:$ver
 docker build --platform "linux/$arch" --build-arg VERSION="$ver" -t "$tag" "$root/server" >/dev/null
@@ -31,7 +34,7 @@ ok "image loaded on $host"
 # shellcheck disable=SC2087 # expand $tag and $dir here, on purpose
 ssh -o BatchMode=yes "$host" bash -s <<EOF
 set -euo pipefail
-cd ~ && mkdir -p "$dir/data" && chmod 700 "$dir" && cd "$dir"
+cd ~ && mkdir -p "$dir/data" "$dir/run" && chmod 700 "$dir" && chmod 1777 "$dir/run" && cd "$dir"
 if [ ! -f env ]; then
 	tz=\$(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')
 	(umask 077; printf 'FRAME_TOKEN=%s\nTZ=%s\n' "\$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" "\${tz:-UTC}" > env)
@@ -47,14 +50,36 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file: env
+    depends_on: [docker-proxy]
     environment:
       DATA_DIR: /data
-      SERVICES_DOCKER: /var/run/docker.sock
+      SERVICES_DOCKER: /run/docker-proxy/docker.sock
     volumes:
       - ./data:/data
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./run:/run/docker-proxy:ro
       - /etc/localtime:/etc/localtime:ro
       - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+  # The only holder of the Docker socket. No network; it serves a filtered copy in ./run that
+  # answers GET /containers/json (the services source) and refuses everything else.
+  docker-proxy:
+    image: wollomatic/socket-proxy:1
+    container_name: thinframe-docker-proxy
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65534:$gid"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./run:/socket
+    command:
+      - -proxysocketendpoint=/socket/docker.sock
+      - -proxysocketendpointfilemode=0600
+      - -allowGET=/(v1\.[0-9]+/)?containers/json
+      - -watchdoginterval=600
+      - -stoponwatchdog
+      - -shutdowngracetime=5
 YML
 docker compose -p thinframe up -d --remove-orphans >/dev/null
 port=\$(sed -n 's/^PORT=[^0-9]*\([0-9]*\).*/\1/p' env | tail -n 1)
