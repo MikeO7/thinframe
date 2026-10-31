@@ -994,3 +994,13 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   identical, `added` identical except one "5 h ago" vs "6 h ago" (73 s apart). The server's 16:40:13
   write says "6 h ago" [V]. Sun times use WEATHER_LAT/LON instead of the script's 40.465,-111.876 [V].
 - MCP_TOKENS: OpenBot's key → POST /mcp initialize 200; same key on /api/frames 401; no key 401 [V].
+
+## 2026-10-31 Docker socket proxy (PR #168)
+- Nox `apps/thinframe/compose.yml` regenerated from `scripts/server-deploy.sh` (server image
+  unchanged, `local/thinframe-server:efd468e`); old compose
+  `/home/nox/docker/archive/thinframe-compose.yml.20261031T125628Z` [V].
+- thinframe no longer mounts `/var/run/docker.sock`; mounts are /data, ./run (ro), localtime,
+  zoneinfo [V]. `thinframe-docker-proxy` (wollomatic/socket-proxy:1, network none, read-only,
+  caps dropped, uid 65534:990) holds the socket and allows only GET /containers/json: other GETs
+  403, POST/DELETE 405 [V].
+- services source refreshed through the proxy at 12:57:34Z, 27 containers, no poll errors [V].
