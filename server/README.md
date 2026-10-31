@@ -112,7 +112,9 @@ poll that fills the source (at least 15 minutes), else after an hour. A source t
 only when it changes should set `stale_s`. When the page's stream has been down for 30 s it shows
 "Offline" at the top.
 
-`SERVICES_DOCKER=/var/run/docker.sock` (in a container, with the host's socket mounted) or
+`SERVICES_DOCKER=<socket>` (in a container: a read-only socket proxy's socket; `scripts/server-deploy.sh`
+runs one that allows only `GET /containers/json`, since even a `:ro` mount of the host socket is
+full Docker API access) or
 `SERVICES_SSH=<host>` (native runs only: the container has no ssh) reads the container list every
 `SERVICES_EVERY` (1m) into the source `services`. An unchanged list is not re-sent.
 

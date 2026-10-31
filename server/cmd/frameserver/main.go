@@ -29,7 +29,7 @@
 //	TZ            frames receive this time zone
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
 //	SERVICES_SSH  ssh destination whose `docker ps` feeds the source "services" (key auth only)
-//	SERVICES_DOCKER docker socket path read instead (in a container: mount the host's socket); wins over SERVICES_SSH
+//	SERVICES_DOCKER docker socket path read instead (in a container: a read-only socket proxy's socket); wins over SERVICES_SSH
 //	SERVICES_EVERY  how often to poll (default 1m, Go duration)
 //	SONARR_URL, SONARR_API_KEY, RADARR_URL, RADARR_API_KEY  with all four set, the server builds the
 //	              sources "shows" and "today" itself (feeds package); sunrise and sunset use
