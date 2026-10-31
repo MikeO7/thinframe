@@ -126,25 +126,47 @@ fn err(msg: impl Into<String>) -> io::Error {
     io::Error::other(msg.into())
 }
 
+const USAGE: &str = "status | backup | install --backup-sha256 HEX [--files DIR]";
+
 pub fn run(args: &[String]) -> R<()> {
+    let rest = args.get(1..).unwrap_or_default();
     match args.first().map(String::as_str) {
-        Some("status") | None => status(),
-        Some("backup") => backup(),
+        Some("status") | None if rest.is_empty() => status(),
+        Some("backup") if rest.is_empty() => backup(),
         Some("install") => {
-            let opt = |k: &str| {
-                args.iter()
-                    .position(|a| a == k)
-                    .and_then(|i| args.get(i + 1))
-                    .cloned()
-            };
-            let sha = opt("--backup-sha256").map(|s| s.to_ascii_lowercase());
-            let files = opt("--files").unwrap_or_else(|| SHARE.to_string());
+            let (sha, files) = install_args(rest)?;
             install(sha.as_deref(), Path::new(&files))
         }
         Some(x) => Err(err(format!(
-            "emmc: unknown '{x}' (status | backup | install --backup-sha256 HEX [--files DIR])"
+            "emmc: unknown '{x}' or extra arguments ({USAGE})"
         ))),
+        None => Err(err(format!("emmc: extra arguments ({USAGE})"))),
     }
+}
+
+/// The install writes the eMMC, so anything it does not know (`--help`, a typo) stops it
+/// before it starts.
+fn install_args(rest: &[String]) -> R<(Option<String>, String)> {
+    let (mut sha, mut files) = (None, None);
+    let mut it = rest.iter();
+    while let Some(k) = it.next() {
+        let slot = match k.as_str() {
+            "--backup-sha256" => &mut sha,
+            "--files" => &mut files,
+            _ => return Err(err(format!("emmc install: unknown '{k}' ({USAGE})"))),
+        };
+        let v = it
+            .next()
+            .filter(|v| !v.starts_with("--"))
+            .ok_or_else(|| err(format!("emmc install: {k} needs a value")))?;
+        if slot.replace(v.clone()).is_some() {
+            return Err(err(format!("emmc install: {k} given twice")));
+        }
+    }
+    Ok((
+        sha.map(|s| s.to_ascii_lowercase()),
+        files.unwrap_or_else(|| SHARE.to_string()),
+    ))
 }
 
 fn disks() -> Vec<&'static Path> {
@@ -1112,6 +1134,20 @@ mod tests {
             slot::from_cmdline("root=PARTUUID=50463045-03 ro"),
             Some(Slot::B)
         );
+    }
+
+    #[test]
+    fn install_refuses_what_it_does_not_know() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(install_args(&a(&["--help"])).is_err());
+        assert!(install_args(&a(&["--files"])).is_err());
+        assert!(install_args(&a(&["--files", "--backup-sha256", "ab"])).is_err());
+        assert!(install_args(&a(&["--files", "a", "--files", "b"])).is_err());
+        assert!(run(&a(&["status", "--help"])).is_err());
+        assert!(run(&a(&["backup", "x"])).is_err());
+        let (sha, files) = install_args(&a(&["--backup-sha256", "AB", "--files", "/x"])).unwrap();
+        assert_eq!((sha.as_deref(), files.as_str()), (Some("ab"), "/x"));
+        assert_eq!(install_args(&[]).unwrap(), (None, SHARE.to_string()));
     }
 
     #[test]
