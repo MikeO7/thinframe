@@ -1069,3 +1069,22 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   the icon after 4 s [V]. On the frame [U].
 - The badge said "21 / 22 containers up" once the doors were locked, and opened Security; #177
   sends that badge to System [V in code, U on the frame].
+
+## 2026-11-07 Camera flicker and the Settings gear (PR #179)
+- Owner: cameras flicker, the gear does nothing. Frame log: no `SettingsShown` and no load of
+  `127.0.0.1:8092` after the taps, so the form never posted [V]. On 2026-10-26 the same gear
+  opened Settings from `tfctl bench 1 8,6`, a touch that does not move [V]. Cause: WebKit on the
+  frame clicks only for a touch that does not move, and a finger always moves a little [U]; tabs
+  and rooms act on touch-down and worked. #179 acts on release for a touch that ends within
+  30 px; the gear submits its form directly.
+- Flicker: each redraw built new `<img>` elements on `Cache-Control: no-store` URLs, which
+  reloaded blank, and swaps used `decoding=async` [V in code]. Tiles now keep their picture
+  element across redraws and swap only after `decode()` (500 ms at most: Chromium never resolves
+  it on a hidden page [V]).
+- Browser at 1280x800, touch events moved 5 to 10 px: the camera view opens and closes, the
+  click after the tap is dropped, a 60 px drag does nothing, the gear posts once; no blank
+  moment in a tile over 9 s of swaps and a redraw [V]. On the frame [U]: needs a finger.
+- Protect answered 429 to every snapshot from the Mac test server (13 cameras every 4 s next to
+  prod) for about a minute; prod had none in 6 h [V]. The server now fetches one snapshot per
+  camera for all widths and serves the last good picture up to 30 s on a failure.
+- Server deployed to Nox, frame reloaded on the new page at 13:49 [V].
