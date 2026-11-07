@@ -1058,3 +1058,14 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   copy of Nox's data and the real cameras; a ring was simulated with `TF.ring` [V]. A real ring
   and the picture the server picks [U]; whether Protect's integration events carry
   `smartDetectTypes` [U] (no event at all in 6 quiet minutes).
+
+## 2026-11-07 Colours that mean something, instant camera tab (PRs #176, #177)
+- Server 2df9a3e on Nox; office layout: hero `badge_open: security`, `chips_open: house`
+  (backup `backups/office-layout.bak-before-colors.json`). Frame screenshot after the reload:
+  forecast bars blue (33°) to green (64°), "Locked up" chip neutral, Today shows
+  "3 h 46 min of daylight left" [V].
+- In a browser at 1280x800 on a copy of Nox's data: with the hidden tab's pictures fetched while
+  idle, all 13 camera tiles had a picture 0.3 s after opening Cameras; before, some still showed
+  the icon after 4 s [V]. On the frame [U].
+- The badge said "21 / 22 containers up" once the doors were locked, and opened Security; #177
+  sends that badge to System [V in code, U on the frame].
