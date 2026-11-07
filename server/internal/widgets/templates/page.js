@@ -293,10 +293,14 @@
         const s = st(x.state) || (open ? 'warn' : '');
         const e = h('span', 'chip' + (s ? ' c-' + s : '')); e.append(icon(x.icon), h('span', '', x.text)); c.append(e);
       }
-      // props.badge_open / chips_open name a tab: a tap on the badge or the chips opens it.
-      const bd = sec.querySelector('.badge');
+      // props.badge_open / chips_open name a tab: a tap on the badge or the chips opens it. The
+      // containers badge (no badge in the data) opens the tab with the services card instead.
+      const bd = sec.querySelector('.badge'), svc = document.querySelector('.w-services'), pg = svc && svc.closest('.page');
+      const go = { badge_open: d.badge ? p.badge_open : pg && pg.dataset.page, chips_open: p.chips_open };
       for (const [el, k] of [[bd, 'badge_open'], [c, 'chips_open']]) {
-        if (el && typeof p[k] === 'string' && document.querySelector('.page[data-page="' + p[k] + '"]')) el.dataset.go = p[k];
+        if (!el) continue;
+        if (typeof go[k] === 'string' && document.querySelector('.page[data-page="' + go[k] + '"]')) el.dataset.go = go[k];
+        else delete el.dataset.go;
       }
     },
     forecast(sec, d, p) {
