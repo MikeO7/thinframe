@@ -1034,3 +1034,15 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
 - Software 2026.11.07-e48db01 (sha 49401ad2), reboot: card start reads "be:4f:41:70:0f:bb (from
   sunxi-sid registers)", driver and wlan0 the same, heartbeat IP 192.168.1.184; prewarm 129 MB in
   8.2 s, on screen at 11.2 s (card) [V].
+
+## 2026-11-07 UniFi Protect connected on Nox
+- Protect 7.3.74 runs on the UNVR at 192.168.1.2, not the UDM Pro at 192.168.1.1 (that answers
+  the Integration API path with its HTML page). Integration API keys are per console: a key made
+  on the UDM Pro gets 401 from the UNVR [V].
+- Key `thinframe` made in Protect, Integrations, on the UNVR; Nox `env` has
+  `PROTECT_URL=https://192.168.1.2`, `PROTECT_API_KEY`, `PROTECT_INSECURE=1` (backup
+  `env.bak-before-protect`). Container log: "protect: cameras and doorbell from
+  https://192.168.1.2", "protect: events stream connected" [V].
+- `GET /api/data/camera/{id}` on Nox: 200 image/jpeg for all 13 cameras, 15 KB to 1.8 MB each [V].
+  No ring logged yet [U]. Snapshots are full size, not 640 wide [V]; decode time on the frame
+  not measured [U].
