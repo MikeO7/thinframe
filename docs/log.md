@@ -1046,3 +1046,15 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
 - `GET /api/data/camera/{id}` on Nox: 200 image/jpeg for all 13 cameras, 15 KB to 1.8 MB each [V].
   No ring logged yet [U]. Snapshots are full size, not 640 wide [V]; decode time on the frame
   not measured [U].
+
+## 2026-11-07 Doorbell picture, shrunk camera pictures, new Home (PR #174)
+- Server d4f6a1f deployed to Nox (`scripts/server-deploy.sh`); "protect: events stream
+  connected" [V]. Front Door (G6 Entry, 1920x2560) at `?w=480`: 92,660 B in 0.39 s, 2.6 ms from
+  the one-second cache; it was 693,792 B full size. 4K Backyard at 480: ~32 KB, was 1.5 MB [V].
+- Office layout: Home's House list (it repeated the hero chips) replaced by a cameras card
+  showing Front Door; backup `backups/office-layout.bak-before-doorbell-ui.json` on Nox. The frame
+  reloaded and its screenshot shows the Front Door tile and the daylight bar (3 h 52 min left) [V].
+- Ring view and Cameras tab (doorbell first and tall) checked in a browser at 1280x800 against a
+  copy of Nox's data and the real cameras; a ring was simulated with `TF.ring` [V]. A real ring
+  and the picture the server picks [U]; whether Protect's integration events carry
+  `smartDetectTypes` [U] (no event at all in 6 quiet minutes).
