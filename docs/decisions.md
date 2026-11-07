@@ -1146,3 +1146,18 @@ parsed and ran all of it again on the A7. Time to first byte 18 ms: the network 
   (the cars app cost about 400 ms of the load [V]).
 - **Stream replay** already skipped unchanged messages (`sec._last`, page.js), so a wake's
   replay of every source redraws only cards whose data changed. Left as it is.
+
+## The ring picture and shrunk camera pictures (2026-11-07)
+- Protect sends snapshots at camera size: 3840x2160 and 1.5 MB from the 4K cameras, 1920x2560
+  from the G6 Entry doorbell [V]. The server shrinks each to the width the page shows (320 to
+  1280 px, one fetch per camera and width a second): a grid tile is ~30 KB [V]. Go decodes and
+  shrinks a 4K snapshot in ~110 ms on the Mac [V]; the A33 no longer decodes 4K JPEGs at all.
+- A ring keeps one picture of who rang instead of a live view, which by the time an off screen is
+  on may show an empty porch. Snapshots at 0, 1.2, 2.4, 3.6 s after the press (on to 8 s while
+  none is clear); a blank one (mean brightness under 14 or over 240, or contrast under 10 on a
+  160 px copy) is never chosen; of the rest the sharpest, counted double while Protect reports a
+  person or face detection at that camera. With a person in view the second clear snapshot ends
+  it (~1.2 s). Rejected: a face detector on the server (a model, a dependency) and Protect's
+  event thumbnails (the Integration API has no events endpoint: 404 [V]). [U] whether the
+  integration events stream carries `smartDetectTypes`: none was seen in 6 quiet minutes.
+- The ring view is drawn for the Mali-400 like the rest (no animation, no blur, no blurred shadow).

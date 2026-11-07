@@ -234,6 +234,24 @@
   function mins(a, b) { return Math.round((b - a) / 60000); }
   function inText(m) { return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); }
 
+  // Today's Sunrise and Sunset events (the server's "today" feed) as a bar under the list: where
+  // the sun is now and how much daylight is left. Redrawn with the agenda every minute.
+  function daylight(b, day, now) {
+    const up = day.find(e => /^sunrise$/i.test(e.title)), down = day.find(e => /^sunset$/i.test(e.title));
+    if (!up || !down || down.s <= up.s) return;
+    const box = h('div', 'sun'), top = h('div', 'between'), lab = h('span', 'row');
+    lab.append(icon(now < up.s || now > down.s ? 'moon' : 'sun'), h('span', '', 'Daylight'));
+    const left = now < up.s ? 'Sunrise in ' + inText(mins(now, up.s)) : now < down.s ? inText(mins(now, down.s)) + ' left' : 'Sun set at ' + clockText(down.s);
+    top.append(lab, h('span', 'dim', left));
+    const pct = Math.max(0, Math.min(100, (now - up.s) / (down.s - up.s) * 100)), tr = h('div', 'sun-tr'), fill = h('i'), dot = h('b');
+    fill.style.width = pct + '%'; dot.style.left = pct + '%';
+    if (now < up.s || now > down.s) box.classList.add('night');
+    tr.append(fill, dot);
+    const ax = h('div', 'ax'); ax.append(h('span', '', clockText(up.s)), h('span', '', clockText(down.s)));
+    box.append(top, tr, ax);
+    b.append(box);
+  }
+
   const R = {
     hero(sec, d, p) {
       badge(sec, d.badge || health(d, p));
@@ -310,6 +328,7 @@
         r.append(t); list.append(r);
       }
       if (!list.children.length) empty(b, 'Nothing today'); else b.append(list);
+      daylight(b, day, now);
     },
     cars(sec, d, p) {
       const b = body(sec), cars = merge(p.cars, d.cars), compact = p.view === 'compact';
@@ -499,26 +518,34 @@
       }
       b.append(l);
     },
+    // The doorbell first and large (portrait, the height of the card) when the card is wide and
+    // shows three cameras or more; the rest in a grid. A redraw keeps each camera's last picture
+    // (camLast), so new data never blanks the tiles.
     cameras(sec, d, p) {
       const b = body(sec), cams = arr(d.cameras);
       sec.querySelector('.live').hidden = !cams.length || !!d.error || !!d.setup;
       if (d.setup) { empty(b, 'Cameras are not connected yet', 'Set PROTECT_URL and PROTECT_API_KEY on the server'); return; }
       if (d.error) { empty(b, 'Cameras unavailable'); return; }
       if (!cams.length) { empty(b, d.cameras ? 'No cameras match' : 'No camera data yet'); return; }
-      const g = h('div', 'cams n' + Math.min(cams.length, 9));
-      for (const c of cams) {
-        const t = h('div', 'cam' + (c.online ? '' : ' offline')), cap = h('div', 'cap');
-        t.dataset.cam = c.id; t.dataset.name = c.name;
-        cap.append(h('span', 'dot' + (c.online ? '' : ' off')), h('span', 'ellip', c.name + (c.online ? '' : ' · offline')));
-        t.append(cap); g.append(t);
+      const rings = arr(d.rings);
+      const feat = cams.length >= 3 && p.feature !== false && b.clientWidth > b.clientHeight * 1.3 ? cams.find(c => c.doorbell && c.online) : null;
+      const rest = cams.filter(c => c !== feat);
+      const wrap = h('div', 'camwrap');
+      if (feat) {
+        const t = camTile(feat, 'big', rings);
+        t.style.width = Math.round((b.clientHeight - 14) * 0.62) + 'px';
+        wrap.append(t);
       }
-      b.append(g);
-      // More than 9: the column count that shows the most of each 16:9 picture (14 in 3
-      // columns were 2.6:1 strips, QA 2026-10-28).
-      if (cams.length > 9 && g.clientWidth && g.clientHeight) {
-        let best = 3, area = 0;
-        for (let c = 3; c <= 6; c++) {
-          const w = g.clientWidth / c, ht = g.clientHeight / Math.ceil(cams.length / c);
+      const g = h('div', 'cams n' + Math.min(rest.length, 9));
+      for (const c of rest) g.append(camTile(c, '', rings));
+      wrap.append(g);
+      b.append(wrap);
+      // More than 4 (or beside the doorbell): the column count that shows the most of each 16:9
+      // picture (14 in 3 columns were 2.6:1 strips, QA 2026-10-28).
+      if ((rest.length > 4 || feat) && g.clientWidth && g.clientHeight) {
+        let best = 2, area = 0;
+        for (let c = 2; c <= 6; c++) {
+          const w = g.clientWidth / c, ht = g.clientHeight / Math.ceil(rest.length / c);
           const a = Math.min(w, ht * 16 / 9) * Math.min(ht, w * 9 / 16);
           if (a > area) { area = a; best = c; }
         }
@@ -575,6 +602,7 @@
   };
 
   const state = {};
+  const camLast = new Map(); // camera id -> URL of its last picture, shown at once on a redraw
   function props(sec) {
     if (!sec._props) { try { sec._props = JSON.parse((sec.querySelector('script.wp') || {}).textContent || '{}'); } catch (e) { sec._props = {}; } }
     return sec._props;
@@ -804,16 +832,47 @@
   }
 
   // ---- cameras and the doorbell (UniFi Protect, server/internal/api/cameras.go) ------------
-  // Snapshots, not video. A new picture is decoded off screen and swapped in when ready, one
-  // request per picture in flight, so a slow camera never queues requests.
-  function loadCam(holder, id) {
-    if (holder._busy) return;
+  // Snapshots, not video, shrunk by the server to the width shown (camshots.go): a 4K snapshot
+  // is 1.5 MB, the 480 px copy 30 KB. A new picture is decoded off screen and swapped in when
+  // ready, one request per picture in flight, so a slow camera never queues requests. Nothing
+  // fades or moves (Mali-400, see aurora.css).
+  // A doorbell's tile says when it last rang (a tap shows who: the ring picture).
+  function camTile(c, cls, rings) {
+    const t = h('div', 'cam' + (cls ? ' ' + cls : '') + (c.online ? '' : ' offline')), cap = h('div', 'cap');
+    t.dataset.cam = c.id; t.dataset.name = c.name;
+    if (c.online && camLast.has(c.id)) { const i = h('img'); i.alt = ''; i.src = camLast.get(c.id); t.append(i); }
+    else t.append(icon('cam', 'ph'));
+    cap.append(h('span', 'dot' + (c.online ? '' : ' off')), h('span', 'ellip', c.name + (c.online ? '' : ' · offline')));
+    t.append(cap);
+    const r = arr(rings).find(x => x.camera === c.id && x.still);
+    if (r) {
+      const g = h('div', 'rang'); g.dataset.ring = r.id;
+      g.append(icon('bell'), h('span', '', 'Rang ' + clockText(new Date(r.at))));
+      t.append(g);
+    }
+    return t;
+  }
+  function picURL(id, w) { return '/api/data/camera/' + encodeURIComponent(id) + '?w=' + Math.round(w || 640) + '&t=' + Date.now(); }
+  // load puts the picture at u into holder when it has loaded; fn(img) after. Returns false when
+  // the holder is still waiting for its last one.
+  function loadPic(holder, u, fn, err) {
+    if (holder._busy) return false;
     holder._busy = true;
     const n = new Image();
-    n.alt = '';
-    n.onload = () => { holder._busy = false; holder.classList.remove('stale'); const o = holder.querySelector('img'); if (o) o.replaceWith(n); else holder.prepend(n); };
-    n.onerror = () => { holder._busy = false; holder.classList.add('stale'); };
-    n.src = '/api/data/camera/' + encodeURIComponent(id) + '?t=' + Date.now();
+    n.alt = ''; n.decoding = 'async';
+    n.onload = () => {
+      holder._busy = false; holder.classList.remove('stale');
+      const o = holder.querySelector('img, .ph');
+      if (o) o.replaceWith(n); else holder.prepend(n);
+      if (fn) fn(n);
+    };
+    n.onerror = () => { holder._busy = false; holder.classList.add('stale'); if (err) err(); };
+    n.src = u;
+    return true;
+  }
+  function loadCam(holder, id) {
+    const u = picURL(id, holder.clientWidth);
+    loadPic(holder, u, () => camLast.set(id, u));
   }
   function camTick(sec, force) {
     const every = Math.max(2, num(props(sec).interval_s) || 4) * 1000, now = Date.now();
@@ -826,23 +885,55 @@
   const view = { el: null };
   if (camSecs.length) setInterval(() => { if (!view.el) camSecs.forEach(s => { if (visible(s)) camTick(s); }); }, 1000);
 
-  // One camera over the whole page: a tapped camera, or the doorbell when it rings.
+  // One camera over the whole page: a tapped camera, a past ring, or the doorbell ringing now.
+  // A ring shows the one picture the server chose of who rang (ring.still), not a live view
+  // that may show an empty porch by the time the screen is on; "Live" switches to live. A
+  // portrait picture (a doorbell) sits on the left with the words beside it; a landscape one
+  // fills the screen under them.
   function openView(o) {
     closeView();
-    const el = h('div', 'camview' + (o.ring ? ' cv-ring' : '')), pic = h('div', 'cv-pic'), top = h('div', 'cv-top'), pill = h('div', 'cv-pill');
-    pill.append(icon(o.ring ? 'bell' : 'cam'), h('span', '', o.name));
-    top.append(pill, h('span', 'cv-live', 'Live'));
-    const foot = h('div', 'cv-foot'), txt = h('div', 'cv-txt');
-    // The camera's name is in the pill; the big title only for a ring.
-    if (o.ring) txt.append(h('div', 'cv-title', 'Someone\u2019s at the door'));
-    txt.append(h('div', 'cv-sub', o.sub || 'Tap anywhere to close'));
-    foot.append(txt, h('div', 'cv-btn', o.ring ? 'Dismiss' : 'Close'));
-    el.append(pic, top, foot);
-    el.addEventListener('click', () => { if (o.ring) dismissed(o.ringId, true); closeView(); });
+    const el = h('div', 'camview' + (o.ring ? ' cv-ring' : '') + (o.still ? '' : ' cv-on') + (o.wide ? ' cv-wide' : ''));
+    el.dataset.mood = 'camera';
+    const pic = h('div', 'cv-pic'), side = h('div', 'cv-side'), tag = h('div', 'cv-tag');
+    // The tile's picture at once (in the cache, already decoded); the sharp one replaces it.
+    if (o.first) { const f = h('img'); f.alt = ''; f.src = o.first; pic.append(f); } else pic.append(icon(o.ring ? 'bell' : 'cam', 'ph'));
+    tag.append(h('span', 'cv-live', 'Live'), h('span', 'cv-still', o.ring ? 'At the door' : 'When it rang'));
+    pic.append(tag);
+    const head = h('div', 'cv-head');
+    const bell = h('div', 'cv-icon'); bell.append(icon(o.still ? 'bell' : 'cam'));
+    head.append(bell);
+    if (o.title) head.append(h('div', 'cv-title', o.title));
+    head.append(h('div', 'cv-name', o.name), h('div', 'cv-sub', o.sub || ''));
+    const btns = h('div', 'cv-btns'), close = h('div', 'cv-btn', o.ring ? 'Dismiss' : 'Close');
+    btns.append(close);
+    let liveBtn = null;
+    if (o.still) { liveBtn = h('div', 'cv-btn cv-alt', 'Live view'); liveBtn.dataset.live = '1'; btns.append(liveBtn); }
+    side.append(head, btns);
+    el.append(pic, side);
     document.body.append(el);
-    const tick = () => loadCam(pic, o.id);
-    tick();
-    Object.assign(view, { el, ringId: o.ringId || '', timer: setInterval(tick, o.ring ? 1000 : 1500), end: setTimeout(closeView, (o.secs || 60) * 1000) });
+    const shape = n => el.classList.toggle('cv-wide', n.naturalWidth > n.naturalHeight);
+    let timer = 0;
+    const live = () => {
+      el.classList.add('cv-on');
+      if (liveBtn) liveBtn.textContent = o.ring ? 'Ring picture' : 'Picture';
+      const tick = () => loadPic(pic, picURL(o.id, 1280), shape);
+      tick(); clearInterval(timer); timer = setInterval(tick, 1000); view.timer = timer;
+    };
+    const still = () => {
+      el.classList.remove('cv-on');
+      if (liveBtn) liveBtn.textContent = 'Live view';
+      clearInterval(timer);
+      pic._busy = false;
+      // No clear picture of this ring (night, a camera restarting): live instead of nothing.
+      loadPic(pic, o.still + '?w=1280', shape, live);
+    };
+    el.addEventListener('click', e => {
+      if (e.target.closest('[data-live]')) { if (el.classList.contains('cv-on')) still(); else live(); dispatchEvent(new Event('tf-activity')); return; }
+      if (o.ring) dismissed(o.ringId, true);
+      closeView();
+    });
+    Object.assign(view, { el, ringId: o.ringId || '', timer, end: setTimeout(closeView, (o.secs || 60) * 1000) });
+    if (o.still) still(); else live();
     dispatchEvent(new Event('tf-activity'));
   }
   function closeView() {
@@ -850,7 +941,21 @@
     clearInterval(view.timer); clearTimeout(view.end);
     view.el.remove(); view.el = null;
   }
-  addEventListener('click', e => { const t = e.target.closest('.cam'); if (t) openView({ id: t.dataset.cam, name: t.dataset.name, secs: 120 }); });
+  function when(at) {
+    const age = (Date.now() - at) / 1000, t = clockText(new Date(at));
+    return t + ' · ' + (age < 60 ? 'just now' : age < 3600 ? Math.round(age / 60) + ' min ago' : ago(age * 1000));
+  }
+  addEventListener('click', e => {
+    const r = e.target.closest('.rang');
+    if (r) {
+      const t = r.closest('.cam'), sec = r.closest('.w'), x = arr((state[sec.id] || {}).rings).find(q => q.id === r.dataset.ring);
+      if (x) openView({ id: x.camera, name: x.name || t.dataset.name, still: '/api/data/ring/' + encodeURIComponent(x.id), title: 'The doorbell rang', sub: when(x.at), secs: 60 });
+      return;
+    }
+    const t = e.target.closest('.cam'), im = t && t.querySelector('img');
+    if (t) openView({ id: t.dataset.cam, name: t.dataset.name, sub: 'Tap anywhere to close', secs: 120,
+      first: im ? im.src : '', wide: im ? im.naturalWidth > im.naturalHeight : true });
+  });
   addEventListener('click', e => { const t = e.target.closest('.w[data-open]'); if (t) show(t.dataset.open); });
   // A dismissed ring stays dismissed across the reload a waking screen does.
   function dismissed(id, set) {
@@ -864,8 +969,8 @@
   function ring(d) {
     const age = Number(d.age_s) || 0;
     if (!d.camera || age > 90 || dismissed(d.id) || (view.el && view.ringId === d.id)) return;
-    openView({ id: d.camera, name: d.name || 'Doorbell', ring: true, ringId: d.id, secs: Math.max(20, 90 - age),
-      sub: (d.name || 'Doorbell') + ' \u00b7 ' + (age < 60 ? 'just now' : Math.round(age / 60) + ' min ago') });
+    openView({ id: d.camera, name: d.name || 'Doorbell', ring: true, ringId: d.id, still: d.still || '', secs: Math.max(20, 90 - age),
+      title: 'Someone’s at the door', sub: when(Date.now() - age * 1000) });
   }
   TF.ring = ring; // tests and the MCP preview
 

@@ -25,7 +25,7 @@ func fakeConsole(t *testing.T, snaps *atomic.Int32, events []string) *httptest.S
 		}
 	}
 	m.HandleFunc("GET "+apiPath+"/cameras", auth(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`[{"id":"c1","name":"Front Door","state":"CONNECTED","modelKey":"camera"},
+		_, _ = w.Write([]byte(`[{"id":"c1","name":"Front Door","state":"CONNECTED","modelKey":"camera","type":"UVC G6 Entry"},
 			{"id":"c2","name":"Garage","state":"DISCONNECTED"},{"id":"","name":"broken"}]`))
 	}))
 	m.HandleFunc("GET "+apiPath+"/cameras/{id}/snapshot", auth(func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func TestCamerasAndSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Camera{{"c1", "Front Door", true}, {"c2", "Garage", false}}
+	want := []Camera{{"c1", "Front Door", true, true}, {"c2", "Garage", false, false}}
 	if len(cams) != 2 || cams[0] != want[0] || cams[1] != want[1] {
 		t.Fatalf("cameras %+v", cams)
 	}
@@ -86,8 +86,16 @@ func TestParseEvent(t *testing.T) {
 	if !ok || ev.Type != "ring" || ev.Device != "c1" || ev.ID != "e1" || ev.Start.UnixMilli() != 1761450000000 {
 		t.Fatalf("ring %+v %v", ev, ok)
 	}
+	ev, ok = ParseEvent([]byte(`{"type":"add","item":{"modelKey":"event","id":"e2","type":"smartDetectZone","device":"c1","smartDetectTypes":["person","face"]}}`))
+	if !ok || ev.Type != "smartDetectZone" || len(ev.Smart) != 2 || ev.Smart[1] != "face" {
+		t.Fatalf("smart detection %+v %v", ev, ok)
+	}
+	ev, ok = ParseEvent([]byte(`{"type":"update","item":{"modelKey":"event","id":"e2","end":1761450001000}}`))
+	if !ok || !ev.Ended || ev.ID != "e2" || ev.Type != "" {
+		t.Fatalf("end %+v %v", ev, ok)
+	}
 	for _, bad := range []string{
-		`{"type":"update","item":{"modelKey":"event","id":"e1","end":1761450001000}}`,
+		`{"type":"update","item":{"modelKey":"event","id":"e1","score":50}}`,
 		`{"type":"add","item":{"modelKey":"camera","id":"c1"}}`,
 		`not json`, `{}`,
 	} {
