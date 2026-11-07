@@ -251,3 +251,10 @@ iframe{border:0;width:100%;height:100%;display:block}
 .sun-tr i{position:absolute;left:0;top:0;bottom:0;border-radius:99rem;background:linear-gradient(90deg,#ff9a5c,#ffd60a)}
 .sun-tr b{position:absolute;top:50%;width:2rem;height:2rem;margin:-1rem 0 0 -1rem;border-radius:50%;background:#ffd60a;border:.3rem solid #1a1c24}
 .sun.night .sun-tr i{opacity:.35}.sun.night .sun-tr b{background:#e5e5ea}
+/* hero chips with a state (page.js hero), and anything that opens a tab on a tap */
+.chip.c-warn{color:var(--warn);background:rgba(255,182,72,.1);border-color:rgba(255,182,72,.32)}
+.chip.c-bad{color:var(--bad);background:rgba(255,95,120,.1);border-color:rgba(255,95,120,.32)}
+.chip.c-ok{color:var(--ok)}
+.ag-none{font-size:1.6rem;color:var(--faint)}
+.sun-big{display:flex;flex-direction:column}
+.sun-big .sun-n{font-size:6.4rem;color:#fff}.sun-big .sun-l{font-size:1.6rem;margin:.6rem 0 2.4rem}

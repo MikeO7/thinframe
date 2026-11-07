@@ -234,20 +234,43 @@
   function mins(a, b) { return Math.round((b - a) / 60000); }
   function inText(m) { return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); }
 
+  // A temperature's colour on a fixed scale, the same every day: indigo below freezing, blue
+  // cold, green mild, yellow warm, orange hot, red very hot. A week's bars then say how warm
+  // each day is at a glance (they were all the same blue-to-yellow before).
+  const TSTOPS = [[-12, [110, 100, 255]], [0, [70, 150, 255]], [8, [60, 210, 235]], [15, [80, 225, 150]],
+    [21, [255, 214, 10]], [27, [255, 150, 60]], [33, [255, 85, 95]]];
+  function tempColor(t, units) {
+    const c = units === 'f' ? (t - 32) * 5 / 9 : t;
+    let k = 0;
+    while (k < TSTOPS.length - 2 && c > TSTOPS[k + 1][0]) k++;
+    const [a, ca] = TSTOPS[k], [b, cb] = TSTOPS[k + 1], f = Math.max(0, Math.min(1, (c - a) / (b - a)));
+    return 'rgb(' + ca.map((v, i) => Math.round(v + (cb[i] - v) * f)).join(',') + ')';
+  }
+
   // Today's Sunrise and Sunset events (the server's "today" feed) as a bar under the list: where
   // the sun is now and how much daylight is left. Redrawn with the agenda every minute.
-  function daylight(b, day, now) {
+  // big: nothing else in the card, so the hours of light left are the card's big number.
+  function daylight(b, day, now, big) {
     const up = day.find(e => /^sunrise$/i.test(e.title)), down = day.find(e => /^sunset$/i.test(e.title));
     if (!up || !down || down.s <= up.s) return;
     const box = h('div', 'sun'), top = h('div', 'between'), lab = h('span', 'row');
     lab.append(icon(now < up.s || now > down.s ? 'moon' : 'sun'), h('span', '', 'Daylight'));
     const left = now < up.s ? 'Sunrise in ' + inText(mins(now, up.s)) : now < down.s ? inText(mins(now, down.s)) + ' left' : 'Sun set at ' + clockText(down.s);
-    top.append(lab, h('span', 'dim', left));
+    top.append(lab, h('span', 'dim', big ? inText(mins(up.s, down.s)) + ' of light' : left));
     const pct = Math.max(0, Math.min(100, (now - up.s) / (down.s - up.s) * 100)), tr = h('div', 'sun-tr'), fill = h('i'), dot = h('b');
     fill.style.width = pct + '%'; dot.style.left = pct + '%';
     if (now < up.s || now > down.s) box.classList.add('night');
     tr.append(fill, dot);
     const ax = h('div', 'ax'); ax.append(h('span', '', clockText(up.s)), h('span', '', clockText(down.s)));
+    if (big) {
+      box.classList.add('sun-big');
+      const m = now < up.s ? mins(now, up.s) : now < down.s ? mins(now, down.s) : 0;
+      if (m > 0) {
+        const n = h('div', 'big sun-n', m < 60 ? m : Math.floor(m / 60));
+        n.append(h('span', 'unit', m < 60 ? ' min' : ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '')));
+        box.append(n, h('div', 'dim sun-l', now < up.s ? 'until sunrise' : 'of daylight left'));
+      }
+    }
     box.append(top, tr, ax);
     b.append(box);
   }
@@ -263,7 +286,18 @@
         sec.querySelector('.hero-sub').textContent = sub.filter(Boolean).join(' · ');
       }
       const c = sec.querySelector('.chips'); c.textContent = '';
-      for (const x of arr(d.chips)) { const e = h('span', 'chip'); e.append(icon(x.icon), h('span', '', x.text)); c.append(e); }
+      for (const x of arr(d.chips)) {
+        // A chip's state colours it; without one, a count of open doors, windows or garages
+        // (icon unlock, door, window, garage; "1 open") is a warning, as the badge says.
+        const open = ['unlock', 'door', 'window', 'garage'].includes(x.icon) && /^[1-9]/.test(String(x.text || ''));
+        const s = st(x.state) || (open ? 'warn' : '');
+        const e = h('span', 'chip' + (s ? ' c-' + s : '')); e.append(icon(x.icon), h('span', '', x.text)); c.append(e);
+      }
+      // props.badge_open / chips_open name a tab: a tap on the badge or the chips opens it.
+      const bd = sec.querySelector('.badge');
+      for (const [el, k] of [[bd, 'badge_open'], [c, 'chips_open']]) {
+        if (el && typeof p[k] === 'string' && document.querySelector('.page[data-page="' + p[k] + '"]')) el.dataset.go = p[k];
+      }
     },
     forecast(sec, d, p) {
       const b = body(sec), days = arr(d.days).slice(0, num(p.days) || 7);
@@ -277,6 +311,7 @@
         r.append(h('span', 'dn', i === 0 ? 'Today' : dt.toLocaleDateString(undefined, { weekday: 'short' })), icon(wxIcon(x.code), 'wx'));
         const rg = h('span', 'rg'), f = h('i');
         f.style.left = ((x.lo - lo) / span * 100) + '%'; f.style.right = ((hi - x.hi) / span * 100) + '%';
+        f.style.background = 'linear-gradient(90deg,' + tempColor(x.lo, d.units) + ',' + tempColor((x.lo + x.hi) / 2, d.units) + ',' + tempColor(x.hi, d.units) + ')';
         rg.append(f);
         r.append(h('span', 'lo', x.lo + '°'), rg, h('span', 'hi', x.hi + '°'));
         l.append(r);
@@ -285,8 +320,11 @@
     },
     agenda(sec, d, p) {
       const b = body(sec), now = new Date(), evs = events(d);
-      const day = evs.filter(e => e.s.toDateString() === now.toDateString());
-      const next = evs.find(e => e.s > now);
+      // Sunrise and Sunset are drawn as the daylight bar (list view), not listed or counted.
+      const isSun = e => (p.view || 'list') === 'list' && /^sun(rise|set)$/i.test(e.title);
+      const sun = evs.filter(e => isSun(e) && e.s.toDateString() === now.toDateString());
+      const day = evs.filter(e => !isSun(e) && e.s.toDateString() === now.toDateString());
+      const next = evs.find(e => !isSun(e) && e.s > now);
       const note = sec.querySelector('.note');
       if (note) note.textContent = day.length ? day.length + (day.length === 1 ? ' event' : ' events') + (next ? ' · next in ' + inText(mins(now, next.s)) : '') : '';
       const view = p.view || 'list';
@@ -315,7 +353,7 @@
         if (t >= from && t <= to) { const n = h('div', 'now'); n.style.top = (t - from) / span * 100 + '%'; tl.append(n); }
         b.append(tl); return;
       }
-      const list = h('div', 'ag'), src = p.all ? evs : day, max = num(p.max) || 5;
+      const list = h('div', 'ag'), src = (p.all ? evs : day).filter(e => !isSun(e)), max = num(p.max) || 5;
       // What is still ahead first: past events fill the list only when fewer remain than fit,
       // so at 6 PM the card shows the evening, not the morning (QA 2026-10-28).
       const ahead = src.findIndex(e => e.e >= now), from = ahead < 0 ? Math.max(0, src.length - max) : Math.min(ahead, Math.max(0, src.length - max));
@@ -327,8 +365,11 @@
         const t = h('div', 'ellip', e.title); if (e.where) t.append(h('small', 'ellip', e.where));
         r.append(t); list.append(r);
       }
-      if (!list.children.length) empty(b, 'Nothing today'); else b.append(list);
-      daylight(b, day, now);
+      const lit = sun.length === 2;
+      if (list.children.length) b.append(list);
+      else if (lit) b.append(h('div', 'ag-none', 'Nothing planned today'));
+      else empty(b, 'Nothing today');
+      if (lit) daylight(b, sun, now, !list.children.length);
     },
     cars(sec, d, p) {
       const b = body(sec), cars = merge(p.cars, d.cars), compact = p.view === 'compact';
@@ -343,7 +384,7 @@
           const top = h('div', 'between'); top.append(h('span', 'ellip cn', c.name));
           if (pct(c) !== null) top.append(h('span', 'cp' + (c.charging ? ' s-ok' : ''), pct(c) + '%'));
           t.append(top);
-          if (pct(c) !== null) t.append(bar(pct(c), c.charging ? 'var(--ok)' : ''));
+          if (pct(c) !== null) t.append(bar(pct(c), c.charging ? 'var(--ok)' : pct(c) < 10 ? 'var(--bad)' : pct(c) < 20 ? 'var(--warn)' : ''));
           t.append(h('div', 'faint ellip cs', c.status || (pct(c) === null ? c.model || '' : '')));
           r.append(t); l.append(r);
         }
@@ -884,6 +925,24 @@
   const camSecs = Array.from(document.querySelectorAll('.w-cameras'));
   const view = { el: null };
   if (camSecs.length) setInterval(() => { if (!view.el) camSecs.forEach(s => { if (visible(s)) camTick(s); }); }, 1000);
+  // Cameras on a hidden tab get a small picture each while the page is idle, so the first visit
+  // shows pictures at once (refreshed at full tile size right after) instead of icons for a few
+  // seconds. Once after the page loads; again later if the camera list had not come yet.
+  const camPre = [];
+  function prefetchCams() {
+    let n = 0;
+    camSecs.forEach(sec => {
+      if (visible(sec)) return;
+      for (const c of arr((state[sec.id] || {}).cameras)) {
+        if (!c.online || camLast.has(c.id) || camPre.some(x => x.id === c.id)) continue;
+        const u = picURL(c.id, 320), i = new Image();
+        i.decoding = 'async'; i.onload = () => camLast.set(c.id, u); i.src = u;
+        camPre.push({ id: c.id, i }); n++;
+      }
+    });
+    return n;
+  }
+  if (camSecs.length) addEventListener('load', () => setTimeout(() => { if (!prefetchCams()) setTimeout(prefetchCams, 15000); }, 5000));
 
   // One camera over the whole page: a tapped camera, a past ring, or the doorbell ringing now.
   // A ring shows the one picture the server chose of who rang (ring.still), not a live view
@@ -893,7 +952,7 @@
   function openView(o) {
     closeView();
     const el = h('div', 'camview' + (o.ring ? ' cv-ring' : '') + (o.still ? '' : ' cv-on') + (o.wide ? ' cv-wide' : ''));
-    el.dataset.mood = 'camera';
+    el.dataset.mood = o.ring ? 'bell' : 'camera';
     const pic = h('div', 'cv-pic'), side = h('div', 'cv-side'), tag = h('div', 'cv-tag');
     // The tile's picture at once (in the cache, already decoded); the sharp one replaces it.
     if (o.first) { const f = h('img'); f.alt = ''; f.src = o.first; pic.append(f); } else pic.append(icon(o.ring ? 'bell' : 'cam', 'ph'));
@@ -956,7 +1015,7 @@
     if (t) openView({ id: t.dataset.cam, name: t.dataset.name, sub: 'Tap anywhere to close', secs: 120,
       first: im ? im.src : '', wide: im ? im.naturalWidth > im.naturalHeight : true });
   });
-  addEventListener('click', e => { const t = e.target.closest('.w[data-open]'); if (t) show(t.dataset.open); });
+  addEventListener('click', e => { const t = e.target.closest('[data-go]') || e.target.closest('.w[data-open]'); if (t) show(t.dataset.go || t.dataset.open); });
   // A dismissed ring stays dismissed across the reload a waking screen does.
   function dismissed(id, set) {
     try {
