@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"sync"
@@ -35,6 +36,11 @@ type ringState struct {
 	mu   sync.Mutex
 	last Ring
 	rang map[string]time.Time // camera id -> last ring
+	// shots: the last ringKeep rings and their pictures, by ring id, oldest first in order;
+	// persons: person and face detections in progress (camshots.go).
+	shots   map[string]*ringShot
+	order   []string
+	persons map[string]personSeen
 }
 
 // Ring is the last doorbell press.
@@ -54,7 +60,11 @@ func (s *Server) RunProtect(ctx context.Context) {
 }
 
 func (s *Server) protectEvent(ev protect.Event) {
-	if ev.Type != "ring" || ev.Device == "" {
+	if ev.Ended || ev.Type != "ring" {
+		s.smartEvent(ev)
+		return
+	}
+	if ev.Device == "" {
 		return
 	}
 	name := "Doorbell"
@@ -78,6 +88,7 @@ func (s *Server) protectEvent(ev protect.Event) {
 	}
 	s.ring.rang[ev.Device] = r.At
 	s.ring.mu.Unlock()
+	s.startRingShot(r)
 	log.Printf("protect: doorbell %q rang", name)
 	for _, f := range s.Store.List() {
 		s.sse.publish(f.ID, s.ringMsg(r))
@@ -93,7 +104,7 @@ func (s *Server) protectEvent(ev protect.Event) {
 
 func (s *Server) ringMsg(r Ring) map[string]any {
 	return map[string]any{"doorbell": map[string]any{"id": r.ID, "camera": r.Camera, "name": r.Name,
-		"age_s": int(time.Since(r.At).Seconds())}}
+		"age_s": int(time.Since(r.At).Seconds()), "still": "/api/data/ring/" + url.PathEscape(r.ID)}}
 }
 
 // pushRing replays a recent ring to a page that just connected.
@@ -144,7 +155,8 @@ func (s *Server) cameraAllowed(ctx context.Context, id string) bool {
 	return false
 }
 
-// handleCamera: GET /api/data/camera/{id}, the camera's current snapshot (JPEG).
+// handleCamera: GET /api/data/camera/{id}, the camera's current snapshot (JPEG), at most
+// ?w= wide (rounded up to one of camWidths; default the largest).
 func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Protect == nil {
 		http.Error(w, "cameras not configured (PROTECT_URL)", http.StatusNotFound)
@@ -157,7 +169,7 @@ func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such camera on any dashboard", http.StatusNotFound)
 		return
 	}
-	b, err := s.opts.Protect.Snapshot(ctx, id)
+	b, err := s.cameraJPEG(ctx, id, camWidth(r.URL.Query().Get("w")))
 	if err != nil {
 		log.Printf("protect: snapshot %s: %v", id, err)
 		http.Error(w, "snapshot failed", http.StatusBadGateway)
@@ -168,7 +180,8 @@ func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
-// camerasData is a cameras widget's data: {cameras: [{id,name,online}]}.
+// camerasData is a cameras widget's data: {cameras: [{id,name,online,doorbell}], rings:
+// [{id,camera,name,at,still}]} (rings of the last day at those cameras, newest first).
 func (s *Server) camerasData(w store.Widget) map[string]any {
 	ctx, cancel := context.WithTimeout(context.Background(), camWait)
 	defer cancel()
@@ -185,5 +198,5 @@ func (s *Server) camerasData(w store.Widget) map[string]any {
 	}
 	// The page merges each message into what it has: name error and setup as cleared, or a
 	// past "cameras unavailable" outlived Protect's recovery (QA 2026-10-28).
-	return map[string]any{"cameras": cams, "error": nil, "setup": nil}
+	return map[string]any{"cameras": cams, "rings": s.ringHistory(cams), "error": nil, "setup": nil}
 }

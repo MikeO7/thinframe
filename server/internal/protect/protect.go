@@ -28,20 +28,25 @@ const (
 	maxBackof = time.Minute
 )
 
-// Camera is one Protect camera as the dashboard needs it.
+// Camera is one Protect camera as the dashboard needs it. Doorbell: a doorbell model (a G4
+// Doorbell, a G6 Entry): the cameras widget shows it first and large.
 type Camera struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Online bool   `json:"online"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Online   bool   `json:"online"`
+	Doorbell bool   `json:"doorbell,omitempty"`
 }
 
 // Event is one event from the stream. Type is Protect's ("ring", "motion",
-// "smartDetectZone", ...); Device is the camera id.
+// "smartDetectZone", ...); Device is the camera id; Smart the detected object types
+// ("person", "face", "vehicle", ...). Ended: an update that closes the event ID (no Type).
 type Event struct {
 	ID     string
 	Type   string
 	Device string
+	Smart  []string
 	Start  time.Time
+	Ended  bool
 }
 
 // Client talks to one Protect console. Safe for concurrent use.
@@ -120,9 +125,11 @@ func (c *Client) Cameras(ctx context.Context) ([]Camera, error) {
 // ParseCameras reads GET /v1/cameras.
 func ParseCameras(b []byte) ([]Camera, error) {
 	var raw []struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		State string `json:"state"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		State      string `json:"state"`
+		Type       string `json:"type"`
+		HasPackage bool   `json:"hasPackageCamera"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, fmt.Errorf("protect cameras: %w", err)
@@ -136,7 +143,9 @@ func ParseCameras(b []byte) ([]Camera, error) {
 		if name == "" {
 			name = r.ID
 		}
-		out = append(out, Camera{ID: r.ID, Name: name, Online: r.State == "" || r.State == "CONNECTED"})
+		t := strings.ToLower(r.Type)
+		bell := r.HasPackage || strings.Contains(t, "doorbell") || strings.Contains(t, "entry")
+		out = append(out, Camera{ID: r.ID, Name: name, Online: r.State == "" || r.State == "CONNECTED", Doorbell: bell})
 	}
 	return out, nil
 }
@@ -164,23 +173,31 @@ func (c *Client) Snapshot(ctx context.Context, id string) ([]byte, error) {
 	return b, nil
 }
 
-// ParseEvent reads one events-stream message. Only new events count ("add" of an "event"):
-// updates carry the end of an event already seen.
+// ParseEvent reads one events-stream message: a new event ("add" of an "event"), or an update
+// that carries its end (Ended, ID only). Other updates are dropped.
 func ParseEvent(b []byte) (Event, bool) {
 	var m struct {
 		Type string `json:"type"`
 		Item struct {
-			ModelKey string `json:"modelKey"`
-			ID       string `json:"id"`
-			Type     string `json:"type"`
-			Device   string `json:"device"`
-			Start    int64  `json:"start"`
+			ModelKey string   `json:"modelKey"`
+			ID       string   `json:"id"`
+			Type     string   `json:"type"`
+			Device   string   `json:"device"`
+			Smart    []string `json:"smartDetectTypes"`
+			Start    int64    `json:"start"`
+			End      int64    `json:"end"`
 		} `json:"item"`
 	}
-	if json.Unmarshal(b, &m) != nil || m.Type != "add" || m.Item.ModelKey != "event" || m.Item.Type == "" {
+	if json.Unmarshal(b, &m) != nil || m.Item.ModelKey != "event" {
 		return Event{}, false
 	}
-	ev := Event{ID: m.Item.ID, Type: m.Item.Type, Device: m.Item.Device, Start: time.Now()}
+	if m.Type == "update" && m.Item.End > 0 && m.Item.ID != "" {
+		return Event{ID: m.Item.ID, Ended: true}, true
+	}
+	if m.Type != "add" || m.Item.Type == "" {
+		return Event{}, false
+	}
+	ev := Event{ID: m.Item.ID, Type: m.Item.Type, Device: m.Item.Device, Smart: m.Item.Smart, Start: time.Now()}
 	if m.Item.Start > 0 {
 		ev.Start = time.UnixMilli(m.Item.Start)
 	}

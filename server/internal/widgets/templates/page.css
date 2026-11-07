@@ -203,28 +203,51 @@ iframe{border:0;width:100%;height:100%;display:block}
 .cars-compact>*,.lst>*,.groups>*,.tgrid>*{min-width:0}
 .w.nodata{background:var(--card);padding:2.2rem 2.4rem}.w.nodata .body{display:flex;flex:1}
 
-/* cameras (snapshots) and the full-page camera view, also the doorbell pop-up */
+/* cameras (snapshots) and the full-page camera view, also the doorbell pop-up. Nothing moves
+   or blurs (Mali-400, aurora.css); a tile waits for its first picture with a camera icon. */
 .w-cameras{display:flex;flex-direction:column}
-.cams{flex:1;min-height:0;display:grid;gap:1.2rem;margin-top:1.4rem;grid-template-columns:1fr 1fr;grid-auto-rows:1fr}
+.camwrap{flex:1;min-height:0;display:flex;gap:1.2rem;margin-top:1.4rem}
+.cams{flex:1;min-width:0;min-height:0;display:grid;gap:1.2rem;grid-template-columns:1fr 1fr;grid-auto-rows:1fr}
 .cams.n1{grid-template-columns:1fr}.cams.n3,.cams.n5,.cams.n6,.cams.n7,.cams.n8,.cams.n9{grid-template-columns:repeat(3,1fr)}
-.cam{position:relative;border-radius:1.6rem;overflow:hidden;background:#000;min-height:0}
+.cam{position:relative;border-radius:1.6rem;overflow:hidden;background:#0d0f16;min-height:0}
+.cam.big{flex:none;height:100%;border-radius:2rem}
 .cam img,.cv-pic img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cam .ph,.cv-pic .ph{position:absolute;left:50%;top:50%;width:3.6rem;height:3.6rem;margin:-1.8rem 0 0 -1.8rem;color:rgba(255,255,255,.22)}
 .cam.stale img{opacity:.45}
 .cam .cap{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:.8rem;padding:2.6rem 1.3rem 1rem;font-size:1.4rem;font-weight:600;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.7))}
+.cam.big .cap{font-size:1.8rem;padding:4rem 1.8rem 1.6rem}
+.rang{position:absolute;left:1.4rem;top:1.4rem;display:flex;align-items:center;gap:.8rem;padding:.9rem 1.5rem;border-radius:99rem;background:rgba(0,0,0,.62);color:#fff;font-size:1.4rem;font-weight:700}
+.rang .ic{width:1.8rem;height:1.8rem}
 .live::before{content:"";display:inline-block;width:.7rem;height:.7rem;border-radius:50%;background:var(--bad);margin-right:.7rem;vertical-align:.1rem}
-.camview{position:fixed;inset:0;z-index:50;background:#000;color:#fff}
-.cv-pic{position:absolute;inset:0}.cv-pic img{object-fit:contain}
-.cv-top{position:absolute;left:3rem;right:3rem;top:2.6rem;display:flex;justify-content:space-between;align-items:center}
-.cv-pill{display:flex;align-items:center;gap:1rem;padding:1.1rem 2rem;border-radius:99rem;background:rgba(0,0,0,.6);font-size:1.7rem;font-weight:700}
-.cv-pill .ic{width:2.3rem;height:2.3rem}
-.cv-live{padding:.8rem 1.4rem;border-radius:99rem;background:rgba(0,0,0,.6);font-size:1.3rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+/* the view: picture on the left (portrait), words and buttons on the right; cv-wide (a landscape
+   picture) fills the screen and the words sit over its foot */
+.camview{position:fixed;inset:0;z-index:50;background:#05060a;color:#fff;display:flex;gap:4rem;padding:3rem 4.4rem 3rem 3rem}
+.cv-pic{position:relative;flex:none;height:100%;width:55rem;border-radius:2.8rem;overflow:hidden;background:#11131b}
+.cv-pic .ph{width:6rem;height:6rem;margin:-3rem 0 0 -3rem}
+.cv-tag{position:absolute;left:1.8rem;top:1.8rem;padding:.8rem 1.4rem;border-radius:99rem;background:rgba(0,0,0,.6);font-size:1.3rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+.cv-tag .cv-live,.camview.cv-on .cv-tag .cv-still{display:none}.camview.cv-on .cv-tag .cv-live{display:inline}
 .cv-live::before{content:"";display:inline-block;width:.8rem;height:.8rem;border-radius:50%;background:#ff4d5e;margin-right:.8rem;vertical-align:.05rem}
-.cv-foot{position:absolute;left:0;right:0;bottom:0;padding:10rem 3.4rem 3.2rem;display:flex;align-items:flex-end;justify-content:space-between;gap:3rem;background:linear-gradient(transparent,rgba(0,0,0,.85))}
-.cv-title{font-size:5.4rem;font-weight:700;letter-spacing:-.025em;line-height:1.05}
-.cv-sub{font-size:1.9rem;color:rgba(255,255,255,.72);margin-top:1.1rem}
-.cv-btn{flex:none;padding:1.7rem 3.6rem;border-radius:99rem;background:#fff;color:#000;font-size:1.9rem;font-weight:700}
-.camview.cv-ring .cv-pill{background:var(--accent);color:#000}
-@keyframes cvpop{0%{opacity:0;transform:scale(.6)}60%{opacity:1;transform:scale(1.08)}100%{opacity:1;transform:none}}
-@keyframes cvup{from{opacity:0;transform:translateY(2.4rem)}to{opacity:1;transform:none}}
-.camview.cv-ring .cv-pill{animation:cvpop .5s cubic-bezier(.2,.8,.2,1) both}
-.camview.cv-ring .cv-txt,.camview.cv-ring .cv-btn{animation:cvup .5s .12s cubic-bezier(.2,.8,.2,1) both}
+.cv-side{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between;padding:2rem 0 .4rem}
+.cv-icon{width:8rem;height:8rem;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;margin-bottom:3.2rem}
+.cv-icon .ic{width:4rem;height:4rem;stroke-width:1.8}
+.cv-title{font-size:5.6rem;font-weight:700;letter-spacing:-.025em;line-height:1.05;margin-bottom:2rem}
+.cv-name{font-size:3rem;font-weight:600}
+.cv-sub{font-size:2rem;color:rgba(255,255,255,.68);margin-top:.8rem}
+.cv-btns{display:flex;flex-direction:column;gap:1.4rem}
+.cv-btn{padding:2.2rem 3.6rem;border-radius:99rem;background:#fff;color:#000;font-size:2.2rem;font-weight:700;text-align:center}
+.cv-btn.cv-alt{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.16)}
+.camview.cv-wide{padding:0;display:block}
+.camview.cv-wide .cv-pic{position:absolute;inset:0;width:auto;border-radius:0;background:#000}
+.camview.cv-wide .cv-pic img{object-fit:contain}
+.camview.cv-wide .cv-tag{left:3rem;top:2.6rem}
+.camview.cv-wide .cv-side{position:absolute;left:0;right:0;bottom:0;flex-direction:row;align-items:flex-end;gap:3rem;padding:10rem 3.4rem 3.2rem;background:linear-gradient(transparent,rgba(0,0,0,.85))}
+.camview.cv-wide .cv-icon{display:none}.camview.cv-wide .cv-title{font-size:4.8rem;margin-bottom:1rem}.camview.cv-wide .cv-name{font-size:2.2rem}
+.camview.cv-wide .cv-btns{flex-direction:row;flex:none}
+.cams.n1 .cap{display:none} /* one camera: the card title names it */
+/* agenda: the day's light under the list (page.js daylight) */
+.sun{margin-top:auto;padding-top:1.6rem;font-size:1.5rem}
+.sun .row{gap:.8rem}.sun .ic{width:2.2rem;height:2.2rem}
+.sun-tr{position:relative;height:.8rem;margin:1.4rem .6rem 0;border-radius:99rem;background:var(--chip2)}
+.sun-tr i{position:absolute;left:0;top:0;bottom:0;border-radius:99rem;background:linear-gradient(90deg,#ff9a5c,#ffd60a)}
+.sun-tr b{position:absolute;top:50%;width:2rem;height:2rem;margin:-1rem 0 0 -1rem;border-radius:50%;background:#ffd60a;border:.3rem solid #1a1c24}
+.sun.night .sun-tr i{opacity:.35}.sun.night .sun-tr b{background:#e5e5ea}

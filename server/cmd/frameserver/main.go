@@ -17,8 +17,8 @@
 //	ARTIFACTS_DIR default /artifacts; tfctl-armv7, system-*.tar, versions.json
 //	WEATHER_LAT, WEATHER_LON  enable the open-meteo weather adapter (current and 7-day forecast)
 //	WEATHER_UNITS  f for °F (default °C)
-//	PROTECT_URL       UniFi Protect console (https://192.168.1.1): cameras widget, doorbell pop-up
-//	PROTECT_API_KEY   its Integration API key (Protect: Settings, Control Plane, Integrations)
+//	PROTECT_URL       the UniFi console that runs Protect (a UNVR: https://192.168.1.2): cameras widget, doorbell pop-up
+//	PROTECT_API_KEY   an Integration API key made on that console (Protect, Integrations; keys are per console)
 //	PROTECT_INSECURE  1 = accept the console's self-signed certificate
 //	CALENDAR_ICS_URL  enable the calendar widget from public .ics feeds (https:// or webcal://);
 //	              several URLs separated by spaces, commas or newlines are merged; repeating events expand

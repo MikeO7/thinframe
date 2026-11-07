@@ -87,8 +87,10 @@ type Server struct {
 	// feeds: last logged failure of weather, calendar and each poll (hooks.go feedLog).
 	feeds feedLog
 	shots shotWaiters
-	// ring: the last doorbell press and which doorbells rang (cameras.go).
+	// ring: the last doorbell press and which doorbells rang (cameras.go); cams: camera
+	// pictures shrunk for the page (camshots.go).
 	ring ringState
+	cams camShots
 	// hosts: the Host names the public routes answer to (hosts.go).
 	hosts hostSet
 	// sockets counts control sockets whose handler is still running. http.Server.Shutdown
@@ -162,6 +164,7 @@ func (s *Server) Routes() http.Handler {
 	fn("GET /api/data/img", s.handleImage)
 	fn("GET /fonts/{name}", gzipped(s.handleFont))
 	fn("GET /api/data/camera/{id}", s.handleCamera)
+	fn("GET /api/data/ring/{id}", s.handleRing)
 	fn("POST /api/frames/{id}/beacon", s.handleBeacon)
 	fn("POST /api/frames/{id}/alive", s.handleAlive)
 	// Apps (apps.go): sandboxed documents and the public endpoints their SDK calls. Like the

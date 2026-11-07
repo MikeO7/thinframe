@@ -43,7 +43,8 @@ The page never calls a third party. The server fetches, caches for 10 minutes, a
 | `GET /api/data/photo/next?frame=<id>` | `PHOTOS_DIR` | `PHOTOS_DIR` |
 | `GET /api/data/weather` | open-meteo (no key) | `WEATHER_LAT`, `WEATHER_LON` |
 | `GET /api/data/calendar` | `.ics` feeds (`https://` or `webcal://`) and private calendars over CalDAV (iCloud), repeating events expanded, all merged | `CALENDAR_ICS_URL`: one or more URLs separated by spaces, commas or newlines; `CALDAV_USER`, `CALDAV_PASSWORD`, optional `CALDAV_CALENDARS`, `CALDAV_URL` (times in `TZ`) |
-| `GET /api/data/camera/<id>` | UniFi Protect snapshot (JPEG), only cameras a `cameras` widget shows or a doorbell that rang | `PROTECT_URL`, `PROTECT_API_KEY`, `PROTECT_INSECURE=1` for the console's self-signed certificate |
+| `GET /api/data/camera/<id>?w=` | UniFi Protect snapshot (JPEG) shrunk to `w` px wide (320 to 1280), only cameras a `cameras` widget shows or a doorbell that rang | `PROTECT_URL`, `PROTECT_API_KEY`, `PROTECT_INSECURE=1` for the console's self-signed certificate |
+| `GET /api/data/ring/<id>?w=` | The picture of who rang: the clearest of several snapshots after the press (JPEG; 404 when none was clear) | as above |
 
 **Calendars.** Repeating events (daily, weekly, monthly, yearly; "every 2nd Tuesday", "last
 Friday", skipped and moved dates) show for the next 60 days, at the same local time across DST.
@@ -75,9 +76,12 @@ A public iCloud calendar link (Share Calendar, Public Calendar, the `webcal://` 
 in `CALENDAR_ICS_URL`, but anyone with it can read the calendar, and iCloud refreshes it on its
 own schedule [D]. CalDAV is private and current.
 
-**Cameras and the doorbell.** Make an API key in Protect (Settings, Control Plane, Integrations).
-The `cameras` widget shows snapshots every `interval_s` (default 4 s); a tap opens one camera over
-the page. A doorbell ring needs no widget: every page shows the doorbell camera live for 90 s,
+**Cameras and the doorbell.** Make an API key in Protect, Integrations, on the console that runs
+Protect (a UNVR, if there is one; a key made on another console gets 401).
+The `cameras` widget shows snapshots every `interval_s` (default 4 s), each shrunk by the server to
+the tile's width; a doorbell shows first and tall when the card is wide (`feature: false` turns that
+off), with "Rang 2:14 PM" after a ring. A tap opens one camera over the page. A doorbell ring needs
+no widget: every page shows the picture of who rang for 90 s (Live view switches to live),
 and every connected frame gets a `wake` action (an off screen on for 2 minutes, like a touch;
 needs a tfctl with `wake`, installed with `update-software`; older frames ignore it).
 
