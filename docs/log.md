@@ -1004,3 +1004,33 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   caps dropped, uid 65534:990) holds the socket and allows only GET /containers/json: other GETs
   403, POST/DELETE 405 [V].
 - services source refreshed through the proxy at 12:57:34Z, 27 containers, no poll errors [V].
+
+## 2026-10-31 eMMC reinstall with the no-write boot script (PRs #161, #170)
+- Running from the card (PARTUUID 50463037-03), `tfctl emmc install --help` ignored `--help` and
+  reinstalled with the card's own `/usr/share/thinframe/boot` (boot.scr 3af1a0ea, an older
+  u-boot-emmc.bin 353d56e6). Exit 0, partitions 1 to 3 read back equal; the card still started
+  first [V]. PR #170: install refuses unknown, repeated or valueless flags; on the frame
+  `--help` now prints "unknown '--help'" and writes nothing [V].
+- Reinstall with `--backup-sha256 ad866fb8… --files /data/thinframe/boot-e6`, exit 0
+  (`/data/thinframe/emmc-install-e6.log`) [V]. Read-only check: eMMC p1 boot.scr 404bd195 (#161),
+  uEnv.bak equal to uEnv.txt (`pf_mode=linux slot=b tries=0`), no `pf/` files, no Mac junk;
+  U-Boot at 8 KiB and in boot0 both edf759ed (build E); PARTITION_CONFIG 0x48 [V].
+- The card is still in, so the frame starts from the card; the eMMC start with #161 is not yet
+  checked on hardware [U].
+
+## 2026-11-04 Software 2026.11.04-9258163
+- Published to Nox artifacts (sha 680195ca), `update-software`: installed at 281 s and respawned;
+  `release_status` lagging [] [V]. Server efd468e is current (main differs by a comment) [V].
+- The previous run stopped after 81,982 s with no last log line, no oops (`panic on oops` is set);
+  the frame was also off the Mac's USB afterwards. Cause unknown [U]; the next start was clean
+  (no EXT4 or mmc errors, on screen at 18.8 s from the card) [V].
+
+## 2026-11-07 One Wi-Fi address from card and eMMC (PR #171)
+- Card start: `tfctl netid` "4a:e2:58:9a:d1:b3 (from device-tree serial-number)", no sunxi-sid
+  nvmem device (the card's DTBs predate the node), IP 192.168.1.101. eMMC start had
+  be:4f:41:70:0f:bb, IP 192.168.1.184 [V].
+- `devmem 0x01c23800..0c` on the card start: 0461872a 9e744001 2c8938f7 00000000; SHA-256 of the
+  label and these words little endian gives be:4f:41:70:0f:bb [V].
+- Software 2026.11.07-e48db01 (sha 49401ad2), reboot: card start reads "be:4f:41:70:0f:bb (from
+  sunxi-sid registers)", driver and wlan0 the same, heartbeat IP 192.168.1.184; prewarm 129 MB in
+  8.2 s, on screen at 11.2 s (card) [V].
