@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -161,5 +162,52 @@ func TestRingPictureStopsEarlyWithPerson(t *testing.T) {
 	rings, _ := d["rings"].([]map[string]any)
 	if len(rings) != 1 || rings[0]["id"] != "r1" || rings[0]["still"] != true {
 		t.Fatalf("rings in widget data %v", d["rings"])
+	}
+}
+
+// flakyProtect fails every snapshot once fail is set (Protect's 429 to a burst).
+type flakyProtect struct {
+	fakeProtect
+	mu    sync.Mutex
+	fail  bool
+	calls int
+}
+
+func (f *flakyProtect) Snapshot(_ context.Context, id string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.fail {
+		return nil, errors.New("429 Too Many Requests")
+	}
+	return []byte("jpeg-" + id), nil
+}
+
+// One Protect fetch serves every width; a failed one serves the last good picture.
+func TestCameraKeepsLastPictureOnFailure(t *testing.T) {
+	fp := &flakyProtect{fakeProtect: fakeProtect{cams: testCams}}
+	s, _ := newDataServer(t, Options{Protect: fp})
+	ctx := context.Background()
+	for _, w := range []int{320, 640, 1280} {
+		if _, err := s.cameraJPEG(ctx, "c1", w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fp.calls != 1 {
+		t.Fatalf("%d Protect fetches for three widths, want 1", fp.calls)
+	}
+	fp.mu.Lock()
+	fp.fail = true
+	fp.mu.Unlock()
+	s.cams.mu.Lock()
+	for _, c := range s.cams.m {
+		c.at = time.Now().Add(-2 * camSnapTTL)
+	}
+	s.cams.mu.Unlock()
+	if b, err := s.cameraJPEG(ctx, "c1", 640); err != nil || string(b) != "jpeg-c1" {
+		t.Fatalf("after a failure: %q %v, want the last picture", b, err)
+	}
+	if _, err := s.cameraJPEG(ctx, "c2", 640); err == nil {
+		t.Fatal("a camera with no good picture yet answered")
 	}
 }
