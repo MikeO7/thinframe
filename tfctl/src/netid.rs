@@ -22,6 +22,10 @@ pub enum Source {
     /// The Security ID's root key, read through the sunxi-sid nvmem device. image/build.sh adds
     /// the node to the A33 device trees (mainline has none); the H3 that QEMU emulates has one.
     Sid,
+    /// The same root key read straight from the A33's SID registers, for a device tree without
+    /// the sunxi-sid node (a card written before image/build.sh added it). Same bytes, same
+    /// address as `Sid` [V 2026-11-07: be:4f:41:70:0f:bb both ways].
+    SidRegisters,
     /// The serial number U-Boot puts in the device tree (`serial#`, which it derives from the
     /// SID or the PMIC). Only when there is no SID device.
     DtSerial,
@@ -31,14 +35,21 @@ impl Source {
     fn name(self) -> &'static str {
         match self {
             Source::Sid => "sunxi-sid",
+            Source::SidRegisters => "sunxi-sid registers",
             Source::DtSerial => "device-tree serial-number",
         }
     }
 }
 
 /// The chip ID under `root` ("/" on the frame): the first SID device that reads a usable
-/// value, else U-Boot's serial number. None: the driver keeps its made-up address.
+/// value, else the SID registers, else U-Boot's serial number. None: the driver keeps its
+/// made-up address. The serial is last because it hashes to another address than the SID:
+/// a card with old device trees moved the frame to a second address and a second IP.
 pub fn chip_id(root: &Path) -> Option<(Vec<u8>, Source)> {
+    chip_id_with(root, sid_registers)
+}
+
+fn chip_id_with(root: &Path, regs: impl FnOnce() -> Option<Vec<u8>>) -> Option<(Vec<u8>, Source)> {
     let dir = root.join("sys/bus/nvmem/devices");
     let mut sids: Vec<_> = fs::read_dir(&dir)
         .into_iter()
@@ -56,11 +67,58 @@ pub fn chip_id(root: &Path) -> Option<(Vec<u8>, Source)> {
             }
         }
     }
+    if let Some(b) = regs().filter(|b| usable(b)) {
+        return Some((b, Source::SidRegisters));
+    }
     let mut s = fs::read(root.join("sys/firmware/devicetree/base/serial-number")).ok()?;
     while s.last() == Some(&0) {
         s.pop();
     }
     usable(&s).then_some((s, Source::DtSerial))
+}
+
+/// The A33 SID root key: four words at 0x01c23800, in the byte order the nvmem device reads
+/// them (little endian). Read-only mapping, PF1007L only, so no other board's memory is read.
+#[cfg(target_os = "linux")]
+fn sid_registers() -> Option<Vec<u8>> {
+    use std::ffi::{c_int, c_void};
+    use std::os::fd::AsRawFd;
+    extern "C" {
+        fn mmap(
+            a: *mut c_void,
+            len: usize,
+            prot: c_int,
+            flags: c_int,
+            fd: c_int,
+            off: i64,
+        ) -> *mut c_void;
+        fn munmap(a: *mut c_void, len: usize) -> c_int;
+    }
+    const PAGE: i64 = 0x01C2_3000;
+    const KEY: usize = 0x800;
+    if !crate::light::on_pf1007l() {
+        return None;
+    }
+    let f = fs::File::open("/dev/mem").ok()?;
+    // PROT_READ, MAP_SHARED: one MMIO page, checked for MAP_FAILED, unmapped below.
+    // SAFETY: a fresh mapping; only the four aligned words of the key are read.
+    unsafe {
+        let p = mmap(std::ptr::null_mut(), 4096, 1, 1, f.as_raw_fd(), PAGE);
+        if p as isize == -1 {
+            return None;
+        }
+        let w = p.cast::<u8>().add(KEY).cast::<u32>();
+        let key: Vec<u8> = (0..4)
+            .flat_map(|i| w.add(i).read_volatile().to_le_bytes())
+            .collect();
+        munmap(p, 4096);
+        Some(key)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sid_registers() -> Option<Vec<u8>> {
+    None
 }
 
 /// An ID worth deriving from: at least 8 bytes and not one byte repeated (an unprogrammed
@@ -179,7 +237,7 @@ mod tests {
     #[test]
     fn sid_first_then_device_tree_serial() {
         let r = sysroot("order");
-        assert_eq!(chip_id(&r), None, "nothing to read");
+        assert_eq!(chip_id_with(&r, || None), None, "nothing to read");
 
         put(
             &r,
@@ -187,7 +245,7 @@ mod tests {
             b"1667a0b1c2d3e4f5\0",
         );
         assert_eq!(
-            chip_id(&r),
+            chip_id_with(&r, || None),
             Some((b"1667a0b1c2d3e4f5".to_vec(), Source::DtSerial))
         );
 
@@ -197,13 +255,42 @@ mod tests {
             .copy_from_slice(b"\x02\xc0\x00\x81\x11\x11\x22\x22\x33\x33\x00\x00\x44\x55\x66\x77");
         sid[200] = 0x5a;
         put(&r, "sys/bus/nvmem/devices/sunxi-sid0/nvmem", &sid);
-        let (id, src) = chip_id(&r).unwrap();
+        let (id, src) = chip_id_with(&r, || None).unwrap();
         assert_eq!((id.len(), src), (16, Source::Sid));
         assert_eq!(id, sid[..16]);
 
         // Another nvmem device (the RTC) is never an ID.
         put(&r, "sys/bus/nvmem/devices/rtc0/nvmem", b"0123456789abcdef");
-        assert_eq!(chip_id(&r).unwrap().1, Source::Sid);
+        assert_eq!(chip_id_with(&r, || None).unwrap().1, Source::Sid);
+        let _ = fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn registers_come_before_the_serial_and_match_the_sid() {
+        // The office frame's root key as the registers read it [V 2026-11-07].
+        let words = [0x0461_872Au32, 0x9E74_4001, 0x2C89_38F7, 0];
+        let key: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        assert_eq!(
+            format(&derive(&key)),
+            "be:4f:41:70:0f:bb",
+            "the eMMC start's address"
+        );
+
+        let r = sysroot("regs");
+        put(
+            &r,
+            "sys/firmware/devicetree/base/serial-number",
+            b"165541530701852e\0",
+        );
+        let got = chip_id_with(&r, || Some(key.clone()));
+        assert_eq!(got, Some((key.clone(), Source::SidRegisters)));
+        assert_eq!(
+            chip_id_with(&r, || Some(vec![0; 16])).unwrap().1,
+            Source::DtSerial,
+            "blank registers: the serial"
+        );
+        put(&r, "sys/bus/nvmem/devices/sunxi-sid0/nvmem", &key);
+        assert_eq!(chip_id_with(&r, || None), Some((key, Source::Sid)));
         let _ = fs::remove_dir_all(&r);
     }
 
@@ -212,7 +299,7 @@ mod tests {
         let r = sysroot("blank");
         put(&r, "sys/bus/nvmem/devices/sunxi-sid0/nvmem", &[0u8; 16]);
         assert_eq!(
-            chip_id(&r),
+            chip_id_with(&r, || None),
             None,
             "blank SID and no serial: no ID, not a shared address"
         );
@@ -221,13 +308,17 @@ mod tests {
             "sys/firmware/devicetree/base/serial-number",
             b"0000000000000000\0",
         );
-        assert_eq!(chip_id(&r), None, "U-Boot found nothing either");
+        assert_eq!(
+            chip_id_with(&r, || None),
+            None,
+            "U-Boot found nothing either"
+        );
         put(
             &r,
             "sys/firmware/devicetree/base/serial-number",
             b"8100c0020b2c5a8e\0",
         );
-        assert_eq!(chip_id(&r).unwrap().1, Source::DtSerial);
+        assert_eq!(chip_id_with(&r, || None).unwrap().1, Source::DtSerial);
         let _ = fs::remove_dir_all(&r);
     }
 }

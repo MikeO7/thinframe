@@ -1098,6 +1098,10 @@ roam-scanning twice a minute at -16 dBm, a new Wi-Fi address and DHCP lease at e
   six bytes, locally administered unicast (`netid.rs`). Mainline's A33 device tree has no SID
   node, so build.sh adds one (`allwinner,sun4i-a10-sid` at 0x01c23800, read directly, as
   sunxi-tools does for the A33); U-Boot's `serial-number` in the device tree is the fallback.
+  A card with device trees from before that node gave another address (4a:e2:58:9a:d1:b3, from
+  the serial) and so another IP than the eMMC start (be:4f:41:70:0f:bb) [V 2026-11-07]. tfctl
+  now reads the same four SID words from the registers (read-only `/dev/mem` mapping, PF1007L
+  only) before it falls back to the serial, so both starts get be:4f:41:70:0f:bb [V].
   The ID is fixed in the chip, so the address survives A/B updates, a new card and the eMMC
   install; nothing is stored. `tfctl netid` shows it. Whether the A33 reads a unique root key
   this way is [U] until it is read on the frame.
