@@ -565,7 +565,7 @@
     },
     // The doorbell first and large (portrait, the height of the card) when the card is wide and
     // shows three cameras or more; the rest in a grid. A redraw keeps each camera's last picture
-    // (camLast), so new data never blanks the tiles.
+    // element (camImg), moved into the new tile, so new data never blanks or reloads one.
     cameras(sec, d, p) {
       const b = body(sec), cams = arr(d.cameras);
       sec.querySelector('.live').hidden = !cams.length || !!d.error || !!d.setup;
@@ -647,7 +647,7 @@
   };
 
   const state = {};
-  const camLast = new Map(); // camera id -> URL of its last picture, shown at once on a redraw
+  const camImg = new Map(); // camera id -> its last picture, decoded: moved into a redrawn tile
   function props(sec) {
     if (!sec._props) { try { sec._props = JSON.parse((sec.querySelector('script.wp') || {}).textContent || '{}'); } catch (e) { sec._props = {}; } }
     return sec._props;
@@ -787,8 +787,35 @@
   drawAll();
   loadApps();
   tickClock();
+  // Taps. On the frame WebKit makes a click of a touch only when the finger does not move at all,
+  // and a finger on this panel always moves a little: the gear, the cameras and the ring view's
+  // buttons did nothing (2026-11-07; tabs and rooms act on touch-down and were fine). A touch
+  // that ends within 30 px of where it began is a tap, acted on at release; the click WebKit may
+  // still send is dropped. A mouse acts the same way. Handlers return true when they acted.
+  const taps = [];
+  const onTap = fn => taps.push(fn);
+  let down = null, tapAt = 0;
+  function tapped(t) { if (!t || !t.closest) return false; for (const fn of taps) if (fn(t)) return true; return false; }
+  addEventListener('pointerdown', e => {
+    down = e.isPrimary ? { x: e.clientX, y: e.clientY, mx: e.clientX, my: e.clientY, t: e.target, at: performance.now() } : null;
+  }, { capture: true, passive: true });
+  addEventListener('pointermove', e => { if (down && e.isPrimary) { down.mx = e.clientX; down.my = e.clientY; } }, { capture: true, passive: true });
+  // A cancelled touch (WebKit took it for a scroll) still counts if it hardly moved.
+  const release = (x, y, slop) => {
+    const d = down; down = null;
+    if (!d || Math.hypot(x - d.x, y - d.y) > slop || performance.now() - d.at > 1500) return;
+    if (tapped(d.t)) tapAt = performance.now();
+  };
+  addEventListener('pointerup', e => { if (e.isPrimary) release(e.clientX, e.clientY, 30); }, true);
+  addEventListener('pointercancel', () => { if (down) release(down.mx, down.my, 12); }, true);
+  addEventListener('click', e => {
+    if (performance.now() - tapAt < 800) { e.preventDefault(); e.stopPropagation(); return; }
+    if (tapped(e.target)) e.preventDefault(); // no pointer events (an old engine): the click
+  }, true);
+  // The gear: its form posts to tfctl's Settings (127.0.0.1:8092, tfctl/src/settings.rs).
+  onTap(t => { const f = t.closest('form.tab-set'); if (!f) return false; f.submit(); return true; });
   // Car and home controls are display-only for now: say so instead of doing nothing.
-  addEventListener('click', e => { if (e.target.closest('[data-act]')) window.toast('Controls are not connected yet'); });
+  onTap(t => { if (!t.closest('[data-act]')) return false; window.toast('Controls are not connected yet'); return true; });
   // Emits carry the frame's emit key (server/internal/api/apps.go EmitKey): only pages the
   // server serves have it, so another site cannot fire a hook. The page's apps never see it.
   const emitPath = '/api/frames/' + encodeURIComponent(TF.frame) + '/emit';
@@ -885,7 +912,7 @@
   function camTile(c, cls, rings) {
     const t = h('div', 'cam' + (cls ? ' ' + cls : '') + (c.online ? '' : ' offline')), cap = h('div', 'cap');
     t.dataset.cam = c.id; t.dataset.name = c.name;
-    if (c.online && camLast.has(c.id)) { const i = h('img'); i.alt = ''; i.src = camLast.get(c.id); t.append(i); }
+    if (c.online && camImg.has(c.id)) t.append(camImg.get(c.id));
     else t.append(icon('cam', 'ph'));
     cap.append(h('span', 'dot' + (c.online ? '' : ' off')), h('span', 'ellip', c.name + (c.online ? '' : ' · offline')));
     t.append(cap);
@@ -898,33 +925,47 @@
     return t;
   }
   function picURL(id, w) { return '/api/data/camera/' + encodeURIComponent(id) + '?w=' + Math.round(w || 640) + '&t=' + Date.now(); }
-  // load puts the picture at u into holder when it has loaded; fn(img) after. Returns false when
-  // the holder is still waiting for its last one.
+  // loadPic puts the picture at u into holder once it is loaded and decoded, so the old one stays
+  // on screen until then (a swap to an undecoded image showed a blank frame: the flicker on the
+  // frame, 2026-11-07); fn(img) after. Returns false when the holder is still waiting for its last
+  // one. Only three failures in a row dim it: one slow snapshot is not worth a blink.
   function loadPic(holder, u, fn, err) {
     if (holder._busy) return false;
     holder._busy = true;
     const n = new Image();
-    n.alt = ''; n.decoding = 'async';
-    n.onload = () => {
-      holder._busy = false; holder.classList.remove('stale');
+    n.alt = '';
+    const swap = () => {
+      holder._busy = false; holder._errs = 0; holder.classList.remove('stale');
       const o = holder.querySelector('img, .ph');
       if (o) o.replaceWith(n); else holder.prepend(n);
       if (fn) fn(n);
     };
-    n.onerror = () => { holder._busy = false; holder.classList.add('stale'); if (err) err(); };
+    // decode() can wait for ever on a hidden page (Chromium in a background tab): at most 500 ms.
+    let done = false;
+    const once = () => { if (!done) { done = true; swap(); } };
+    n.onload = () => { if (n.decode) { n.decode().then(once, once); setTimeout(once, 500); } else once(); };
+    n.onerror = () => {
+      holder._busy = false;
+      if (++holder._errs >= 3 || !holder.querySelector('img')) holder.classList.add('stale');
+      if (err) err();
+    };
     n.src = u;
     return true;
   }
   function loadCam(holder, id) {
-    const u = picURL(id, holder.clientWidth);
-    loadPic(holder, u, () => camLast.set(id, u));
+    loadPic(holder, picURL(id, holder.clientWidth), n => camImg.set(id, n));
   }
   function camTick(sec, force) {
     const every = Math.max(2, num(props(sec).interval_s) || 4) * 1000, now = Date.now();
     if (!force && now - (sec._camAt || 0) < every) return;
     sec._camAt = now;
     // An offline camera only answers 502: no request (it comes back with the camera list).
-    sec.querySelectorAll('.cam:not(.offline)').forEach(t => loadCam(t, t.dataset.cam));
+    sec.querySelectorAll('.cam:not(.offline)').forEach(t => {
+      // A picture fetched while the tab was hidden (prefetchCams) goes up at once.
+      const ph = t.querySelector('.ph'), n = camImg.get(t.dataset.cam);
+      if (ph && n && !n.isConnected) ph.replaceWith(n);
+      loadCam(t, t.dataset.cam);
+    });
   }
   const camSecs = Array.from(document.querySelectorAll('.w-cameras'));
   const view = { el: null };
@@ -938,9 +979,9 @@
     camSecs.forEach(sec => {
       if (visible(sec)) return;
       for (const c of arr((state[sec.id] || {}).cameras)) {
-        if (!c.online || camLast.has(c.id) || camPre.some(x => x.id === c.id)) continue;
+        if (!c.online || camImg.has(c.id) || camPre.some(x => x.id === c.id)) continue;
         const u = picURL(c.id, 320), i = new Image();
-        i.decoding = 'async'; i.onload = () => camLast.set(c.id, u); i.src = u;
+        i.alt = ''; i.onload = () => { if (!camImg.has(c.id)) camImg.set(c.id, i); if (i.decode) i.decode().catch(() => {}); }; i.src = u;
         camPre.push({ id: c.id, i }); n++;
       }
     });
@@ -958,8 +999,8 @@
     const el = h('div', 'camview' + (o.ring ? ' cv-ring' : '') + (o.still ? '' : ' cv-on') + (o.wide ? ' cv-wide' : ''));
     el.dataset.mood = o.ring ? 'bell' : 'camera';
     const pic = h('div', 'cv-pic'), side = h('div', 'cv-side'), tag = h('div', 'cv-tag');
-    // The tile's picture at once (in the cache, already decoded); the sharp one replaces it.
-    if (o.first) { const f = h('img'); f.alt = ''; f.src = o.first; pic.append(f); } else pic.append(icon(o.ring ? 'bell' : 'cam', 'ph'));
+    // The tile's own picture at once (decoded; it goes back on close); the sharp one replaces it.
+    if (o.first) pic.append(o.first); else pic.append(icon(o.ring ? 'bell' : 'cam', 'ph'));
     tag.append(h('span', 'cv-live', 'Live'), h('span', 'cv-still', o.ring ? 'At the door' : 'When it rang'));
     pic.append(tag);
     const head = h('div', 'cv-head');
@@ -990,12 +1031,12 @@
       // No clear picture of this ring (night, a camera restarting): live instead of nothing.
       loadPic(pic, o.still + '?w=1280', shape, live);
     };
-    el.addEventListener('click', e => {
-      if (e.target.closest('[data-live]')) { if (el.classList.contains('cv-on')) still(); else live(); dispatchEvent(new Event('tf-activity')); return; }
+    const tap = t => {
+      if (t.closest('[data-live]')) { if (el.classList.contains('cv-on')) still(); else live(); dispatchEvent(new Event('tf-activity')); return; }
       if (o.ring) dismissed(o.ringId, true);
       closeView();
-    });
-    Object.assign(view, { el, ringId: o.ringId || '', timer, end: setTimeout(closeView, (o.secs || 60) * 1000) });
+    };
+    Object.assign(view, { el, tap, ringId: o.ringId || '', timer, lent: o.first ? { n: o.first, tile: o.tile } : null, end: setTimeout(closeView, (o.secs || 60) * 1000) });
     if (o.still) still(); else live();
     dispatchEvent(new Event('tf-activity'));
   }
@@ -1003,23 +1044,29 @@
     if (!view.el) return;
     clearInterval(view.timer); clearTimeout(view.end);
     view.el.remove(); view.el = null;
+    const l = view.lent; view.lent = null;
+    if (l && l.tile.isConnected && !l.tile.querySelector('img')) { const ph = l.tile.querySelector('.ph'); if (ph) ph.replaceWith(l.n); else l.tile.prepend(l.n); }
   }
   function when(at) {
     const age = (Date.now() - at) / 1000, t = clockText(new Date(at));
     return t + ' · ' + (age < 60 ? 'just now' : age < 3600 ? Math.round(age / 60) + ' min ago' : ago(age * 1000));
   }
-  addEventListener('click', e => {
-    const r = e.target.closest('.rang');
+  // The open view takes every tap (anywhere closes it); then a past ring's chip, then a camera.
+  onTap(t => {
+    if (view.el) { view.tap(t); return true; }
+    const r = t.closest('.rang');
     if (r) {
-      const t = r.closest('.cam'), sec = r.closest('.w'), x = arr((state[sec.id] || {}).rings).find(q => q.id === r.dataset.ring);
-      if (x) openView({ id: x.camera, name: x.name || t.dataset.name, still: '/api/data/ring/' + encodeURIComponent(x.id), title: 'The doorbell rang', sub: when(x.at), secs: 60 });
-      return;
+      const c = r.closest('.cam'), sec = r.closest('.w'), x = arr((state[sec.id] || {}).rings).find(q => q.id === r.dataset.ring);
+      if (x) openView({ id: x.camera, name: x.name || c.dataset.name, still: '/api/data/ring/' + encodeURIComponent(x.id), title: 'The doorbell rang', sub: when(x.at), secs: 60 });
+      return true;
     }
-    const t = e.target.closest('.cam'), im = t && t.querySelector('img');
-    if (t) openView({ id: t.dataset.cam, name: t.dataset.name, sub: 'Tap anywhere to close', secs: 120,
-      first: im ? im.src : '', wide: im ? im.naturalWidth > im.naturalHeight : true });
+    const c = t.closest('.cam'), im = c && c.querySelector('img');
+    if (!c) return false;
+    openView({ id: c.dataset.cam, name: c.dataset.name, sub: 'Tap anywhere to close', secs: 120,
+      first: im, tile: c, wide: im ? im.naturalWidth > im.naturalHeight : true });
+    return true;
   });
-  addEventListener('click', e => { const t = e.target.closest('[data-go]') || e.target.closest('.w[data-open]'); if (t) show(t.dataset.go || t.dataset.open); });
+  onTap(t => { const g = t.closest('[data-go]') || t.closest('.w[data-open]'); if (!g) return false; show(g.dataset.go || g.dataset.open); return true; });
   // A dismissed ring stays dismissed across the reload a waking screen does.
   function dismissed(id, set) {
     try {

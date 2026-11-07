@@ -32,8 +32,9 @@ var camWidths = []int{320, 480, 640, 960, 1280}
 
 const (
 	camSnapTTL = time.Second
-	ringW      = 1280 // ring pictures are kept at most this wide
-	ringKeep   = 8    // ring pictures kept, in memory
+	camKeepOld = 30 * time.Second // a failed snapshot: the last good one, at most this old
+	ringW      = 1280             // ring pictures are kept at most this wide
+	ringKeep   = 8                // ring pictures kept, in memory
 	personKeep = 2 * time.Minute
 )
 
@@ -70,18 +71,30 @@ type camShots struct {
 }
 
 // cameraJPEG is camera id's current picture at most w wide, shared between requests for a second.
+// Protect is asked once per camera for every width (rawSnapshot). When it fails (it answers 429 to
+// a burst, a camera restarts), the last good picture up to camKeepOld old is served instead: the
+// page dims a tile only for a camera that keeps failing.
 func (s *Server) cameraJPEG(ctx context.Context, id string, w int) ([]byte, error) {
-	key := id + "@" + strconv.Itoa(w)
-	s.cams.mu.Lock()
-	if s.cams.m == nil {
-		s.cams.m = map[string]*camShot{}
+	c := s.camShot(id + "@" + strconv.Itoa(w))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.jpg != nil && time.Since(c.at) < camSnapTTL {
+		return c.jpg, nil
 	}
-	c := s.cams.m[key]
-	if c == nil {
-		c = &camShot{}
-		s.cams.m[key] = c
+	b, err := s.rawSnapshot(ctx, id)
+	if err != nil {
+		if c.jpg != nil && time.Since(c.at) < camKeepOld {
+			return c.jpg, nil
+		}
+		return nil, err
 	}
-	s.cams.mu.Unlock()
+	c.jpg, c.at = shrinkJPEG(b, w), time.Now()
+	return c.jpg, nil
+}
+
+// rawSnapshot is camera id's snapshot as Protect sent it, fetched at most once per camSnapTTL.
+func (s *Server) rawSnapshot(ctx context.Context, id string) ([]byte, error) {
+	c := s.camShot(id)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.jpg != nil && time.Since(c.at) < camSnapTTL {
@@ -91,8 +104,22 @@ func (s *Server) cameraJPEG(ctx context.Context, id string, w int) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	c.jpg, c.at = shrinkJPEG(b, w), time.Now()
-	return c.jpg, nil
+	c.jpg, c.at = b, time.Now()
+	return b, nil
+}
+
+func (s *Server) camShot(key string) *camShot {
+	s.cams.mu.Lock()
+	defer s.cams.mu.Unlock()
+	if s.cams.m == nil {
+		s.cams.m = map[string]*camShot{}
+	}
+	c := s.cams.m[key]
+	if c == nil {
+		c = &camShot{}
+		s.cams.m[key] = c
+	}
+	return c
 }
 
 // shrinkJPEG returns picture b at most w wide. One it cannot read, or already narrow enough,
