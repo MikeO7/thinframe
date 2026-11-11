@@ -67,8 +67,30 @@ pub fn rotate(dir: &Path, boot_id: &str) -> io::Result<()> {
     crate::update::write_synced(&id_file, format!("{boot_id}\n").as_bytes())
 }
 
+/// Where in `src` the end of `dst` is: after `cap_log` cut the live log down to its tail, most
+/// of that tail is in the mirror already, and copying it again wrote 256 KiB to the card for
+/// nothing at every cap. 0 when the mirror's last bytes are not found (copy it all, as before).
+fn resume_at(src: &[u8], dst: &Path) -> u64 {
+    const MARK: u64 = 256;
+    let Ok(mut d) = fs::File::open(dst) else {
+        return 0;
+    };
+    let len = d.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut mark = Vec::new();
+    if len < MARK
+        || d.seek(SeekFrom::Start(len - MARK)).is_err()
+        || d.read_to_end(&mut mark).is_err()
+        || mark.len() != MARK as usize
+    {
+        return 0;
+    }
+    src.windows(mark.len())
+        .rposition(|w| w == mark)
+        .map_or(0, |p| (p + mark.len()) as u64)
+}
+
 /// Append the bytes of `src` past `*offset` to `dst`. A `src` shorter than the offset was
-/// truncated by `cap_log`: start again from its beginning.
+/// truncated by `cap_log`: carry on after what the mirror already has (`resume_at`).
 pub fn copy_new(src: &Path, dst: &Path, offset: &mut u64) -> io::Result<()> {
     let mut f = match fs::File::open(src) {
         Ok(f) => f,
@@ -76,15 +98,19 @@ pub fn copy_new(src: &Path, dst: &Path, offset: &mut u64) -> io::Result<()> {
         Err(e) => return Err(e),
     };
     let len = f.metadata()?.len();
+    let mut buf = Vec::new();
     if len < *offset {
-        *offset = 0;
-    }
-    if len == *offset {
+        f.read_to_end(&mut buf)?;
+        let at = resume_at(&buf, dst) as usize;
+        buf.drain(..at);
+        *offset = at as u64;
+    } else if len == *offset {
         return Ok(());
+    } else {
+        f.seek(SeekFrom::Start(*offset))?;
+        buf.reserve((len - *offset) as usize);
+        f.read_to_end(&mut buf)?;
     }
-    f.seek(SeekFrom::Start(*offset))?;
-    let mut buf = Vec::with_capacity((len - *offset) as usize);
-    f.read_to_end(&mut buf)?;
     let mut out = fs::OpenOptions::new().append(true).create(true).open(dst)?;
     out.write_all(&buf)?;
     *offset += buf.len() as u64;
@@ -94,6 +120,33 @@ pub fn copy_new(src: &Path, dst: &Path, offset: &mut u64) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capped_log_is_not_mirrored_twice() {
+        let dir = std::env::temp_dir().join(format!("tfctl-mirror-cap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (src, dst) = (dir.join("live.log"), dir.join("current.log"));
+        let line = |i: u32| format!("12:00:{:02} line number {i} of the kiosk log\n", i % 60);
+        let all: String = (0..40).map(line).collect();
+        let mut off = 0;
+        fs::write(&src, &all).unwrap();
+        copy_new(&src, &dst, &mut off).unwrap();
+        // cap_log keeps the tail; two new lines arrive before the next copy.
+        let tail = &all[all.len() - 600..];
+        let new = format!("{}{}", line(40), line(41));
+        fs::write(&src, format!("{tail}{new}")).unwrap();
+        copy_new(&src, &dst, &mut off).unwrap();
+        assert_eq!(fs::read_to_string(&dst).unwrap(), format!("{all}{new}"));
+        assert_eq!(off, (tail.len() + new.len()) as u64);
+        // A log that is something else entirely is copied whole.
+        fs::write(&src, "fresh\n").unwrap();
+        copy_new(&src, &dst, &mut off).unwrap();
+        assert!(fs::read_to_string(&dst)
+            .unwrap()
+            .ends_with("of the kiosk log\nfresh\n"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn rotates_on_a_new_boot_and_copies_only_new_bytes() {

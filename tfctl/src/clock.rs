@@ -161,8 +161,9 @@ pub fn start() {
             let wait = match (got, unset) {
                 (Some(_), _) => 24 * 3600,
                 (None, true) => {
+                    let wait = retry;
                     retry = (retry * 2).min(3600);
-                    retry
+                    wait
                 }
                 (None, false) => 3600,
             };

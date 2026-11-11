@@ -4,7 +4,7 @@ package main
 // have a row here, so a new route without a decision about its auth fails the build's tests.
 //
 // Policy (README.md, server/README.md, docs/decisions.md):
-//   - /api/frames*, /api/release, /api/artifacts/*, /mcp: Bearer FRAME_TOKEN. Some frame routes
+//   - /api/frames*, /api/artifacts/*, /mcp: Bearer FRAME_TOKEN. Some frame routes
 //     also take the frame's own paired token ("frame"), release and artifacts any paired frame's
 //     token ("anyFrame").
 //   - /admin*: HTTP Basic, any user, password = FRAME_TOKEN. POSTs (and /mcp) refuse cross-origin.
@@ -314,7 +314,6 @@ func rows() []row {
 		{pattern: "GET /api/frames/{id}/config", method: "GET", path: "/api/frames/kitchen/config", ghost: "/api/frames/ghost/config", class: frame, ok: 200},
 		{pattern: "PUT /api/frames/{id}/config", method: "PUT", path: "/api/frames/kitchen/config", ghost: "/api/frames/ghost/config", class: bearer, ok: 200, body: `{"brightness":40}`, ctype: jsonT},
 		{pattern: "PUT /api/frames/{id}/layout", method: "PUT", path: "/api/frames/kitchen/layout", ghost: "/api/frames/ghost/layout", class: bearer, ok: 200, body: string(layout), ctype: jsonT},
-		{pattern: "POST /api/frames/{id}/heartbeat", method: "POST", path: "/api/frames/kitchen/heartbeat", ghost: "/api/frames/ghost/heartbeat", class: frame, ok: 200, body: `{"ip":"10.0.0.2"}`, ctype: jsonT},
 		{pattern: "POST /api/frames/{id}/actions", method: "POST", path: "/api/frames/kitchen/actions", ghost: "/api/frames/ghost/actions", class: bearer, ok: 202, body: `{"name":"reload-page"}`, ctype: jsonT},
 		{pattern: "POST /api/frames/{id}/report", method: "POST", path: "/api/frames/kitchen/report", ghost: "/api/frames/ghost/report", class: frame, ok: 201, body: "==== tfctl\nreport\n", ctype: "text/plain"},
 		{pattern: "GET /api/frames/{id}/reports", method: "GET", path: "/api/frames/kitchen/reports", ghost: "/api/frames/ghost/reports", class: bearer, ok: 200},
@@ -328,7 +327,6 @@ func rows() []row {
 		{pattern: "PUT /api/sources/{key}", method: "PUT", path: "/api/sources/demo", class: bearer, ok: 204, body: `{"items":[{"label":"a"}]}`, ctype: jsonT},
 		{pattern: "DELETE /api/sources/{key}", method: "DELETE", path: "/api/sources/gone", ghost: "/api/sources/ghost", class: bearer, ok: 204,
 			prep: func(e *tenv) { _ = e.srv.SetSource("gone", []byte(`{}`)) }},
-		{pattern: "GET /api/release", method: "GET", path: "/api/release", class: anyFrame, ok: 200},
 		{pattern: "GET /api/artifacts/{name}", method: "GET", path: "/api/artifacts/tfctl-armv7", ghost: "/api/artifacts/nope", class: anyFrame, ok: 200},
 		// admin
 		{pattern: "GET /admin", method: "GET", path: "/admin", class: admin, ok: 200},

@@ -188,8 +188,6 @@ func (s *Server) Routes() http.Handler {
 	handle("GET /api/frames/{id}/config", s.authFrame(http.HandlerFunc(s.handleGetConfig)))
 	handle("PUT /api/frames/{id}/config", s.auth(http.HandlerFunc(s.handlePutConfig)))
 	handle("PUT /api/frames/{id}/layout", s.auth(http.HandlerFunc(s.handlePutLayout)))
-	// Kept on purpose though tfctl heartbeats over the socket: older tfctl and curl use it.
-	handle("POST /api/frames/{id}/heartbeat", s.authFrame(http.HandlerFunc(s.handleHeartbeat)))
 	handle("POST /api/frames/{id}/actions", s.auth(http.HandlerFunc(s.handlePostAction)))
 	handle("POST /api/frames/{id}/report", s.authFrame(http.HandlerFunc(s.handlePostReport)))
 	handle("GET /api/frames/{id}/reports", s.auth(http.HandlerFunc(s.handleListReports)))
@@ -201,8 +199,6 @@ func (s *Server) Routes() http.Handler {
 	handle("GET /api/sources/{key}", s.auth(http.HandlerFunc(s.handleGetSource)))
 	handle("PUT /api/sources/{key}", s.auth(http.HandlerFunc(s.handlePutSource)))
 	handle("DELETE /api/sources/{key}", s.auth(http.HandlerFunc(s.handleDeleteSource)))
-	// Kept on purpose for curl (MCP calls ReleaseStatus directly).
-	handle("GET /api/release", s.authAnyFrame(http.HandlerFunc(s.handleRelease)))
 	if s.opts.Artifacts != nil {
 		handle("GET /api/artifacts/{name}", s.authAnyFrame(s.opts.Artifacts.Handler()))
 	}
@@ -233,7 +229,7 @@ func (s *Server) authFrame(next http.Handler) http.Handler {
 	return s.authWith(next, func(r *http.Request) bool { return s.frameTokenOK(r, r.PathValue("id")) })
 }
 
-// authAnyFrame also accepts any paired frame's token (release info, update artifacts).
+// authAnyFrame also accepts any paired frame's token (update artifacts).
 func (s *Server) authAnyFrame(next http.Handler) http.Handler {
 	return s.authWith(next, func(r *http.Request) bool { return s.frameTokenOK(r, "") })
 }

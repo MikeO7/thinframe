@@ -93,9 +93,6 @@ func TestPairWithCode(t *testing.T) {
 	if r, _ := do(t, "GET", ts.URL+"/api/frames/kitchen/config", tok, nil); r.StatusCode != 200 {
 		t.Fatalf("own config: %d", r.StatusCode)
 	}
-	if r, _ := do(t, "GET", ts.URL+"/api/release", tok, nil); r.StatusCode != 200 {
-		t.Fatalf("release: %d", r.StatusCode)
-	}
 	for _, c := range []struct{ m, p string }{{"GET", "/api/frames/other/config"}, {"GET", "/api/frames"}, {"PUT", "/api/frames/kitchen/layout"}, {"DELETE", "/api/frames/kitchen"}} {
 		if r, _ := do(t, c.m, ts.URL+c.p, tok, nil); r.StatusCode != 401 {
 			t.Fatalf("%s %s with a frame token: %d", c.m, c.p, r.StatusCode)

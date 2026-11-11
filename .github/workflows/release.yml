@@ -87,6 +87,9 @@ jobs:
             image/out/system-*.tar
             image/out/system.sha256
             image/out/qemu-test.txt
+      # The tfctl inside the image, so the release asset and the server's copy are the same bytes.
+      - uses: actions/upload-artifact@v4
+        with: { name: tfctl-built, path: image/work/tfctl/tfctl }
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: logs, path: "image/out/*.log\nimage/out/qemu-test.txt\nimage/work/qemu/serial.log" }
@@ -99,17 +102,15 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with: { name: image, path: image/out }
-      - uses: dtolnay/rust-toolchain@stable
-        with: { targets: armv7-unknown-linux-musleabihf }
+      - uses: actions/download-artifact@v4
+        with: { name: tfctl-built, path: tfctl-built }
       - name: stage frame software (tfctl-armv7, system bundle, versions.json)
         run: |
-          pip install cargo-zigbuild
-          (cd tfctl && cargo zigbuild --release --target armv7-unknown-linux-musleabihf)
           scripts/make-artifacts.sh "${{ needs.image.outputs.version }}" \
-            tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl image/out/system-*.tar
+            tfctl-built/tfctl image/out/system-*.tar
       - name: tfctl as a release asset (TASK 9)
         run: |
-          mkdir -p rel && cp tfctl/target/armv7-unknown-linux-musleabihf/release/tfctl rel/tfctl-armv7
+          mkdir -p rel && cp tfctl-built/tfctl rel/tfctl-armv7
           (cd rel && sha256sum tfctl-armv7 > tfctl-armv7.sha256)
       - uses: actions/upload-artifact@v4
         with: { name: tfctl, path: "rel/tfctl-armv7*" }
