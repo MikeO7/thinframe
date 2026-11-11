@@ -9,14 +9,14 @@
 //!
 //! `tfctl boot fsck` is a separate, earlier step: the inittab line between `mount proc` and
 //! `mount -a`. It first links `/dev/thinframe-data` and `/dev/thinframe-boot` (devtmpfs) to p4
-//! and p1 of the disk `slot::find_disk` returns (our MBR signature only, never an eMMC); fstab
+//! and p1 of the disk `slot::find_disk` returns (the disk we booted from: the card, or the eMMC after `tfctl emmc install`, never the other); fstab
 //! mounts those links, not `LABEL=`, because the frame's Android eMMC may hold a file system
 //! labelled `data` (Android build tools can label userdata after its mount point; not checked
 //! on this frame's dump), and BusyBox mount takes the first label match it finds. No thinframe disk: no links, and /data and /boot stay
 //! unmounted rather than landing on something else. /data (p4) is never mounted at that
 //! point, so `e2fsck -p` can repair it after a power cut; if preen mode gives up (exit bit 4),
 //! one `e2fsck -y` pass follows. Then `mount -a` mounts /data and the bind mounts over it in
-//! fstab order, before rcS starts iwd and dropbear, which read their state from those binds.
+//! fstab order, before init starts iwd and dropbear, which read their state from those binds.
 use crate::config;
 use crate::provision;
 use crate::slot;
@@ -28,7 +28,8 @@ use std::path::Path;
 use std::process::Command;
 
 /// cog's runtime dir is private; the status page is readable by anyone who logs in.
-const RUN_DIRS: [(&str, u32); 2] = [("/run/user/1000", 0o700), ("/run/thinframe", 0o755)];
+pub const COG_RUNTIME_DIR: &str = "/run/user/1000";
+const RUN_DIRS: [(&str, u32); 2] = [(COG_RUNTIME_DIR, 0o700), ("/run/thinframe", 0o755)];
 /// Partition table entry 4 of the MBR.
 const P4: usize = 446 + 3 * 16;
 /// Grow only when it gains at least 1 MiB.
@@ -199,7 +200,7 @@ fn should_format(readable: bool, io_errors: bool, ext4_anywhere: bool) -> bool {
 /// profiles, nowhere to save new ones and no way back on the screen. After it, the frame starts
 /// like a new one: Wi-Fi setup on screen, the server found on the network, a pairing code;
 /// dropbear makes a new host key; touch firmware also lives in the image or on /boot. The
-/// device is checked again here: p4 of the disk with our MBR signature (never the eMMC), not
+/// device is checked again here: p4 of the disk we booted from (slot::find_disk; never the other disk), not
 /// mounted anywhere.
 fn ensure_data() -> io::Result<()> {
     if mounted_at(&fs::read_to_string("/proc/mounts")?, "/data") {

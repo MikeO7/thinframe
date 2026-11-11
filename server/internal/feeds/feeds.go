@@ -24,7 +24,7 @@ import (
 type Config struct {
 	SonarrURL, SonarrKey string
 	RadarrURL, RadarrKey string
-	Lat, Lon             float64        // sunrise and sunset
+	Lat, Lon             float64        // sunrise and sunset; both 0 = not set, none shown
 	Loc                  *time.Location // times on the frame; nil = UTC
 	SunURL               string         // empty = open-meteo; tests point it elsewhere
 	Client               *http.Client   // nil = 20 s timeout
@@ -89,11 +89,14 @@ func Refresh(ctx context.Context, c Config, now time.Time, set SetSource) error 
 	if err := put(set, "shows", shows); err != nil {
 		return err
 	}
-	sun, err := f.sun()
-	if err != nil {
-		return err
+	// No place set (WEATHER_LAT/WEATHER_LON): no sunrise for 0°N 0°E.
+	if c.Lat != 0 || c.Lon != 0 {
+		sun, err := f.sun()
+		if err != nil {
+			return err
+		}
+		today = append(today, sun...)
 	}
-	today = append(today, sun...)
 	sort.SliceStable(today, func(i, j int) bool { return today[i].Start < today[j].Start })
 	return put(set, "today", map[string]any{"events": today})
 }
@@ -265,7 +268,7 @@ func (f fetcher) build() (map[string]any, []Event, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return map[string]any{"upcoming": up, "added": added, "updated": iso(f.now)}, today, nil
+	return map[string]any{"upcoming": up, "added": added}, today, nil
 }
 
 func (f fetcher) added() ([]Added, error) {

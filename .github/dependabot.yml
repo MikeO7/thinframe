@@ -3,11 +3,9 @@ updates:
   - package-ecosystem: gomod
     directory: /server
     schedule: { interval: weekly }
-  - package-ecosystem: gomod
-    directory: /sim
-    schedule: { interval: weekly }
+  # tfctl itself has no dependencies; its font tool is the only crate that does.
   - package-ecosystem: cargo
-    directory: /tfctl
+    directory: /tfctl/tools/fontgen
     schedule: { interval: weekly }
   - package-ecosystem: github-actions
     directory: /

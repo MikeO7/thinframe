@@ -1,10 +1,10 @@
-//! Run the browser and keep it alive. This is the OpenRC service's `command`.
+//! Run the browser and keep it alive. Started by init (inittab respawn).
 //!
-//! cog on DRM (`cog --platform=drm --platform-params=renderer=gles,rotation=N URL`, or `cage -- cog
-//! --platform=wl URL`), restarted 3 s after it exits, 30 s after 5 fast failures. Commands from
+//! cog on DRM (`cog --platform=drm --platform-params=renderer=gles,rotation=N URL`),
+//! restarted 3 s after it exits, 30 s after 5 fast failures. Commands from
 //! the agent thread arrive over an mpsc channel; the night-mode schedule is evaluated here once
 //! a minute so it keeps working through a server outage. The light sensor turns the screen off
-//! in a dark room (light.rs); a touch while off wakes it for a minute. SIGTERM is forwarded to cog.
+//! in a dark room (light.rs); a touch while off wakes it for a minute. On SIGTERM cog is killed with us.
 use crate::config::Config;
 use crate::update::{self, Paths, StartCheck};
 use crate::{agent, light, screen, sense, splash, sys};
@@ -359,12 +359,10 @@ fn animated(style: &str) -> bool {
 
 pub struct Kiosk {
     url: String,
-    platform: String,
     renderer: String,
     rotation: u8,
     extra_args: Vec<String>,
     cog_env: Vec<(String, String)>,
-    user: String,
     brightness: u8,
     screen_off: String,
     screen_on: String,
@@ -421,12 +419,10 @@ impl Kiosk {
     pub fn new(cfg: &Config) -> Kiosk {
         Kiosk {
             url: cfg.url.clone(),
-            platform: cfg.platform.clone(),
             renderer: cfg.renderer.clone(),
             rotation: cfg.rotation,
             extra_args: cfg.extra_args.clone(),
             cog_env: cfg.cog_env.clone(),
-            user: cfg.user.clone(),
             brightness: cfg.brightness,
             screen_off: cfg.screen_off.clone(),
             screen_on: cfg.screen_on.clone(),
@@ -490,27 +486,20 @@ impl Kiosk {
     }
 
     pub fn command(&self) -> Command {
-        let mut c = if self.platform == "wl" {
-            let mut c = Command::new("cage");
-            c.arg("--").arg("cog").arg("--platform=wl");
-            c
-        } else {
-            let mut c = Command::new("cog");
-            c.arg("--platform=drm")
-                // Only the GLES renderer rotates; modeset ignores rotation (cog 0.18.4). COG_RENDERER
-                // picks: gles is the default, modeset is the escape hatch if gles fails on a GPU.
-                .arg(format!(
-                    "--platform-params=renderer={},rotation={}",
-                    self.renderer, self.rotation
-                ));
-            c
-        };
+        let mut c = Command::new("cog");
+        c.arg("--platform=drm")
+            // Only the GLES renderer rotates; modeset ignores rotation (cog 0.18.4). COG_RENDERER
+            // picks: gles is the default, modeset is the escape hatch if gles fails on a GPU.
+            .arg(format!(
+                "--platform-params=renderer={},rotation={}",
+                self.renderer, self.rotation
+            ));
         // Dark until the page paints: the default is a white flash at every (re)start.
         c.arg(format!("--bg-color={BG_COLOR}"))
             .arg(format!("--web-mem-limit={WEB_MEM_LIMIT_MIB}"));
         c.args(&self.extra_args).arg(&self.url);
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| format!("/run/user/{}", uid_of(&self.user).unwrap_or(1000)));
+            .unwrap_or_else(|_| crate::boot::COG_RUNTIME_DIR.into());
         c.env("XDG_RUNTIME_DIR", runtime_dir)
             .env("LIBSEAT_BACKEND", "seatd")
             .env("DBUS_SESSION_BUS_ADDRESS", BUS)
@@ -874,9 +863,6 @@ impl Kiosk {
 
     /// cog's session bus, once: dbus-daemon in the foreground as our child.
     fn start_bus(&mut self) {
-        if self.platform == "wl" {
-            return;
-        }
         let path = BUS.trim_start_matches("unix:path=");
         let _ = fs::remove_file(path);
         match Command::new("dbus-daemon")
@@ -1135,18 +1121,6 @@ impl Kiosk {
     }
 }
 
-fn uid_of(user: &str) -> Option<u32> {
-    std::fs::read_to_string("/etc/passwd")
-        .ok()?
-        .lines()
-        .filter_map(|l| {
-            let mut f = l.split(':');
-            Some((f.next()?, f.nth(1)?))
-        })
-        .find(|(name, _)| *name == user)
-        .and_then(|(_, uid)| uid.parse().ok())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1194,11 +1168,6 @@ mod tests {
             Some("2")
         );
         cfg.cog_env = vec![];
-        cfg.platform = "wl".into();
-        let c = Kiosk::new(&cfg).command();
-        assert_eq!(c.get_program(), "cage");
-        assert_eq!(c.get_args().next().unwrap(), "--");
-        cfg.platform = "drm".into();
         cfg.renderer = "modeset".into();
         let c = Kiosk::new(&cfg).command();
         assert_eq!(

@@ -210,12 +210,21 @@ func newHTTPServer(addr string, h http.Handler) *http.Server {
 	return hs
 }
 
+// zone is the time zone frames are told (TZ, else the host's), so calendar lines and feeds agree
+// with the clock on the frame; UTC, with a log line, when it does not load.
+func zone(who string) *time.Location {
+	name := api.LocalTZ()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Printf("%s: time zone %q: %v; using UTC", who, name, err)
+		return time.UTC
+	}
+	return loc
+}
+
 // calendars are the .ics feeds and the CalDAV account the env names, times in TZ.
 func calendars() api.Calendars {
-	loc, err := time.LoadLocation(env("TZ", "UTC"))
-	if err != nil {
-		loc = time.UTC
-	}
+	loc := zone("calendar")
 	var cs api.Calendars
 	if urls := api.FeedURLs(os.Getenv("CALENDAR_ICS_URL")); len(urls) > 0 {
 		cs = append(cs, api.ICSFeeds(urls, loc))
@@ -237,11 +246,7 @@ func calendars() api.Calendars {
 
 // feedsConfig is the shows/today refresher's settings from the environment.
 func feedsConfig() feeds.Config {
-	loc, err := time.LoadLocation(env("TZ", "UTC"))
-	if err != nil {
-		log.Printf("feeds: time zone %q: %v; using UTC", os.Getenv("TZ"), err)
-		loc = time.UTC
-	}
+	loc := zone("feeds")
 	lat, _ := strconv.ParseFloat(os.Getenv("WEATHER_LAT"), 64)
 	lon, _ := strconv.ParseFloat(os.Getenv("WEATHER_LON"), 64)
 	return feeds.Config{

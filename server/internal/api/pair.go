@@ -344,7 +344,7 @@ func (s *Server) handlePairShowCode(w http.ResponseWriter, r *http.Request) {
 
 // Unpair forgets a frame's token; the frame asks to pair again (a new code) on its next connect.
 func (s *Server) Unpair(id string) (store.Frame, error) {
-	f, err := s.Store.Update(id, func(f *store.Frame) {
+	f, err := s.Store.UpdateExisting(id, func(f *store.Frame) {
 		f.TokenHash, f.PairedAt = "", nil
 		store.AddEvent(f, "pair", "pairing forgotten")
 	})
@@ -370,10 +370,5 @@ func (s *Server) frameTokenOK(r *http.Request, id string) bool {
 		f, err := s.Store.Get(id)
 		return err == nil && f.TokenHash != "" && sameHash(f.TokenHash, h)
 	}
-	for _, f := range s.Store.List() {
-		if f.TokenHash != "" && sameHash(f.TokenHash, h) {
-			return true
-		}
-	}
-	return false
+	return s.Store.AnyToken(func(stored string) bool { return sameHash(stored, h) })
 }

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -76,6 +76,7 @@ func (cs Calendars) Upcoming(now time.Time, n int) ([]Event, error) {
 	wg.Wait()
 	var out []Event
 	failed := 0
+	raw := slices.Clone(errs)
 	for i := range cs {
 		out = append(out, evs[i]...)
 		if errs[i] != nil {
@@ -90,13 +91,15 @@ func (cs Calendars) Upcoming(now time.Time, n int) ([]Event, error) {
 	if failed > 0 && failed == len(cs) {
 		return out, errors.Join(errs...)
 	}
-	for _, err := range errs {
-		if err != nil {
-			log.Printf("calendar: %s", redactErr(err))
-		}
+	// Some feeds work: say which do not, once per change (this runs on every page request).
+	for i, err := range raw {
+		calendarFeeds.note(fmt.Sprintf("calendar: feed %d", i+1), err)
 	}
 	return out, nil
 }
+
+// calendarFeeds logs one feed of several failing, when it starts and when it stops.
+var calendarFeeds feedLog
 
 func (c *ICS) fetch() ([]Event, error) {
 	cl := http.Client{Timeout: 10 * time.Second}

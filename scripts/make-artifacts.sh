@@ -13,9 +13,8 @@ out="${4:-$root/server/artifacts}"
 [ -f "$bin" ] || { echo "no such binary: $bin" >&2; exit 1; }
 mkdir -p "$out"
 install -m 0755 "$bin" "$out/tfctl-armv7"
-# No overlay.tar.gz: root changes ship only as system updates (A/B), never unpacked into a
-# running root (docs/decisions.md "Power can be pulled at any time").
-rm -f "$out/overlay.tar.gz" "$out/overlay.tar.gz.sha256"
+# Root changes ship only as system updates (A/B), never unpacked into a running root
+# (docs/decisions.md "Power can be pulled at any time").
 
 files='"tfctl":"tfctl-armv7"'
 system=""

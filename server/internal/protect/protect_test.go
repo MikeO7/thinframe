@@ -83,7 +83,7 @@ func TestCamerasAndSnapshots(t *testing.T) {
 
 func TestParseEvent(t *testing.T) {
 	ev, ok := ParseEvent([]byte(`{"type":"add","item":{"modelKey":"event","id":"e1","type":"ring","start":1761450000000,"device":"c1"}}`))
-	if !ok || ev.Type != "ring" || ev.Device != "c1" || ev.ID != "e1" || ev.Start.UnixMilli() != 1761450000000 {
+	if !ok || ev.Type != "ring" || ev.Device != "c1" || ev.ID != "e1" {
 		t.Fatalf("ring %+v %v", ev, ok)
 	}
 	ev, ok = ParseEvent([]byte(`{"type":"add","item":{"modelKey":"event","id":"e2","type":"smartDetectZone","device":"c1","smartDetectTypes":["person","face"]}}`))

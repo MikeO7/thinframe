@@ -25,6 +25,8 @@ pub const GRACE: Duration = Duration::from_secs(45);
 const CACHED_HOLD: Duration = Duration::from_secs(10);
 const RESCAN: Duration = Duration::from_secs(20);
 const STEP: Duration = Duration::from_secs(2);
+/// How long "Connected" may wait for an address before the page gives up on that network.
+const JOINED_WAIT: Duration = Duration::from_secs(60);
 /// While waiting for an address: one `ip` call each time, and the server is tried the moment
 /// DHCP answers instead of up to 2 s later.
 const WAIT_STEP: Duration = Duration::from_millis(400);
@@ -41,6 +43,8 @@ pub struct Setup {
     /// A join is running for this network.
     pub joining: Option<String>,
     pub joined: Option<String>,
+    /// When `joined` was set: no address after `JOINED_WAIT` goes back to the list.
+    pub joined_at: Option<Instant>,
     /// The last network tried, and why it failed.
     pub last: Option<String>,
     /// The security of the row that was tapped for `last` ("psk", "open").
@@ -392,7 +396,8 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
             s.error = None;
             drop(s);
             let (st, radio) = (st.clone(), radio.clone());
-            let _ = thread::Builder::new()
+            let st2 = st.clone();
+            let spawned = thread::Builder::new()
                 .name("wifijoin".into())
                 .spawn(move || {
                     let r = radio.join(&ssid, (!open).then_some(psk.as_str()));
@@ -402,6 +407,7 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
                         Ok(()) => {
                             eprintln!("tfctl: wifi setup: joined {ssid}");
                             s.joined = Some(ssid);
+                            s.joined_at = Some(Instant::now());
                         }
                         Err(e) => {
                             eprintln!("tfctl: wifi setup: join {ssid}: {e}");
@@ -409,6 +415,12 @@ pub fn respond(st: &Shared, radio: &Arc<dyn Radio>, port: u16, req: &Req) -> Res
                         }
                     }
                 });
+            if let Err(e) = spawned {
+                // No thread, no join: without this the page said "Joining" for ever.
+                let mut s = lock(&st2);
+                s.joining = None;
+                s.error = Some(format!("That didn't work ({e}). Try again."));
+            }
             see_other("/wifi")
         }
         ("GET", "/font.ttf") => file(FONT, "font/ttf"),
@@ -838,6 +850,16 @@ impl Agent {
                 ui
             }
         };
+        {
+            // Joined but no address (DHCP never answered): back to the list, with the reason.
+            let mut s = lock(&ui);
+            if s.joined.is_some() && s.joined_at.is_some_and(|t| t.elapsed() >= JOINED_WAIT) {
+                let ssid = s.joined.take().unwrap_or_default();
+                s.joined_at = None;
+                s.error = Some(format!("{ssid} gave this frame no address. Try again."));
+                s.last = Some(ssid);
+            }
+        }
         let rescan = {
             let s = lock(&ui);
             s.joining.is_none() && s.scanned.is_none_or(|t| t.elapsed() >= RESCAN)
@@ -903,6 +925,9 @@ impl Agent {
         }
         self.wifi_page_up = false;
         self.wifi_setup = false;
+        // A pairing code this page displaced is not on screen any more: ask for a new one.
+        self.pair_nonce = None;
+        self.pair_page_up = false;
         // Back to the status page ("reaching the server"); pairing or the dashboard follows.
         self.write_status_page();
         if !self.cfg.fallback_url.is_empty() {

@@ -133,8 +133,9 @@ func TestRefreshBuildsShowsAndToday(t *testing.T) {
 			t.Errorf("added[%d] = %q; want %q", i, s, wantAdded[i])
 		}
 	}
-	if shows.Updated != "2026-10-30T10:00:00-06:00" {
-		t.Errorf("updated = %q", shows.Updated)
+	// No timestamp in the source: it would make every refresh a change to store and push.
+	if shows.Updated != "" {
+		t.Errorf("updated = %q; want none", shows.Updated)
 	}
 
 	var today struct{ Events []Event }

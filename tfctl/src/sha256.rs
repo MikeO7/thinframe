@@ -36,14 +36,23 @@ impl Sha256 {
         }
     }
 
-    pub fn update(&mut self, data: &[u8]) {
+    pub fn update(&mut self, mut data: &[u8]) {
         self.len = self.len.wrapping_add(data.len() as u64);
-        self.buf.extend_from_slice(data);
-        let (blocks, rest) = self.buf.as_chunks::<64>();
+        // Fill the block left over from the last call, then hash straight from `data`.
+        if !self.buf.is_empty() {
+            let take = (64 - self.buf.len()).min(data.len());
+            self.buf.extend_from_slice(&data[..take]);
+            data = &data[take..];
+            let (blocks, _) = self.buf.as_chunks::<64>();
+            let Some(b) = blocks.first() else { return };
+            compress(&mut self.h, b);
+            self.buf.clear();
+        }
+        let (blocks, rest) = data.as_chunks::<64>();
         for b in blocks {
             compress(&mut self.h, b);
         }
-        self.buf = rest.to_vec();
+        self.buf.extend_from_slice(rest);
     }
 
     pub fn finish(mut self) -> [u8; 32] {

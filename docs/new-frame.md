@@ -14,7 +14,11 @@ After that everything (updates, settings, fixes, reboots) comes from the server.
    It builds `frameserver`, makes an admin token, and runs it as a login service on port 41007
    (restarts on its own; `scripts/server-mac.sh status` lists the frames). Frames find it on the
    network by themselves **[V]** (2026-10-22: the frame moved to the Mac's new address on its own).
-   Keep the Mac awake while frames use it.
+   Keep the Mac awake while frames use it. If another server already runs on the network (the
+   owner's production container), add `DISCOVERY=off` to `~/.thinframe/env` and run
+   `scripts/server-mac.sh restart`: the script does not set it, and without it frames may find
+   the Mac instead (decisions.md "Production on the home server"). Such a test server gets its
+   frames by `SERVER_URL` only.
 
 2. **Touch firmware.** The touch controller needs the vendor's table, which cannot be shipped.
    It is the same file for every PF1007L. The flasher looks for `~/.thinframe/gsl_m86_hd.fw` and
@@ -56,6 +60,6 @@ the original frame again.
 | Wi-Fi list on the screen | The saved network did not join (wrong password, out of range). Pick a network on screen. |
 | Taps do nothing | No touch firmware was on the card. Copy `gsl_m86_hd.fw` to `~/.thinframe/` and rewrite the settings: `scripts/flash.sh --settings-only`. |
 
-A second PF1007L has not been tried yet **[U]**: the bootloader carries this unit's memory
-settings (docs/hardware.md). If a new unit does not start from the card, take the card out
+A second PF1007L has not been tried yet **[U]**: the bootloader is the one build tested on this unit
+(U-Boot "build L", docs/hardware.md "Boot"). If a new unit does not start from the card, take the card out
 (Android comes back) and note it in docs/log.md.

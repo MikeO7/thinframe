@@ -86,7 +86,8 @@ pub fn collect(cfg: &Config) -> String {
             PREV_TAIL,
         ),
     );
-    out.truncate(MAX_BYTES.min(out.len()));
+    let keep = crate::dbg::clip(&out, MAX_BYTES).len();
+    out.truncate(keep);
     out
 }
 

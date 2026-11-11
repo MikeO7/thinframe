@@ -3,7 +3,7 @@
 //! `/data/thinframe/log/current.log` every 15 s (the only card writes the log causes); the first
 //! run of a new boot moves the last boot's file to `previous.log`. Both are plain 0644 files, so
 //! `frame` reads them over ssh, and the report (report.rs) carries their tails. `current.log` is
-//! capped like the live log, but by a synced copy renamed over it (a power cut mid-trim keeps
+//! capped too (at half the live log's size), but by a synced copy renamed over it (a power cut mid-trim keeps
 //! the old file, where truncating in place would leave an empty one); `/data` not mounted means nothing is written.
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};

@@ -131,6 +131,8 @@ step_check() {
 	grep -q "disk-signature = 0x$SIG" "$br/board/pf1007l/genimage.cfg" || stop "genimage signature != $SIG"
 	grep -q "PARTUUID=$SIG-0@PART@" "$HERE/boot/extlinux.conf.in" || stop "extlinux root != PARTUUID=$SIG-0N"
 	grep -q "VALUE=\"$KVER\"" "$br/configs/pf1007l_defconfig" || stop "defconfig kernel pin != $KVER"
+	grep -q "\"kernel\":\"$KVER\"" "$br/board/pf1007l/post-image.sh" || stop "post-image.sh kernel != $KVER"
+	grep -q "grep -qx $KVER'" "$HERE/qemu-test.sh" || stop "qemu-test.sh kernel != $KVER"
 	echo "ok"
 }
 

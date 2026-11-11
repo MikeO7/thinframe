@@ -9,8 +9,6 @@ pub const DEFAULT_PATH: &str = "/etc/thinframe.conf";
 #[derive(Debug, Clone)]
 pub struct Config {
     pub url: String,
-    /// "drm" or "wl"
-    pub platform: String,
     /// cog DRM renderer: "gles" (rotates) or "modeset" (no rotation; plain KMS planes)
     pub renderer: String,
     /// quarter turns 0..3
@@ -19,7 +17,6 @@ pub struct Config {
     /// COG_ENV="NAME=value ...": extra environment for cog and WebKit, over the defaults in
     /// kiosk.rs (for trying a WebKit setting without a new tfctl).
     pub cog_env: Vec<(String, String)>,
-    pub user: String,
     /// Thin-client mode: base URL of frameserver, e.g. http://nas.local:41007. Empty = standalone.
     pub server_url: String,
     pub frame_id: String,
@@ -58,12 +55,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             url: "file:///var/lib/thinframe/www/index.html".into(),
-            platform: "drm".into(),
             renderer: "gles".into(),
             rotation: 3,
             extra_args: vec![],
             cog_env: vec![],
-            user: "frame".into(),
             server_url: String::new(),
             frame_id: "frame".into(),
             fallback_url: "file:///run/thinframe/status.html".into(),
@@ -130,10 +125,10 @@ pub fn parse(text: &str) -> Config {
         .map(|(k, v)| (k.trim(), v.trim().trim_matches('"')))
         .collect();
     let get = |k: &str, d: &str| kv.get(k).map(|v| v.to_string()).unwrap_or(d.into());
-    cfg.url = get("FRAME_URL", &cfg.url);
-    cfg.platform = get("COG_PLATFORM", &cfg.platform);
+    // An empty FRAME_URL (Settings' reset writes one) is no override.
+    let frame_url = kv.get("FRAME_URL").copied().filter(|v| !v.is_empty());
+    cfg.url = frame_url.unwrap_or(&cfg.url).to_string();
     cfg.renderer = get("COG_RENDERER", &cfg.renderer);
-    cfg.user = get("FRAME_USER", &cfg.user);
     cfg.server_url = get("SERVER_URL", &cfg.server_url);
     cfg.frame_id = get("FRAME_ID", &cfg.frame_id);
     cfg.fallback_url = get("FALLBACK_URL", &cfg.fallback_url);
@@ -158,7 +153,7 @@ pub fn parse(text: &str) -> Config {
     if let Some(v) = kv.get("BRIGHTNESS") {
         cfg.brightness = v.parse().unwrap_or(cfg.brightness).min(100);
     }
-    if !cfg.server_url.is_empty() && !kv.contains_key("FRAME_URL") {
+    if !cfg.server_url.is_empty() && frame_url.is_none() {
         let base = cfg.server_url.trim_end_matches('/');
         cfg.url = format!("{base}/frame/{}", cfg.frame_id);
     }
@@ -212,6 +207,10 @@ pub fn parse_rgb(s: &str) -> Option<u32> {
 /// removes it) and the line in the file is blanked. A token an older tfctl left in the file is
 /// moved out on the next save, whatever keys that save carries.
 pub fn save_overrides(path: &str, kv: &[(&str, &str)]) -> io::Result<()> {
+    // The agent, Settings and discovery threads all save: one read-modify-write at a time, or
+    // two overlapping saves lose a key (and share one .tmp name).
+    static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = SAVING.lock().unwrap_or_else(|e| e.into_inner());
     let real = resolve_target(Path::new(path));
     let path = real.to_str().unwrap_or(path);
     // Bytes, not a string: one bad byte (a torn write, a card fault) must not stop the boot or
@@ -467,7 +466,6 @@ mod tests {
                 ("A_1".to_string(), "2=3".to_string())
             ]
         );
-        assert_eq!(c.platform, "drm");
     }
 
     #[test]
@@ -489,6 +487,13 @@ mod tests {
         assert_eq!(parse("COG_ROTATION=200\n").rotation, 3);
         assert_eq!(parse("COG_ROTATION=4\n").rotation, 3);
         assert_eq!(parse("COG_ROTATION=0\n").rotation, 0);
+    }
+
+    #[test]
+    fn an_empty_frame_url_is_no_override() {
+        // What Settings' reset leaves behind, then a server found again.
+        let c = parse("SERVER_URL=http://nas:41007\nFRAME_ID=kitchen\nFRAME_URL=\"\"\n");
+        assert_eq!(c.url, "http://nas:41007/frame/kitchen");
     }
 
     #[test]

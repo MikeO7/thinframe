@@ -19,19 +19,17 @@ import (
 
 // Config is what a frame obeys. Sent whole on every change.
 type Config struct {
-	URL             string   `json:"url,omitempty"` // override; empty = /frame/{id} on this server
-	Rotation        int      `json:"rotation"`      // quarter turns 0..3
-	Brightness      int      `json:"brightness"`    // 0..100
-	ScreenOff       string   `json:"screen_off,omitempty"`
-	ScreenOn        string   `json:"screen_on,omitempty"`
-	PageVersion     int      `json:"page_version"`
-	SoftwareVersion string   `json:"software_version,omitempty"`
-	SystemVersion   string   `json:"system_version,omitempty"`
-	Tags            []string `json:"tags,omitempty"`
-	SplashText      string   `json:"splash_text,omitempty"` // boot splash line (TASK 15)
-	SplashBG        string   `json:"splash_bg,omitempty"`   // "#rrggbb"
-	SplashPNG       string   `json:"splash_png,omitempty"`  // base64 PNG, at most MaxSplashPNG bytes decoded
-	Debug           bool     `json:"debug"`                 // tfctl logs everything and reports on connect
+	URL         string   `json:"url,omitempty"` // override; empty = /frame/{id} on this server
+	Rotation    int      `json:"rotation"`      // quarter turns 0..3
+	Brightness  int      `json:"brightness"`    // 0..100
+	ScreenOff   string   `json:"screen_off,omitempty"`
+	ScreenOn    string   `json:"screen_on,omitempty"`
+	PageVersion int      `json:"page_version"`
+	Tags        []string `json:"tags,omitempty"`
+	SplashText  string   `json:"splash_text,omitempty"` // boot splash line (TASK 15)
+	SplashBG    string   `json:"splash_bg,omitempty"`   // "#rrggbb"
+	SplashPNG   string   `json:"splash_png,omitempty"`  // base64 PNG, at most MaxSplashPNG bytes decoded
+	Debug       bool     `json:"debug"`                 // tfctl logs everything and reports on connect
 	// The light sensor beyond "dark room = off" (tfctl sense.rs).
 	AutoBrightness bool `json:"auto_brightness"` // backlight follows the room light, up to Brightness
 	Wave           bool `json:"wave"`            // a hand over the sensor wakes the screen, or turns the page to the next tab
@@ -277,6 +275,36 @@ func (s *Store) List() []Frame {
 		out = append(out, clone(*f))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// AnyToken reports whether match accepts some paired frame's token hash. For requests that
+// arrive often (artifact downloads): it copies no frame.
+func (s *Store) AnyToken(match func(hash string) bool) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, f := range s.frames {
+		if f.TokenHash != "" && match(f.TokenHash) {
+			return true
+		}
+	}
+	return false
+}
+
+// WidgetsOfType lists every layout's widgets of one type, for checks made on each request (is
+// this camera on some frame?). The widgets are the stored ones, not copies: read, never change.
+// That is safe because an update replaces a frame whole (update) and never edits it in place.
+func (s *Store) WidgetsOfType(typ string) []Widget {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []Widget
+	for _, f := range s.frames {
+		for _, w := range f.Layout.Widgets {
+			if w.Type == typ {
+				out = append(out, w)
+			}
+		}
+	}
 	return out
 }
 

@@ -162,7 +162,7 @@ pub const LOGO_PATH: &str = "/etc/thinframe/splash.png";
 /// Pushed by the server (`splash_png`); wins over the image's logo.
 pub const DATA_LOGO_PATH: &str = "/data/thinframe/splash.png";
 
-/// The logo, if one is installed and decodes; a bad file is logged and ignored.
+/// Where the logo is: `TFCTL_SPLASH_PNG` (for trying one by hand), the server's, the image's.
 fn logo_path() -> String {
     std::env::var("TFCTL_SPLASH_PNG").unwrap_or_else(|_| {
         let data = std::path::Path::new(DATA_LOGO_PATH).exists();
@@ -202,6 +202,9 @@ impl Splash {
     /// Let cog take the display: drop DRM master, keep the picture up. False if that failed
     /// (then the caller must drop the splash, or cog cannot become master).
     pub fn hand_over(&mut self) -> bool {
+        if self.handed_over.load(Ordering::SeqCst) {
+            return true; // dropping master twice fails (EINVAL) and would lose the picture
+        }
         let mut d = self.display.lock().unwrap_or_else(|e| e.into_inner());
         match d.drop_master() {
             Ok(()) => {

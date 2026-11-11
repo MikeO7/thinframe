@@ -46,7 +46,7 @@ TFCTL_CONF="$TMP/frame.conf" "$TMP/target/release/tfctl" agent >"$TMP/agent.log"
 
 online=""
 for _ in $(seq 100); do
-	if api "http://127.0.0.1:$PORT/api/frames" | grep -q "\"$ID\""; then online=1; break; fi
+	if api "http://127.0.0.1:$PORT/api/frames" | grep "\"$ID\"" >/dev/null; then online=1; break; fi
 	sleep 0.1
 done
 [ -n "$online" ] || fail "frame never registered"
@@ -59,9 +59,9 @@ grep -q 'COG_ROTATION="\?1' "$TMP/frame.conf" || fail "rotation not persisted by
 api -X POST -H 'Content-Type: application/json' -d '{"name":"screen","args":{"state":"off"}}' \
 	"http://127.0.0.1:$PORT/api/frames/$ID/actions" >/dev/null
 for _ in $(seq 100); do
-	api "http://127.0.0.1:$PORT/api/frames/$ID" | grep -q '"acked_at"' && break; sleep 0.1
+	api "http://127.0.0.1:$PORT/api/frames/$ID" | grep '"acked_at"' >/dev/null && break; sleep 0.1
 done
-api "http://127.0.0.1:$PORT/api/frames/$ID" | grep -q '"acked_at"' || fail "action never acked"
+api "http://127.0.0.1:$PORT/api/frames/$ID" | grep '"acked_at"' >/dev/null || fail "action never acked"
 
 # Pairing: a frame without a token shows a code on its page; nothing pairs until the owner types
 # that code on /admin, then the frame gets its own token. (Own dir: the token file sits next to
@@ -77,21 +77,21 @@ for _ in $(seq 100); do
 done
 [ -n "$code" ] || fail "the unpaired frame shows no pairing code"
 sleep 3 # a few polls while nobody has typed the code
-api "http://127.0.0.1:$PORT/api/frames" | grep -q '"e2e-pair"' && fail "a frame record exists before the code was typed"
+api "http://127.0.0.1:$PORT/api/frames" | grep '"e2e-pair"' >/dev/null && fail "a frame record exists before the code was typed"
 [ -s "$PD/thinframe.token" ] && fail "the frame got a token before the code was typed"
 wrong=$(( (10#$code + 1) % 1000000 )); wrong=$(printf '%06d' "$wrong")
 curl -fsS -o /dev/null -w '%{redirect_url}' -u "admin:$TOKEN" -d "code=$wrong" \
-	"http://127.0.0.1:$PORT/admin/e2e-pair/pair" | grep -q 'err=' || fail "a wrong code was not refused"
+	"http://127.0.0.1:$PORT/admin/e2e-pair/pair" | grep 'err=' >/dev/null || fail "a wrong code was not refused"
 curl -fsS -o /dev/null -u "admin:$TOKEN" -d "code=$code" "http://127.0.0.1:$PORT/admin/e2e-pair/pair" || fail "typing the code"
 for _ in $(seq 100); do [ -s "$PD/thinframe.token" ] && break; sleep 0.1; done
 [ -s "$PD/thinframe.token" ] || fail "the frame never picked its token up"
-for _ in $(seq 100); do api "http://127.0.0.1:$PORT/api/frames/e2e-pair" 2>/dev/null | grep -q '"ip"' && break; sleep 0.1; done
-api "http://127.0.0.1:$PORT/api/frames/e2e-pair" | grep -q '"ip"' || fail "the paired frame never sent a heartbeat"
+for _ in $(seq 100); do api "http://127.0.0.1:$PORT/api/frames/e2e-pair" 2>/dev/null | grep '"ip"' >/dev/null && break; sleep 0.1; done
+api "http://127.0.0.1:$PORT/api/frames/e2e-pair" | grep '"ip"' >/dev/null || fail "the paired frame never sent a heartbeat"
 # Artifacts: a second server (no agent, so nothing tries to self-update) carrying staged files.
 "$ROOT/scripts/make-artifacts.sh" v-e2e "$TMP/target/release/tfctl" "" "$TMP/staged" >/dev/null
 serve $((PORT + 1)) "$TMP/data2" "$TMP/staged" "$TMP/server2.log"; P2=$SP
 api -X PUT -H 'Content-Type: application/json' -d '{"rotation":0}' "http://127.0.0.1:$P2/api/frames/a/config" \
-	| grep -q '"software_version":"v-e2e"' || fail "config lacks software_version"
+	| grep '"software_version":"v-e2e"' >/dev/null || fail "config lacks software_version"
 want="$({ sha256sum "$TMP/target/release/tfctl" 2>/dev/null || shasum -a 256 "$TMP/target/release/tfctl"; } | cut -d' ' -f1)"
 got="$(api "http://127.0.0.1:$P2/api/artifacts/tfctl-armv7.sha256" | cut -d' ' -f1)"
 [ "$want" = "$got" ] || fail "artifact sha256 mismatch"

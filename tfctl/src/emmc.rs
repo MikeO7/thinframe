@@ -77,6 +77,15 @@ type R<T> = io::Result<T>;
 /// `holder` then sees as stale: its pid is gone or no longer a tfctl.
 pub struct InstallLock(PathBuf);
 
+/// Puts the eMMC user area back to read-only when the install ends, also on an error.
+struct ForceRo(String);
+
+impl Drop for ForceRo {
+    fn drop(&mut self) {
+        let _ = fs::write(&self.0, "1\n");
+    }
+}
+
 impl Drop for InstallLock {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
@@ -682,6 +691,7 @@ fn install(backup_sha: Option<&str>, files: &Path) -> R<()> {
     // 2. Open the eMMC for writing, exclusively (fails if any of it is in use).
     let force_ro = format!("/sys/block/{}/force_ro", sys_name(&emmc));
     fs::write(&force_ro, "0\n")?;
+    let _ro_again = ForceRo(force_ro.clone());
     let w = OpenOptions::new()
         .read(true)
         .write(true)

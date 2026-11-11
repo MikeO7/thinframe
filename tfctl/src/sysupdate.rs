@@ -6,7 +6,7 @@
 //! two starts (tries left 2, then 1). The agent's first connect on the new slot writes `tries=0`.
 //!
 //! Safety: `dd` only ever targets a partition of the disk the system booted from, found by the
-//! MBR signature of its root (`slot::find_disk`): from the card, never the eMMC. `uEnv.txt` is rewritten only after the rootfs and
+//! MBR signature of its root (`slot::find_disk`): booted from the card, never the eMMC; booted from the eMMC, never a card. `uEnv.txt` is rewritten only after the rootfs and
 //! kernel are in place, so a failed download or write leaves the running slot untouched.
 use crate::config::Config;
 use crate::slot::{self, Slot, UEnv};
@@ -60,7 +60,7 @@ pub fn free_kb(dir: &Path) -> Option<u64> {
     parse_df(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// `zstd -d -c SRC | dd of=DEV bs=4M`. Both are BusyBox applets on the frame.
+/// `zstd -d -c SRC | dd of=DEV bs=4M`. dd is BusyBox's, zstd its own package.
 pub fn write_rootfs(src: &Path, dev: &Path, fsync: bool) -> io::Result<()> {
     let mut zstd = Command::new("zstd")
         .args(["-d", "-c", "-q", src.to_str().unwrap()])
@@ -131,7 +131,7 @@ fn boot_ro(p: &Paths) {
 }
 
 /// Download, verify, write the standby slot, point U-Boot at it. Returns the new slot; the
-/// caller acks and reboots. Idempotent: a version that is already running is a no-op.
+/// caller acks and reboots. A version that is already running is an error (the agent reports it), not a second write.
 pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::Result<Slot> {
     let current =
         running_slot(p).ok_or_else(|| io::Error::other("cannot tell which slot is running"))?;
@@ -206,6 +206,11 @@ pub fn system(cfg: &Config, arts: &Artifacts, version: &str, p: &Paths) -> io::R
             u.save(&uenv_path(p), standby, TRIES)
         })();
         boot_ro(p);
+        if res.is_err() {
+            // The slot was never switched: this version did not fail to boot, so do not hold
+            // it against the next try.
+            let _ = fs::remove_file(p.data.join("system-attempt"));
+        }
         res
     })();
     let _ = fs::remove_dir_all(&dir);

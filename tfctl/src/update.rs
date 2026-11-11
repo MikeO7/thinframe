@@ -450,6 +450,7 @@ pub fn run(cfg: &Config, force: bool) -> io::Result<()> {
         println!("already at {want}");
         return Ok(());
     }
+    p.no_install_running()?;
     software(cfg, &Artifacts::parse(&v), &want, &p)?;
     println!("installed {want}; restart the service (or reboot) to run it");
     Ok(())

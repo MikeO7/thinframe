@@ -193,6 +193,19 @@ func TestWebSocketControlPlane(t *testing.T) {
 
 func TestPendingActionResentOnReconnect(t *testing.T) {
 	s, ts := newTest(t, "")
+	// An action or an unpair for an id nobody registered is refused, not a new frame.
+	if _, err := s.Act("f1", "reboot", nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("act on an unknown frame: %v", err)
+	}
+	if _, err := s.Unpair("f1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unpair of an unknown frame: %v", err)
+	}
+	if len(s.Store.List()) != 0 {
+		t.Fatal("an unknown id made a frame")
+	}
+	if _, err := s.Store.Ensure("f1"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Act("f1", "reboot", nil); err != nil {
 		t.Fatal(err)
 	}

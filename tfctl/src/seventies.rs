@@ -1,4 +1,4 @@
-//! The "seventies" splash (SPLASH_STYLE=seventies, the default; TASK 15): warm stripes curving
+//! The "seventies" splash (SPLASH_STYLE=seventies; TASK 15): warm stripes curving
 //! around a sun, sunburst rays that turn slowly, the title in Shrikhand (sdf.rs), the boot status
 //! with three pulsing dots, and the frame's address. Picked from browser mockups on 2026-10-20.
 //!

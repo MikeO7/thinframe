@@ -1,4 +1,4 @@
-//! Minimal HTTP/1.1 over TcpStream: URL splitting, one GET, response parsing. LAN only, no TLS.
+//! Minimal HTTP/1.1 over TcpStream: URL splitting, GET and POST, a streaming download, response parsing. LAN only, no TLS.
 use crate::sha256::Sha256;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -68,11 +68,19 @@ impl Url {
 }
 
 pub fn connect(url: &Url, timeout: Duration) -> io::Result<TcpStream> {
-    let addr = (url.host.as_str(), url.port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| io::Error::other("no address"))?;
-    let s = TcpStream::connect_timeout(&addr, timeout)?;
+    // Every address of the name in turn (a name with a dead first address still connects).
+    let mut last = io::Error::other("no address");
+    let mut conn = None;
+    for addr in (url.host.as_str(), url.port).to_socket_addrs()? {
+        match TcpStream::connect_timeout(&addr, timeout) {
+            Ok(s) => {
+                conn = Some(s);
+                break;
+            }
+            Err(e) => last = e,
+        }
+    }
+    let Some(s) = conn else { return Err(last) };
     s.set_read_timeout(Some(timeout))?;
     s.set_write_timeout(Some(timeout))?;
     s.set_nodelay(true)?;
@@ -191,6 +199,15 @@ fn request(
     let body = if chunked {
         dechunk(&buf[end..]).ok_or_else(|| io::Error::other("bad chunked body"))?
     } else {
+        let want = headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, v)| v.parse::<usize>().ok());
+        if want.is_some_and(|w| buf.len() - end < w) {
+            return Err(io::Error::other(
+                "response body shorter than Content-Length",
+            ));
+        }
         buf[end..].to_vec()
     };
     Ok(Response {
@@ -219,7 +236,7 @@ fn dechunk(mut b: &[u8]) -> Option<Vec<u8>> {
 /// A value that goes into the request line or a header: the frame id (in the path), an
 /// artifact name, the token. A control character or a space would end the line or the field
 /// early and let a server-supplied name inject a header.
-fn request_safe(s: &str) -> io::Result<()> {
+pub(crate) fn request_safe(s: &str) -> io::Result<()> {
     if s.bytes().any(|b| b <= b' ' || b == 0x7f) {
         return Err(io::Error::other("control character or space in request"));
     }

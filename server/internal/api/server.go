@@ -188,6 +188,7 @@ func (s *Server) Routes() http.Handler {
 	handle("GET /api/frames/{id}/config", s.authFrame(http.HandlerFunc(s.handleGetConfig)))
 	handle("PUT /api/frames/{id}/config", s.auth(http.HandlerFunc(s.handlePutConfig)))
 	handle("PUT /api/frames/{id}/layout", s.auth(http.HandlerFunc(s.handlePutLayout)))
+	// Kept on purpose though tfctl heartbeats over the socket: older tfctl and curl use it.
 	handle("POST /api/frames/{id}/heartbeat", s.authFrame(http.HandlerFunc(s.handleHeartbeat)))
 	handle("POST /api/frames/{id}/actions", s.auth(http.HandlerFunc(s.handlePostAction)))
 	handle("POST /api/frames/{id}/report", s.authFrame(http.HandlerFunc(s.handlePostReport)))
@@ -200,6 +201,7 @@ func (s *Server) Routes() http.Handler {
 	handle("GET /api/sources/{key}", s.auth(http.HandlerFunc(s.handleGetSource)))
 	handle("PUT /api/sources/{key}", s.auth(http.HandlerFunc(s.handlePutSource)))
 	handle("DELETE /api/sources/{key}", s.auth(http.HandlerFunc(s.handleDeleteSource)))
+	// Kept on purpose for curl (MCP calls ReleaseStatus directly).
 	handle("GET /api/release", s.authAnyFrame(http.HandlerFunc(s.handleRelease)))
 	if s.opts.Artifacts != nil {
 		handle("GET /api/artifacts/{name}", s.authAnyFrame(s.opts.Artifacts.Handler()))
@@ -496,7 +498,8 @@ func (s *Server) SetLayout(id string, l store.Layout) (store.Frame, error) {
 // ValidActions lists what a frame understands.
 var ValidActions = []string{"reboot", "restart-kiosk", "reload-page", "screen", "update-software", "update-system", "rollback", "screenshot", "bench", "report", "wake"}
 
-// Act queues an action and pushes it if the frame is online.
+// Act queues an action and pushes it if the frame is online. The frame must exist: a mistyped
+// id is an error (store.ErrNotFound), not a new frame.
 func (s *Server) Act(id, name string, args map[string]string) (store.Action, error) {
 	ok := false
 	for _, v := range ValidActions {
@@ -506,7 +509,7 @@ func (s *Server) Act(id, name string, args map[string]string) (store.Action, err
 		return store.Action{}, fmt.Errorf("%w: unknown action %q (valid: %s)", ErrInvalid, name, strings.Join(ValidActions, ", "))
 	}
 	a := store.Action{ID: newID(), Name: name, Args: normalizeArgs(name, args), CreatedAt: time.Now().UTC()}
-	_, err := s.Store.Update(id, func(f *store.Frame) {
+	_, err := s.Store.UpdateExisting(id, func(f *store.Frame) {
 		f.Pending = append(f.Pending, a)
 		store.AddEvent(f, "action", name)
 	})

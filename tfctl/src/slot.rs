@@ -48,7 +48,8 @@ impl Slot {
     }
 }
 
-/// Running slot from the kernel command line: `tf.slot=`, else `root=PARTUUID=50463037-0N`,
+/// Running slot from the kernel command line: `tf.slot=` (a manual override; nothing in the
+/// image sets it), else `root=PARTUUID=50463037-0N`,
 /// else `root=/dev/mmcblkXpN`.
 pub fn from_cmdline(cmdline: &str) -> Option<Slot> {
     let words: Vec<&str> = cmdline.split_whitespace().collect();

@@ -45,6 +45,7 @@ pub fn start() {
             }
             thread::sleep(Duration::from_secs(60));
         }
+        eprintln!("tfctl: wifi trace: iwmon ended 5 times, off until the next start");
     });
     if let Err(e) = r {
         eprintln!("tfctl: wifi trace: thread: {e}");
@@ -61,7 +62,11 @@ fn run() -> std::io::Result<()> {
     let out = child.stdout.take().expect("piped");
     let (mut hour, mut n) = (Instant::now(), 0u32);
     for line in BufReader::new(out).lines() {
-        let line = line?;
+        let line = match line {
+            Ok(l) => l,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(_) => break,
+        };
         if !keep(&line) {
             continue;
         }
@@ -76,6 +81,7 @@ fn run() -> std::io::Result<()> {
             eprintln!("tfctl: wifi trace: more than {PER_HOUR} lines this hour, pausing");
         }
     }
+    let _ = child.kill();
     let _ = child.wait();
     Err(std::io::Error::other("iwmon ended"))
 }

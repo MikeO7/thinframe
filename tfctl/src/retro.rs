@@ -1,4 +1,4 @@
-//! The default boot screen (TASK 15): a synthwave sunset drawn in software. Gradient sky with
+//! The "retro" boot screen (SPLASH_STYLE=retro; TASK 15): a synthwave sunset drawn in software. Gradient sky with
 //! stars, a striped sun on a glowing horizon, a perspective grid floor, the title in the
 //! embedded 8x16 font with a chrome gradient, the boot status in amber under a block cursor,
 //! then CRT scanlines and a vignette. Drawn upright (logical size); splash.rs rotates it onto the

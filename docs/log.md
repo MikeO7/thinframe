@@ -1115,3 +1115,45 @@ unused. Fixed what could be proven from the code; the rest is listed for the own
   code, `--settings-only`, card size, cog 0.18.4, `--web-mem-limit=512`, no doas, the Wi-Fi join.
 - Checks: `cargo clippy -D warnings`, `cargo test` 259 passed; `go vet`, `go test ./...` ok;
   shellcheck clean; `tests/flash-test.sh` and `tests/e2e-native.sh` ok [V].
+
+## 2026-11-10 Audit follow-up: the review list
+The items the audit left for review, fixed where the code could prove the fix. Nothing here was
+run on the frame: every frame-side line is [V] in tests or code and [U] on hardware.
+- Pairing: a code displaced by the Wi-Fi setup page is asked for again; six failed steps with
+  the code on screen look for the server again (it may have moved).
+- Settings' reset left `FRAME_URL=""`, which counted as an override: empty is now absent
+  (test `an_empty_frame_url_is_no_override`).
+- A system update that fails before the slot switch no longer leaves `system-attempt`, so it
+  is not reported as a failed boot. `tfctl emmc install` sets `force_ro` back on every exit.
+- `save_overrides` is one at a time (three threads called it). The report is cut on a character
+  boundary. `tfctl update` refuses while an eMMC install runs. The WebSocket upgrade checks its
+  path and token like HTTP does. `http::connect` tries every address; a body shorter than
+  Content-Length is an error.
+- Wi-Fi setup: "Connected" with no address for 60 s goes back to the list with the reason; a
+  join thread that cannot start shows an error. iwmon is reaped on every exit.
+- Removed: the `COG_PLATFORM=wl` path (no cage in the image), `FRAME_USER`, provision's second
+  key file and hostname file, a second /proc/uptime parser, unused CSS. SHA-256 no longer copies
+  its input per call. The splash is not dropped when it was already handed over.
+- Server: an action or unpair for an unknown frame is 404, not a new frame; calendar and feeds
+  use the zone frames are told; no sunrise for 0,0 when the place is unset; a failing calendar
+  feed logs once; `versions.json` cached by mtime; camera and token checks no longer copy every
+  frame; failed poster fetches cached for a minute; `list_frames` carries touch samples.
+- flash.sh: Linux unmounts the card first; a disk whose APFS container holds a system volume
+  is refused (new case in tests/flash-test.sh); a `<redacted>` SSID is no SSID.
+- QEMU image: dhcpcd.conf follows the frame's again; the unread `etc/default/iwd` is gone. Not
+  rebuilt or booted [U].
+- CI: cancelled on a newer push, Go module cache, `go test -race`; `build.sh check` ties the
+  kernel version in post-image.sh and qemu-test.sh to KVER; `.dockerignore` files.
+- Docs follow-up: TASKS.md task text matches the tree (board file list, QEMU=1 instead of a
+  second defconfig, no modules-load.d, no overlay.tar.gz, /admin Basic auth, recurrence); the
+  duplicate status-page item is one item in section 15. No gate box changed.
+- TASKS.md "unverified" notes now name the log evidence: clock (2026-10-26, 10-27), backlight
+  (2026-10-26), A/B updates on the frame (2026-10-22). The touch gate stays 10 px; measured 21 px
+  on 2026-10-26, owner to accept or re-measure.
+- decisions.md: superseded passages point at the section the code follows; the MCP tool table
+  lists what internal/mcp registers; golang.org/x/image justified under Photos. hardware.md:
+  rows with a dated measurement in this log are tagged V with that date.
+- CLAUDE.md Safety: the eMMC is written only by tfctl (install, and on an eMMC-booted frame its
+  boot and A/B update) [V in code: slot.rs, boot.rs, sysupdate.rs].
+- Checks: clippy `-D warnings`, `cargo test` 260 passed, armv7 release 1,196,836 bytes;
+  `go vet`, `go test -race ./...` ok; shellcheck clean; flash-test and e2e-native ok [V].

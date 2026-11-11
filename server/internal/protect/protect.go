@@ -45,7 +45,6 @@ type Event struct {
 	Type   string
 	Device string
 	Smart  []string
-	Start  time.Time
 	Ended  bool
 }
 
@@ -184,7 +183,6 @@ func ParseEvent(b []byte) (Event, bool) {
 			Type     string   `json:"type"`
 			Device   string   `json:"device"`
 			Smart    []string `json:"smartDetectTypes"`
-			Start    int64    `json:"start"`
 			End      int64    `json:"end"`
 		} `json:"item"`
 	}
@@ -197,11 +195,7 @@ func ParseEvent(b []byte) (Event, bool) {
 	if m.Type != "add" || m.Item.Type == "" {
 		return Event{}, false
 	}
-	ev := Event{ID: m.Item.ID, Type: m.Item.Type, Device: m.Item.Device, Smart: m.Item.Smart, Start: time.Now()}
-	if m.Item.Start > 0 {
-		ev.Start = time.UnixMilli(m.Item.Start)
-	}
-	return ev, true
+	return Event{ID: m.Item.ID, Type: m.Item.Type, Device: m.Item.Device, Smart: m.Item.Smart}, true
 }
 
 // Watch follows the events stream until ctx ends, reconnecting with backoff, and calls fn

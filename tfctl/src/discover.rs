@@ -6,7 +6,7 @@
 //! A frame with a token sends its id and a fresh nonce and moves only to a server that proves it
 //! knows the token (HMAC keyed by the token's SHA-256), so a stranger on the LAN cannot collect
 //! the token by answering. A frame with no token takes any answer: it holds nothing to steal,
-//! and pairing still needs the PAIR button on its screen.
+//! and pairing still needs the code on its screen typed on /admin.
 use crate::sha256::{hmac_hex, sha256_hex};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
