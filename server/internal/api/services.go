@@ -79,8 +79,8 @@ func ParseDockerAPI(r io.Reader) ([]Container, error) {
 	return cs, nil
 }
 
-// PollDocker reads the container list from a Docker socket (in a container: the host's
-// /var/run/docker.sock mounted in) every interval into the source "services". It only ever
+// PollDocker reads the container list from a Docker socket (in a container: a socket
+// proxy's filtered socket, never the host's own; scripts/server-deploy.sh) every interval into the source "services". It only ever
 // sends GET /containers/json.
 func (s *Server) PollDocker(ctx context.Context, sock string, every time.Duration) {
 	cl := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{

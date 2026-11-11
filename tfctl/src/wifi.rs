@@ -1,7 +1,7 @@
 //! Write an iwd profile and reconnect (TASK 7).
 //!   /var/lib/iwd/<SSID>.psk, mode 0600:
 //!     [Security]\nPassphrase=<psk>\n\n[Settings]\nAutoConnect=true\n
-//!   then `/etc/init.d/S40iwd stop` + `start`, `iwctl station wlan0 connect <SSID>`, print `iwctl ... show`.
+//!   then `iwctl station wlan0 connect <SSID>` (iwd watches the directory), print `iwctl ... show`.
 //! Also the radio as the on-screen Wi-Fi setup sees it (TASK 17, wifisetup.rs): state, scan,
 //! network list and join, all through `iwctl` (no D-Bus client in tfctl).
 use std::fs;
@@ -139,12 +139,9 @@ pub fn run(ssid: &str, psk: &str) -> io::Result<()> {
             "wifi: SSID 1..32 bytes without control characters, PSK 8..63 printable ASCII chars",
         ));
     }
-    write_profile(Path::new(IWD_DIR), ssid, psk)?;
-    // Buildroot 2025.02's S40iwd has only start and stop.
-    let _ = sh("/etc/init.d/S40iwd", &["stop"]);
-    sh("/etc/init.d/S40iwd", &["start"])?;
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    sh("iwctl", &connect_args(ssid, "psk"))?;
+    // iwd runs under init's respawn (there is no S40iwd on the image) and picks the profile
+    // up through its watch on IWD_DIR: the same join as the setup page.
+    Iwctl.join(ssid, Some(psk)).map_err(io::Error::other)?;
     print!("{}", sh("iwctl", &["station", STATION, "show"])?);
     Ok(())
 }

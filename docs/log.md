@@ -1088,3 +1088,30 @@ start times, cog's own timestamps against `/proc/uptime`), system updates fastbo
   prod) for about a minute; prod had none in 6 h [V]. The server now fetches one snapshot per
   camera for all widths and serves the last good picture up to 30 s on a failure.
 - Server deployed to Nox, frame reloaded on the new page at 13:49 [V].
+
+## 2026-11-10 Whole-repo audit: fixes
+Read every tracked file (tfctl, server, sim, image, scripts, CI, docs) for what is broken, stale or
+unused. Fixed what could be proven from the code; the rest is listed for the owner.
+- `tfctl wifi SSID PSK` called `/etc/init.d/S40iwd`, which post-build.sh deletes: it failed on
+  every image [V in code]. It now joins like the setup page (profile, then `iwctl connect`). On
+  the frame [U].
+- A schedule cleared while it held the screen off left it off until a touch; the kiosk now
+  decides at once (test `a_cleared_schedule_lets_go_of_the_screen`) [V].
+- A touch no longer shortens a longer wake hold; `tfctl bench X,Y` at 100 % stays inside the
+  virtual screen (4095, was 4096) [V: tests].
+- `flash.sh`: a release without the image now says so instead of exiting silently (grep under
+  pipefail); Linux copies the touch firmware under the name tfctl reads; `--settings-only` no
+  longer asks "Erase". Same grep fix in `qemu-journey-test.sh` [V: tests/flash-test.sh].
+- Apps: the SDK refetches after a lost stream (`lost` was reset on every reconnect); an embedded
+  app's fetch path must match its state path exactly (`/state/../../..` reached other pages);
+  a camera tile that never loaded now counts its failures (`++undefined`) [V in code].
+- Server: `time/tzdata` built in (the scratch image had no zoneinfo unless mounted, so
+  calendars fell back to UTC under compose.yml); `go 1.27` in go.mod like the Dockerfiles.
+- Removed, unused: `POLL_INTERVAL_S`, `REPO_TARBALL`, `HEALTH_INTERVAL_S` (parsed, never read),
+  `etc/default/dropbear` (its init script is deleted at build), `tfctl/.cargo-config.toml`,
+  `Hub.OnlineIDs`, `Server.DeleteSource`, the `json` template func, dead `.ep img` CSS, a
+  duplicate `BR2_PACKAGE_READLINE`.
+- Docs brought in line with the code: eMMC (written only by `tfctl emmc install`), pairing by
+  code, `--settings-only`, card size, cog 0.18.4, `--web-mem-limit=512`, no doas, the Wi-Fi join.
+- Checks: `cargo clippy -D warnings`, `cargo test` 259 passed; `go vet`, `go test ./...` ok;
+  shellcheck clean; `tests/flash-test.sh` and `tests/e2e-native.sh` ok [V].

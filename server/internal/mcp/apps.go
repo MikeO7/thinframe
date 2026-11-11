@@ -211,7 +211,7 @@ func registerApps(m *sdk.Server, s *api.Server) {
 
 	type shotIn struct {
 		ID    string `json:"id" jsonschema:"frame id"`
-		Width int    `json:"width,omitempty" jsonschema:"scale to this width in px (default 800; 0 or 1280 = full size)"`
+		Width int    `json:"width,omitempty" jsonschema:"scale to this width in px (default 800; 1280 = full size)"`
 	}
 	sdk.AddTool(m, tool("screenshot", "Screenshot", "What the frame's panel shows right now, as a PNG (taken on the frame from the scanned-out framebuffer, in the page's orientation). Takes 1 to 5 seconds. A dark screen (screen off) is still captured as it was last drawn.", readOnly),
 		func(ctx context.Context, _ *sdk.CallToolRequest, in shotIn) (*sdk.CallToolResult, map[string]any, error) {

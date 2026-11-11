@@ -75,11 +75,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var m struct {
-			Type string          `json:"type"`
-			ID   string          `json:"id"`
-			OK   *bool           `json:"ok"`
-			Err  string          `json:"error"`
-			Raw  json.RawMessage `json:"-"`
+			Type string `json:"type"`
+			ID   string `json:"id"`
+			OK   *bool  `json:"ok"`
+			Err  string `json:"error"`
 		}
 		if json.Unmarshal(data, &m) != nil {
 			continue

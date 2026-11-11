@@ -72,7 +72,7 @@ start_qemu
 check "fresh card: Wi-Fi page first (cog loaded it)" wait_for 1500 loaded "127.0.0.1:8091/wifi"
 check "the sim's networks are listed" wait_for 300 listed
 check "Wi-Fi list painted" snap 1-wifi-list 300
-idx="$(r 'wget -qO- http://127.0.0.1:8091/wifi' | grep -o 'class="name">[^<]*' | grep -n 'Groovy Wifi' | cut -d: -f1)"
+idx="$(r 'wget -qO- http://127.0.0.1:8091/wifi' | grep -o 'class="name">[^<]*' | grep -n 'Groovy Wifi' | cut -d: -f1 || true)"
 tap 300 $(( ROW0 + (${idx:-1} - 1) * ROWH ))
 check "row tapped: the password page loads" wait_for 300 loaded "/wifi/net?ssid=Groovy"
 check "password page painted" snap 2-password 300

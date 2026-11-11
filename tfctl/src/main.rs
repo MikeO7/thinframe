@@ -1,6 +1,6 @@
 //! tfctl: the one custom binary on the frame. Static musl, no runtime deps, no allocator
 //! surprises. Everything that is not the browser lives here so the shell layer stays
-//! busybox + OpenRC only.
+//! BusyBox init only.
 //!
 //! Subcommands (see TASKS.md for which are done):
 //!   tfctl kiosk      run cog on DRM, restart on crash, run the agent thread (inittab respawn)
@@ -15,9 +15,13 @@
 //!   tfctl screenshot FILE  write what the panel shows, page orientation, as a P6 PPM (root)
 //!   tfctl set KEY VALUE   rewrite one key in /etc/thinframe.conf (first pairing)
 //!   tfctl netid      the Wi-Fi address derived from the chip ID, and what wlan0 has
+//!   tfctl clock      set the clock (RTC, then SNTP)
+//!   tfctl light      read the light sensor
+//!   tfctl emmc [status|backup|install]  the internal eMMC (TASKS E; install is the only eMMC writer)
+//!   tfctl bench [TAPS] [X,Y ...]  tap the page through a virtual touch screen, print tap -> paint
 //!
 //! Config: /etc/thinframe.conf (KEY=VALUE, see image/rootfs/etc/thinframe.conf), or $TFCTL_CONF.
-//! Size budget: release binary under 1 MB. Check with `ls -l` in CI.
+//! Size budget: release binary under 2 MB (CI fails above).
 
 use std::env;
 use std::process::ExitCode;
@@ -83,7 +87,7 @@ mod fuzz;
 fn usage() -> ExitCode {
     eprintln!(
         "usage: tfctl <kiosk|boot [fsck]|agent|update [--force]|provision [--boot-dir D]|splash [--png FILE] [STATUS]|clock|\
-         wifi SSID PSK|status|emmc [status|backup|install]|screenshot FILE|light|bench [TAPS]|netid|set KEY VALUE>"
+         wifi SSID PSK|status|emmc [status|backup|install]|screenshot FILE|light|bench [TAPS] [X,Y ...]|netid|set KEY VALUE>"
     );
     ExitCode::from(2)
 }

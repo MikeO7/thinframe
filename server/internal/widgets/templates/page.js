@@ -894,7 +894,7 @@
         const reply = (status, body) => e.source.postMessage({ tf: 1, op: 'reply', id: m.id, status, body }, '*');
         const path = String(m.path || ''), emit = path === emitPath;
         const ok = /^\/api\/data\/source\/[a-z0-9_-]+$/.test(path) || emit ||
-          path === '/api/apps/' + name + '/state' || path.startsWith('/api/apps/' + name + '/state/');
+          new RegExp('^/api/apps/' + name + '/state(/[A-Za-z0-9_-]+)?$').test(path); // exact: no ../ out of the app's state
         if (!ok || (m.method !== 'GET' && m.method !== 'POST')) { reply(403, 'not allowed: ' + m.method + ' ' + path); return; }
         // The key is added here, after the check on the path the app asked for.
         fetch(emit ? emitURL : path, m.method === 'POST' ? { method: 'POST', body: String(m.body ?? '') } : {})
@@ -946,7 +946,7 @@
     n.onload = () => { if (n.decode) { n.decode().then(once, once); setTimeout(once, 500); } else once(); };
     n.onerror = () => {
       holder._busy = false;
-      if (++holder._errs >= 3 || !holder.querySelector('img')) holder.classList.add('stale');
+      if ((holder._errs = (holder._errs || 0) + 1) >= 3 || !holder.querySelector('img')) holder.classList.add('stale');
       if (err) err();
     };
     n.src = u;

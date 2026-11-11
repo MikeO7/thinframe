@@ -131,7 +131,8 @@ const USAGE: &str = "status | backup | install --backup-sha256 HEX [--files DIR]
 pub fn run(args: &[String]) -> R<()> {
     let rest = args.get(1..).unwrap_or_default();
     match args.first().map(String::as_str) {
-        Some("status") | None if rest.is_empty() => status(),
+        None => status(),
+        Some("status") if rest.is_empty() => status(),
         Some("backup") if rest.is_empty() => backup(),
         Some("install") => {
             let (sha, files) = install_args(rest)?;
@@ -140,7 +141,6 @@ pub fn run(args: &[String]) -> R<()> {
         Some(x) => Err(err(format!(
             "emmc: unknown '{x}' or extra arguments ({USAGE})"
         ))),
-        None => Err(err(format!("emmc: extra arguments ({USAGE})"))),
     }
 }
 

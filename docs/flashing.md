@@ -4,7 +4,7 @@ Three steps. No SSH, no editing files, no building. About ten minutes, mostly wa
 
 ## You need
 - The frame (PF1007L family: Humblestead / EFERCRO / Anna Bella 10.1", see upstream device index).
-- A microSD card, 8 to 64 GB. It becomes the frame's disk. The frame's internal storage is never touched.
+- A microSD card, 4 to 64 GB. It becomes the frame's disk. The frame's internal storage is never touched.
 - A Mac with a card reader.
 - `frameserver` running on your network: natively, or in a container with host networking so the
   frame's discovery broadcast (UDP 41007) reaches it. Note its token.
@@ -52,9 +52,9 @@ system. You never flash it again unless the card dies.
 
 | Symptom | Do |
 |---|---|
-| Dark screen after 2 minutes | Pull the card and put it back. If still dark, re-run `flash.sh`; it offers to keep your answers. |
+| Dark screen after 2 minutes | Pull the card and put it back. If still dark, re-run `flash.sh`; it remembers your Wi-Fi and server. |
 | Logo but no dashboard | The frame cannot reach the server. Check the server URL you typed is reachable from the Wi-Fi network. The frame shows the reason on screen. |
-| Not in `/admin` | Wrong Wi-Fi password or token. Re-run `flash.sh`, choose "rewrite settings only" (10 seconds, no full flash). |
+| Not in `/admin` | Wrong Wi-Fi password, or not paired yet (type the code from the frame on `/admin`). To rewrite only the settings (10 seconds, no full flash): `curl -fsSL <the flash.sh URL above> \| bash -s -- --settings-only`. |
 | Black screen on the wall brick, boots on a computer or dock | A card flashed before 2026-10-26 waits for a USB host: its console was the USB serial port, which takes no text until a computer connects. Re-run `flash.sh` with a newer image. Until then a powered USB hub between the brick and the frame starts it. **[U]** cause read in the kernel source 2026-10-26, see `docs/log.md`. |
 | Want the old Android back | Power off, remove the card, power on. The original firmware is untouched. |
 | Need a shell | `ssh frame@<ip from admin>`. The key is at `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh`. |

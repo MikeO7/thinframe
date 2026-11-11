@@ -5,7 +5,6 @@ logic of its own; it renders `/frame/<id>` and obeys `/api/frames/<id>/config`.
 
 ```sh
 docker compose up -d --build        # from the repo root
-# on the frame (once): doas tfctl set SERVER_URL http://nas.local:41007 FRAME_ID livingroom
 ```
 
 `/frame/<id>` is rendered from the frame's `layout.json` with the templates in `internal/widgets/templates/`.
@@ -138,7 +137,7 @@ controls are not connected yet.
 
 ## Production on a Docker host
 `scripts/server-deploy.sh HOST` builds the image on the Mac, loads it on HOST over ssh and runs it
-with compose in `~/thinframe` (host networking for discovery, the Docker socket read-only for the
+with compose in `~/thinframe` (host networking for discovery, a socket proxy that only lists containers for the
 services widget, the host's time zone). `~/thinframe/env` is made once and then yours to edit;
 `~/thinframe/data` holds frames, sources and assets. Run it again to ship a new build. Keep a
 local server for testing on another machine with `DISCOVERY=off`, so frames only find production.
@@ -148,8 +147,8 @@ and in `DATA_DIR`, never in Git. `examples/obsidian/` is a demo with made-up nam
 `FRAME_TOKEN=... examples/obsidian/load.sh http://localhost:41007 demo`. Sources are server-wide,
 so load the demo on a server whose source keys you are not using.
 
-Controls (climate on, lock, scenes) are display-only: the page plane has no credentials, so a tap
-on it cannot be trusted to act on a car or a house (docs/decisions.md).
+The built-in car controls are display-only. Room switches and app buttons act through server-side
+hooks, authorised by the frame's emit key (below; docs/decisions.md "Apps").
 
 ## Apps: any web page, sandboxed
 MCP (or anything with the token) can put a whole web page on a frame: `put_app` stores a folder of

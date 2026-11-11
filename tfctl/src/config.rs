@@ -20,13 +20,9 @@ pub struct Config {
     /// kiosk.rs (for trying a WebKit setting without a new tfctl).
     pub cog_env: Vec<(String, String)>,
     pub user: String,
-    /// https://github.com/<owner>/thinframe/archive/refs/heads/main.tar.gz
-    pub repo_tarball: String,
-    pub health_interval_s: u64,
     /// Thin-client mode: base URL of frameserver, e.g. http://nas.local:41007. Empty = standalone.
     pub server_url: String,
     pub frame_id: String,
-    pub poll_interval_s: u64,
     /// Shown when the server is unreachable.
     pub fallback_url: String,
     /// 0..100, applied to /sys/class/backlight/*/brightness (TASK 10)
@@ -68,15 +64,8 @@ impl Default for Config {
             extra_args: vec![],
             cog_env: vec![],
             user: "frame".into(),
-            repo_tarball: concat!(
-                "https://github.com/MikeO7/thinframe/",
-                "archive/refs/heads/main.tar.gz"
-            )
-            .into(),
-            health_interval_s: 30,
             server_url: String::new(),
             frame_id: "frame".into(),
-            poll_interval_s: 15,
             fallback_url: "file:///run/thinframe/status.html".into(),
             brightness: 100,
             screen_off: String::new(),
@@ -145,7 +134,6 @@ pub fn parse(text: &str) -> Config {
     cfg.platform = get("COG_PLATFORM", &cfg.platform);
     cfg.renderer = get("COG_RENDERER", &cfg.renderer);
     cfg.user = get("FRAME_USER", &cfg.user);
-    cfg.repo_tarball = get("REPO_TARBALL", &cfg.repo_tarball);
     cfg.server_url = get("SERVER_URL", &cfg.server_url);
     cfg.frame_id = get("FRAME_ID", &cfg.frame_id);
     cfg.fallback_url = get("FALLBACK_URL", &cfg.fallback_url);
@@ -170,9 +158,6 @@ pub fn parse(text: &str) -> Config {
     if let Some(v) = kv.get("BRIGHTNESS") {
         cfg.brightness = v.parse().unwrap_or(cfg.brightness).min(100);
     }
-    if let Some(v) = kv.get("POLL_INTERVAL_S") {
-        cfg.poll_interval_s = v.parse().unwrap_or(cfg.poll_interval_s);
-    }
     if !cfg.server_url.is_empty() && !kv.contains_key("FRAME_URL") {
         let base = cfg.server_url.trim_end_matches('/');
         cfg.url = format!("{base}/frame/{}", cfg.frame_id);
@@ -195,9 +180,6 @@ pub fn parse(text: &str) -> Config {
         if r < 4 {
             cfg.rotation = r;
         }
-    }
-    if let Some(v) = kv.get("HEALTH_INTERVAL_S") {
-        cfg.health_interval_s = v.parse().unwrap_or(cfg.health_interval_s);
     }
     cfg
 }

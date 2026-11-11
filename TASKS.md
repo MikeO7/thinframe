@@ -191,7 +191,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (tfctl/src/pair.rs.) flash.sh: the token prompt may be left empty.
 - [x] Gate: in QEMU, a frame flashed without a token shows PAIR, one tap pairs it, the dashboard loads,
   a reboot goes straight to the dashboard, a second pairing request is refused, "forget pairing"
-  brings the button back. Evidence in docs/log.md (2026-10-20, docs/img/pair-qemu-*.png).
+  brings the button back. Evidence in docs/log.md (2026-10-20, docs/img/pair-qemu-*).
 - [ ] On the frame: the same with a finger on the real panel (touch axes, TASK 6).
 - [x] 2026-10-28, security: one press proved nothing (any LAN host could request, press and poll
       alone). Now the frame shows a 6-digit code from the server and the owner types it on /admin

@@ -58,8 +58,6 @@ BR2_PACKAGE_DROPBEAR=y
 BR2_PACKAGE_IWD=y
 # iwctl (tfctl wifi.rs scans, joins and checks the station with it); Buildroot builds the client only with readline.
 BR2_PACKAGE_READLINE=y
-# iwd builds its client (iwctl) only with readline; tfctl drives Wi-Fi through iwctl (TASK 7, 17).
-BR2_PACKAGE_READLINE=y
 BR2_TARGET_ROOTFS_EXT2=y
 BR2_TARGET_ROOTFS_EXT2_4=y
 BR2_TARGET_ROOTFS_EXT2_LABEL="rootfs"
@@ -77,4 +75,4 @@ BR2_PACKAGE_HOST_MTOOLS=y
 BR2_PACKAGE_HOST_UBOOT_TOOLS=y
 BR2_PACKAGE_TFCTL=y
 BR2_PACKAGE_AIC8800=y
-# No X, no wayland compositor, no dbus, no systemd, no package manager.
+# No X, no wayland compositor, no systemd, no package manager (dbus only because iwd needs it).

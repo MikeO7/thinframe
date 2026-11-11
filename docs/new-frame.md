@@ -1,6 +1,6 @@
 # Setting up a frame
 
-From a boxed PF1007L to a frame on your dashboard: one command on the Mac, one card, one tap.
+From a boxed PF1007L to a frame on your dashboard: one command on the Mac, one card, one code.
 After that everything (updates, settings, fixes, reboots) comes from the server.
 
 ## Once per Mac
@@ -35,13 +35,13 @@ After that everything (updates, settings, fixes, reboots) comes from the server.
    | Settings | Wi-Fi network and password come from this Mac (Keychain). The server is found on the network. You type a **name** for the frame (`kitchen`, lowercased). |
    | Image | The latest release, checked against its SHA-256 (or `IMAGE=path/to/thinframe-sd.img` for a local build). |
    | Card | Waits for the card, shows its size and name, asks once before erasing. |
-   | Write | One Mac password prompt, progress bars for writing and verifying, then settings and touch firmware go on the card and it ejects. |
+   | Write | One password prompt, progress bars for writing and verifying, then settings and touch firmware go on the card and it ejects. |
 
 2. Put the card in the frame **before** powering it on, then power on. With no card, or a card
    inserted late, the frame starts its original Android instead; power-cycle with the card in.
 
-3. About a minute later the frame shows a **PAIR** button. Tap it once. The frame appears on the
-   admin page (`http://<mac>:41007/admin`, password = the token) and shows its dashboard.
+3. About a minute later the frame shows a 6-digit pairing code. Type it on the admin page
+   (`http://<mac>:41007/admin`, password = the token); the frame then shows its dashboard.
 
 That is all. The frame's own storage (Android) is never written: take the card out and it is
 the original frame again.
