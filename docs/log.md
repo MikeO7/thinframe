@@ -1157,3 +1157,23 @@ run on the frame: every frame-side line is [V] in tests or code and [U] on hardw
   boot and A/B update) [V in code: slot.rs, boot.rs, sysupdate.rs].
 - Checks: clippy `-D warnings`, `cargo test` 260 passed, armv7 release 1,196,836 bytes;
   `go vet`, `go test -race ./...` ok; shellcheck clean; flash-test and e2e-native ok [V].
+
+## 2026-11-10 Audit: the last leftovers
+- Removed `POST /api/frames/{id}/heartbeat` and `GET /api/release`: no tfctl in this repo's
+  history ever called them (`git log -S/heartbeat -- tfctl/src` is empty; heartbeats go over
+  the socket, MCP calls `ReleaseStatus` directly) [V].
+- `www/index.html`, the offline page, loaded a picture from picsum.photos every 10 minutes;
+  it calls nothing now. The tap coordinates stay (TASKS section 6 uses them).
+- The log mirror no longer re-appends the 256 KiB the live log keeps at each cap: it finds the
+  end of the mirror in the capped log and carries on there, or copies all if it is not found
+  (test `a_capped_log_is_not_mirrored_twice`) [V].
+- A download hashes and writes straight from the read buffer; the first SNTP retry is 60 s as
+  the constant says (was 120); one constant for the Wi-Fi module name.
+- release.yml: the server image and the release asset take the tfctl the image job built
+  (one build, same bytes as in the image). Not run [U].
+- Left, with reasons: TASKS.md gates and the 10 px touch gate (need the frame; a gate is not
+  loosened); `compose.yml` on a bridge (the sim profile needs it); the weekly release (TASK S8);
+  the car names in `apps/cars` (the owner's app); the two image scalers and two snapshot caches
+  (not the same behaviour); the splash thread join (bounded by one scene build, 41 ms on the Mac).
+- Checks: `cargo test` 261 passed, clippy clean for host and armv7; `go test -race` ok;
+  e2e-native ok [V].

@@ -285,20 +285,18 @@ pub fn download(url: &Url, token: &str, timeout: Duration, dest: &Path) -> io::R
         .and_then(|(_, v)| v.parse::<u64>().ok());
     let mut out = fs::File::create(dest)?;
     let mut hash = Sha256::new();
-    let mut got = 0u64;
-    let mut data = buf[end..].to_vec();
-    loop {
-        out.write_all(&data)?;
-        hash.update(&data);
-        got += data.len() as u64;
-        if want.is_some_and(|w| got >= w) {
-            break;
-        }
+    // What came with the head, then straight from the read buffer: no copy per chunk.
+    out.write_all(&buf[end..])?;
+    hash.update(&buf[end..]);
+    let mut got = (buf.len() - end) as u64;
+    while !want.is_some_and(|w| got >= w) {
         let n = s.read(&mut chunk)?;
         if n == 0 {
             break;
         }
-        data = chunk[..n].to_vec();
+        out.write_all(&chunk[..n])?;
+        hash.update(&chunk[..n]);
+        got += n as u64;
     }
     out.sync_all()?;
     if let Some(w) = want {

@@ -11,7 +11,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::process::Command;
 use std::time::Duration;
 
-/// The server refuses more (api handlers); a frame never produces more.
+/// A frame never produces more; the server takes up to 512 KiB (api/reports.go MaxReport).
 pub const MAX_BYTES: usize = 384 << 10;
 const LOG_TAIL: u64 = 96 << 10;
 const PREV_TAIL: u64 = 24 << 10;

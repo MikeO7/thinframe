@@ -164,20 +164,6 @@ func (s *Server) handlePutLayout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, f.Layout)
 }
 
-func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
-	var hb store.Heartbeat
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&hb); err != nil {
-		writeErr(w, fmt.Errorf("%w: %v", ErrInvalid, err))
-		return
-	}
-	f, err := s.recordHeartbeat(r.PathValue("id"), hb)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{"config": s.ConfigFor(f), "pending": f.Pending, "time_unix": time.Now().Unix()})
-}
-
 func (s *Server) recordHeartbeat(id string, hb store.Heartbeat) (store.Frame, error) {
 	hb.At = time.Now().UTC()
 	f, err := s.Store.Update(id, func(f *store.Frame) {
@@ -248,10 +234,6 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 
 // beaconMS reports whether a page timing is plausible: 0 (not measured) up to 10 minutes.
 func beaconMS(ms int) bool { return ms >= 0 && ms < 600000 }
-
-func (s *Server) handleRelease(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, s.ReleaseStatus())
-}
 
 // ReleaseStatus reports carried versions and lagging frames.
 func (s *Server) ReleaseStatus() map[string]any {

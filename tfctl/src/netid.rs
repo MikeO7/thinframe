@@ -14,7 +14,7 @@ use std::path::Path;
 
 use crate::sha256::Sha256;
 
-const MODULE: &str = "aic8800_fdrv";
+pub(crate) const MODULE: &str = "aic8800_fdrv";
 
 /// Where the chip ID came from.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

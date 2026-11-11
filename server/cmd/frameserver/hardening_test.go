@@ -42,7 +42,6 @@ func TestBodyLimits(t *testing.T) {
 		{"config wrong type", "PUT", "/api/frames/kitchen/config", `{"name":5}`, jsonT, bearerAuth, []int{400}},
 		{"config tags wrong type", "PUT", "/api/frames/kitchen/config", `{"tags":7}`, jsonT, bearerAuth, []int{400}},
 		{"layout over 1 MiB", "PUT", "/api/frames/kitchen/layout", `{"cols":4,"rows":3,"theme":"` + big(2<<20) + `"}`, jsonT, bearerAuth, []int{400}},
-		{"heartbeat over 64 KiB", "POST", "/api/frames/kitchen/heartbeat", `{"ip":"` + big(100<<10) + `"}`, jsonT, bearerAuth, []int{400}},
 		{"action over 64 KiB", "POST", "/api/frames/kitchen/actions", `{"name":"` + big(100<<10) + `"}`, jsonT, bearerAuth, []int{400}},
 		{"beacon over 4 KiB", "POST", "/api/frames/kitchen/beacon", `{"widget":"` + big(1<<20) + `"}`, "text/plain", nil, []int{413}},
 		{"pair request over 4 KiB", "POST", "/api/pair", `{"id":"bigpair","nonce":"` + big(10<<10) + `"}`, jsonT, nil, []int{400}},

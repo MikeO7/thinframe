@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-const WIFI_MODULE: &str = "aic8800_fdrv";
+use crate::netid::MODULE as WIFI_MODULE;
 const DISKS: [&str; 3] = ["mmcblk0", "mmcblk1", "mmcblk2"];
 const CPUFREQ: &str = "/sys/devices/system/cpu/cpufreq";
 const DEVFREQ: &str = "/sys/class/devfreq";
