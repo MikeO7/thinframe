@@ -14,7 +14,7 @@ BR2_TARGET_ENABLE_ROOT_LOGIN=y
 BR2_PACKAGE_HOSTAPD=y
 BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_THINFRAME_PATH)/../rootfs $(BR2_EXTERNAL_THINFRAME_PATH)/board/pf1007l/qemu-overlay"
 # M2 A/B inside -M virt: U-Boot for QEMU's virt board runs the same boot.cmd slot logic (the
-# harness swaps "mmc 0:1" for "virtio 0:1"); sim/qemu/run.sh boots it with -bios.
+# harness swaps "mmc 0:1" for "virtio 0:1"); image/qemu-lib.sh boots it with -bios.
 BR2_TARGET_UBOOT=y
 BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
 BR2_TARGET_UBOOT_BOARD_DEFCONFIG="qemu_arm"

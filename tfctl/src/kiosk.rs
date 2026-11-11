@@ -757,8 +757,10 @@ impl Kiosk {
             KioskCmd::Schedule(off, on) => {
                 self.screen_off = off;
                 self.screen_on = on;
-                self.sched_state = None;
-                self.last_sched = Instant::now() - Duration::from_secs(60);
+                // Decide now, also for "no schedule": a cleared one must let go of the screen.
+                self.sched_state = screen::schedule_wants_off(&self.screen_off, &self.screen_on);
+                self.last_sched = Instant::now();
+                self.apply_auto("schedule");
             }
             KioskCmd::Exit => {
                 self.kill_child();
@@ -1031,7 +1033,7 @@ impl Kiosk {
         if touched {
             if !SCREEN_ON.load(Ordering::SeqCst) {
                 self.wake(TOUCH_WAKE, "touch");
-            } else if self.wake_until.is_some() {
+            } else if self.wake_until.is_some_and(|t| t < now + TOUCH_WAKE) {
                 self.wake_until = Some(now + TOUCH_WAKE);
             }
         }
@@ -1513,7 +1515,20 @@ mod tests {
         assert!(k.next_spawn > Instant::now());
         k.handle(KioskCmd::SetUrl("http://other/".into()));
         assert!(k.next_spawn <= Instant::now());
-        k.handle(KioskCmd::Schedule("23:00".into(), "06:00".into()));
-        assert_eq!(k.screen_off, "23:00");
+        // An empty window: never off, whatever the time of the test run.
+        k.handle(KioskCmd::Schedule("12:00".into(), "12:00".into()));
+        assert_eq!(k.screen_off, "12:00");
+        assert_eq!(k.sched_state, Some(false));
+    }
+
+    #[test]
+    fn a_cleared_schedule_lets_go_of_the_screen() {
+        let mut k = Kiosk::new(&Config::default());
+        k.dark_off = false;
+        k.sched_state = Some(true);
+        k.auto_off = true;
+        k.handle(KioskCmd::Schedule(String::new(), String::new()));
+        assert_eq!(k.sched_state, None);
+        assert!(!k.auto_off, "the schedule no longer holds the screen off");
     }
 }

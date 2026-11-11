@@ -35,7 +35,8 @@ If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the ga
 
 The upstream project `pangoleen/ormarch-picture-frame` has pinned, hardware-tested builds of
 U-Boot, kernel 7.2.10, the panel module, three DTBs and the AIC8800 modules. `image/build.sh`
-clones it into `image/cache/ormarch` and runs its `kernel/build.sh` and `wifi/build.sh`. Do
+clones it into `image/cache/ormarch`, runs its `image/build.sh uboot` and takes its DTS and panel
+patch; Buildroot builds the kernel and the AIC8800 modules from the same pins. Do
 not port those recipes into this repo unless a task says so. If one of them breaks, fix it
 there or pin an older commit here.
 

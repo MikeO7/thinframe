@@ -16,7 +16,7 @@
 // hex(HMAC-SHA256(key, "thinframe-discover|<id>|<nonce>|<port>")) with key = the hex SHA-256 of
 // a token the server accepts for that frame (its paired token, whose hash is all the server
 // stores, and FRAME_TOKEN). A frame with no token yet takes a reply without proof; nothing is
-// trusted until the PAIR button on its screen is pressed (api/pair.go).
+// trusted until its pairing code is typed on /admin (api/pair.go).
 //
 // Broadcasts reach a server on the host's network (a native process, or a container with host
 // networking). A container behind a bridge with a published port does not see them.

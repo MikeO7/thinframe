@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end without Docker: real frameserver + real `tfctl agent` on this machine.
 # Asserts: the frame registers, a rotation PUT reaches the agent and is persisted to its conf,
-# an action is acked, and the hello reply carried the clock/TZ. The screenshot assertion
+# and an action is acked. The screenshot assertion
 # (M4) needs the sim container and lives in tests/e2e.sh.
 set -euo pipefail
 

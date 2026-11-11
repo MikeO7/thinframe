@@ -27,6 +27,7 @@
 //	CALDAV_URL    CalDAV server (default https://caldav.icloud.com)
 //	CALDAV_CALENDARS calendar names to show, comma separated (default all)
 //	TZ            frames receive this time zone
+//	SERVER_HOSTS  extra Host names the token-less routes answer to (comma separated; server/README.md)
 //	PAGE_STALE    hung-page restart after this long without a page ping (default 3m, Go duration)
 //	SERVICES_SSH  ssh destination whose `docker ps` feeds the source "services" (key auth only)
 //	SERVICES_DOCKER docker socket path read instead (in a container: a read-only socket proxy's socket); wins over SERVICES_SSH
@@ -53,6 +54,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // the image is FROM scratch: no zoneinfo unless the host mounts it
 
 	"github.com/MikeO7/thinframe/server/internal/api"
 	"github.com/MikeO7/thinframe/server/internal/artifacts"

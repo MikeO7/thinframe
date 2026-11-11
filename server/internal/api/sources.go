@@ -274,9 +274,6 @@ func (s *Server) Sources() []SourceInfo { return s.src.list() }
 // Source returns one stored source.
 func (s *Server) Source(key string) (json.RawMessage, bool) { return s.src.get(key) }
 
-// DeleteSource forgets a source. Pages keep what they last showed until they reload.
-func (s *Server) DeleteSource(key string) bool { return s.src.delete(key) }
-
 // sourceOf is the widget's main source; reads also lists health, the services feed a hero
 // summarizes in its badge.
 func sourceOf(w store.Widget) string {

@@ -24,7 +24,7 @@ frame goes through Settings on its screen, the server (config, actions, updates)
 or a new card.
 
 ## Changing the page
-Edit `server/static/` or the layout in `/admin`; the frame follows on its control socket.
+Edit `server/internal/widgets/templates/` or the layout in `/admin`; the frame follows on its control socket.
 The frame's own `www/` is only the offline fallback.
 
 ## Changing config

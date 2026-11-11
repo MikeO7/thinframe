@@ -49,10 +49,10 @@ fetch_image() {
 	command -v zstd >/dev/null || stop "zstd is required (brew install zstd / apt install zstd)"
 	local api asset want
 	api=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
-	asset=$(grep -o '"browser_download_url": *"[^"]*thinframe-sd.img.zst"' <<<"$api" | cut -d'"' -f4)
+	asset=$(grep -o '"browser_download_url": *"[^"]*thinframe-sd.img.zst"' <<<"$api" | cut -d'"' -f4 || true)
 	[ -n "$asset" ] || stop "no thinframe-sd.img.zst in the latest release of $REPO"
 	want=$(curl -fsSL "$asset.sha256" | cut -d' ' -f1)
-	local tag; tag=$(grep -o '"tag_name": *"[^"]*"' <<<"$api" | cut -d'"' -f4)
+	local tag; tag=$(grep -o '"tag_name": *"[^"]*"' <<<"$api" | cut -d'"' -f4 || true)
 	if [ -f "$IMG" ] && [ -f "$IMG.zsum" ] && [ "$(cat "$IMG.zsum")" = "$want" ]; then ok "thinframe $tag (already downloaded)"; return; fi
 	curl -fL --progress-bar -o "$IMG.zst" "$asset"
 	[ "$(sha "$IMG.zst")" = "$want" ] || stop "download hash mismatch"
@@ -85,7 +85,7 @@ write_card() {
 	[ $((bytes % 1048576)) = 0 ] || stop "image size is not whole MiB"
 	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"; fi
 	# shellcheck disable=SC2024  # the prompt reads the terminal, not a file
-	sudo -v -p "  Your Mac password, to write the card: " </dev/tty || stop "sudo was refused"
+	sudo -v -p "  Your password, to write the card: " </dev/tty || stop "sudo was refused"
 	got=$(sudo bash -c "$ROOT_WRITE" _ "$IMG" "$raw" "$bytes")
 	[ "$got" = "$want" ] || stop "the card reads back different from the image; do not use this card"; ok "written and verified"
 }
@@ -101,7 +101,7 @@ put_provision() {
 	else
 		mp=$(mktemp -d); sudo partprobe "/dev/$dev" 2>/dev/null || true; sleep 2
 		sudo mount "/dev/${dev}1" "$mp" 2>/dev/null || sudo mount "/dev/${dev}p1" "$mp"
-		provision_txt | sudo tee "$mp/provision.txt" >/dev/null; [ -z "$TOUCH" ] || sudo cp "$TOUCH" "$mp/"
+		provision_txt | sudo tee "$mp/provision.txt" >/dev/null; [ -z "$TOUCH" ] || sudo cp "$TOUCH" "$mp/gsl_m86_hd.fw"
 		sudo umount "$mp"; rmdir "$mp"
 		sudo eject "/dev/$dev" 2>/dev/null || true
 	fi
@@ -142,7 +142,7 @@ main() {
 	step 1 "Settings"; settings
 	step 2 "Image"; if [ "${1:-}" = "--settings-only" ]; then ok "settings only, the card keeps its image"; else fetch_image; fi
 	step 3 "Card"; wait_card
-	local a; read -r -p "  Erase $DEV ($((SIZE / 1000000000)) GB, $LABEL)? [y/N] " a </dev/tty; [ "$a" = y ] || [ "$a" = Y ] || stop "nothing written"
+	local a verb=Erase; [ "${1:-}" != "--settings-only" ] || verb="Write settings to"; read -r -p "  $verb $DEV ($((SIZE / 1000000000)) GB, $LABEL)? [y/N] " a </dev/tty; [ "$a" = y ] || [ "$a" = Y ] || stop "nothing written"
 	step 4 "Write"; [ "${1:-}" = "--settings-only" ] || write_card "$DEV" "$SIZE"; put_provision "$DEV"
 	printf '\n%sDone.%s Put the card in the frame and power it on. It joins %s,\nfinds the server, then shows a pairing code: type it on the server /admin page.\n\n' "$B" "$N" "${WIFI_SSID:-the Wi-Fi you pick on screen}"
 }

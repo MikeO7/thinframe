@@ -116,7 +116,7 @@ fn parse_point(s: &str) -> Option<(i32, i32)> {
             .ok()
             .filter(|v| (0..=100).contains(v))
     };
-    Some((pct(x)? * RANGE / 100, pct(y)? * RANGE / 100))
+    Some((pct(x)? * (RANGE - 1) / 100, pct(y)? * (RANGE - 1) / 100))
 }
 
 pub fn run(cfg: &Config, args: &[String]) -> io::Result<()> {
@@ -376,8 +376,8 @@ mod tests {
 
     #[test]
     fn points_are_per_cent_of_the_panel() {
-        assert_eq!(parse_point("50,50"), Some((RANGE / 2, RANGE / 2)));
-        assert_eq!(parse_point("0, 100"), Some((0, RANGE)));
+        assert_eq!(parse_point("50,50"), Some((RANGE / 2 - 1, RANGE / 2 - 1)));
+        assert_eq!(parse_point("0, 100"), Some((0, RANGE - 1)));
         for bad in ["101,5", "5", "a,b", "-1,2"] {
             assert_eq!(parse_point(bad), None, "{bad}");
         }

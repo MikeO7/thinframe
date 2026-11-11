@@ -1,6 +1,6 @@
 module github.com/MikeO7/thinframe/server
 
-go 1.26.0
+go 1.27
 
 require (
 	github.com/coder/websocket v1.8.15

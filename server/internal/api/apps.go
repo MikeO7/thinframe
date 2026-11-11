@@ -27,7 +27,7 @@ import (
 // with a CSP sandbox, so it runs in an opaque origin: it cannot read this server's pages, the
 // admin page's Basic credentials, or anything else same-origin, and talks to the server only
 // through the public endpoints below, which answer any origin. /apps-sdk.js is injected into
-// every HTML file and gives the app window.thinframe (docs/apps.md).
+// every HTML file and gives the app window.thinframe (MCP app_guide; docs/decisions.md "Apps").
 
 //go:embed appsdk.js
 var appSDK []byte
@@ -51,7 +51,10 @@ const (
 	maxEvents  = 200
 )
 
-var headRe = regexp.MustCompile(`(?i)<head(\s[^>]*)?>|<!doctype[^>]*>`)
+var (
+	headRe     = regexp.MustCompile(`(?i)<head(\s[^>]*)?>|<!doctype[^>]*>`)
+	headOnlyRe = regexp.MustCompile(`(?i)<head(\s[^>]*)?>`)
+)
 
 // EmitKey is what a public emit for frameID must carry (query parameter k) when the server
 // has a token (secret): the first 32 hex digits of HMAC-SHA256(secret, "emit:"+frameID). Only
@@ -86,7 +89,7 @@ func injectSDK(b []byte, key string) []byte {
 		return append(tag, b...)
 	}
 	// Prefer <head> over the doctype when both exist.
-	if m := regexp.MustCompile(`(?i)<head(\s[^>]*)?>`).FindIndex(b); m != nil {
+	if m := headOnlyRe.FindIndex(b); m != nil {
 		loc = m
 	}
 	out := make([]byte, 0, len(b)+len(tag))

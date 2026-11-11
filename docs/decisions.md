@@ -4,7 +4,7 @@
 The first plan was Alpine. On 2026-10-18 we found that Alpine 3.24 and edge no longer package
 `cog` or `wpewebkit` on any architecture (3.21 was the last), so "Alpine + cog" cannot be built
 from packages. Buildroot is the canonical way to put WPE on a small ARM board: it cross-compiles
-a complete, immutable root from a defconfig we own, with WPE WebKit 2.50 and cog 0.18.5 (DRM
+a complete, immutable root from a defconfig we own, with WPE WebKit 2.50 and cog 0.18.4 (DRM
 platform) as first-class packages, and lets us pick the kernel, libc (musl) and init (BusyBox).
 The result is smaller than Alpine would have been and every version is ours to bump. The cost is
 a first WebKit build of 1 to 3 hours (cached afterwards) and a more opinionated tree for the next
@@ -73,8 +73,8 @@ updater, the Wi-Fi helper and the status tool. The rest of the system is stock B
 (init and tools), eudev, iwd, dhcpcd, dropbear, dbus, mesa, WPE WebKit and cog.
 
 ## Nothing extra in the image
-No avahi, no dbus, no ntp daemon, no git, no package manager at all. Debug tools (evtest,
-libinput-tools, i2c-tools) are a separate Buildroot config fragment used only for a DEBUG build.
+No avahi, no ntp daemon, no git, no package manager at all (dbus only because iwd needs it).
+Debug tools (evtest, strace) are a separate Buildroot config fragment used only for a DEBUG build.
 
 ## Where dashboard performance actually comes from
 `tfctl` is not on the hot path: it launches cog and sleeps. Frame rate and responsiveness are
@@ -122,7 +122,7 @@ Three layers, three mechanisms:
 
 So "rebuild the container" is the only deploy action. Every frame converges within one poll.
 Safety: agent keeps the previous `tfctl` as `tfctl.prev`; if the new one fails to start twice,
-supervise-daemon runs the old one (TASK 11).
+tfctl puts the old one back itself (update.rs, TASK 11).
 
 ## Simulator
 See `sim/README.md`. Tier 1 (headless WPE + native agent in a container) is the one worth
@@ -174,7 +174,7 @@ upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edg
   mainline stable) lands.
 - Dependabot/Renovate on `server/` and `tfctl/` dependencies.
 - Baseline on the frame: root fs read-only; no password login anywhere; sshd key-only, `frame` user
-  only; `doas` for exactly the commands tfctl needs; iwd with WPA2/3 only; no inbound ports besides
+  only; no sudo or doas; iwd with WPA2/3 only; no inbound ports besides
   22; all frame→server traffic over the LAN with a shared bearer token (`FRAME_TOKEN`); artifacts
   verified by sha256 from the signed-in config response before install. Outbound HTTPS from the
   frame is unnecessary: the container fetches the world, the frame only talks to the container.
@@ -261,7 +261,7 @@ Levers, in the order to pull them (TASK 13):
    expensive (image resize, charts as SVG, data joins). The page receives finished HTML and small
    JSON. Transitions use `transform`/`opacity` only; `will-change` on the elements that move.
 6. **Nothing periodic on the frame** besides tfctl's poll: no cron, no syslog to disk, no ntp
-   daemon (one-shot `ntpd -q` at boot and on resume), `dmesg` ring only.
+   daemon (tfctl sets the clock itself: clock.rs), `dmesg` ring only.
 7. **Panel refresh**: run the page at the panel's native 59.7 Hz; no vsync-off tricks.
 
 Measurement, not opinion: `tfctl bench [TAPS]` (TASK 13) taps the middle of the panel through a
@@ -277,7 +277,7 @@ the last value, p50 and max. bench reads `painted_at_ms` back with the frame's t
 tap -> paint, which is everything but the touch controller's own I2C read. [V in QEMU, see
 log.md; on the panel: U]
 
-The WebProcess memory cap is cog's `--web-mem-limit=256` (MiB). WebKit drops caches at a third of
+The WebProcess memory cap is cog's `--web-mem-limit=512` (MiB, kiosk.rs). WebKit drops caches at a third of
 that and collects hard at half (cog defaults). There is no kill threshold: the server watchdog
 already handles a hung page. Swap is off in the kernel (`# CONFIG_SWAP is not set`) and there is
 no zram.
@@ -301,7 +301,7 @@ Rules:
   cog-affecting field changed.
 - Actions carry an id and are acked. The server queues unacked actions and resends on reconnect.
 - HTTP is still used for: first contact (GET /config before the socket is up), artifact downloads
-  (range requests, resumable), and as a 60 s poll fallback if the socket cannot be established.
+  (whole file; no Range resume yet, http.rs), and as a 60 s poll fallback if the socket cannot be established.
 - The dashboard page has its own channel (SSE from the Go server at `/api/stream/<id>`) for live
   widget data. The control socket never carries page content, so a page bug cannot block updates.
 - SSH is for humans. Nothing in the system automates over SSH.
@@ -495,12 +495,11 @@ no one has to type a password into `flash.sh`, and moving house only takes a tap
 - **No D-Bus client.** tfctl drives iwd through `iwctl` (built only with readline, hence
   `BR2_PACKAGE_READLINE=y`; readline is GPL-3.0 and so is iwctl, iwd itself stays LGPL) and parses its tables, colour escapes
   included, as status.rs already does for RSSI.
-  - The join is `iwctl --passphrase P station wlan0 connect SSID`, after
-    `known-networks SSID forget`. A stale profile from provision.txt would otherwise win over the
-    new password.
-  - iwd writes the profile to /var/lib/iwd (bound to /data), so it survives updates.
-  - The password sits in iwctl's argv for the seconds the join takes. Only root runs anything on
-    the frame. **[U]** acceptable.
+  - The join is `known-networks SSID forget` (a stale profile from provision.txt would otherwise
+    win over the new password), then tfctl writes the 0600 profile, then
+    `iwctl station wlan0 connect SSID`.
+  - The profile is in /var/lib/iwd (bound to /data), so it survives updates.
+  - The password never goes on a command line (wifi.rs `join`, with a test). **[V in code]**
 - **When it shows.**
   - Nothing is configured: at once.
   - A network is configured but has not come up: after 45 s, which gives iwd's autoconnect time

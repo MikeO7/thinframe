@@ -80,7 +80,6 @@ var Icons = map[string]string{
 }
 
 var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
-	"json": func(v any) template.JS { b, _ := json.Marshal(v); return template.JS(b) }, //nolint:gosec // props are server-owned
 	"prop": func(w store.Widget, k string, def any) any {
 		if v, ok := w.Props[k]; ok {
 			return v

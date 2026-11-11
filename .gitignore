@@ -13,5 +13,6 @@ sim/out/*
 server/artifacts/*
 !server/artifacts/.gitkeep
 sim/qemu/work/
+sim/simframe
 server/data/
 /tfctl/tools/fontgen/target/

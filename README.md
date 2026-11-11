@@ -54,7 +54,7 @@ version (WPE, cog, kernel, mesa) is pinned in this repo and bumped on purpose.
 | Wi-Fi | AIC8800DC on SDIO, 2.4 GHz only, out-of-tree driver |
 | GPU | Mali-400 MP2, Mesa lima, GLES 2 only |
 | USB | One USB-C, device mode (powers the frame). Gadget serial + CDC ECM network for recovery |
-| Storage | 16 GB eMMC. **Never written.** We boot from SD only. |
+| Storage | 16 GB eMMC. Written only by `tfctl emmc install` (docs/decisions.md "Running from the eMMC"); a thinframe card always boots first. |
 
 ## Architecture
 
@@ -62,7 +62,7 @@ version (WPE, cog, kernel, mesa) is pinned in this repo and bumped on purpose.
  server (Docker, any box)                      frame (Buildroot, 1 GB A33)
  ┌──────────────────────────┐    Wi-Fi LAN    ┌──────────────────────────┐
  │ frameserver (Go)         │ <── GET /frame/id ── cog (WPE WebKit on DRM)│
- │  static/ dashboard       │ ── HTML/JS/data ──>│                          │
+ │  widgets/ dashboard      │ ── HTML/JS/data ──>│                          │
  │  /api/frames/<id>/ws     │ <══ WebSocket ════> tfctl agent (Rust)      │
  │   push config + actions  │     heartbeats     │  (restart cog, reboot,   │
  │  /admin                  │                    │   rotation, update)      │
@@ -97,7 +97,7 @@ Update  : software = new `tfctl` from the server, rolled back after two fast cra
 | Container | Role | Runs where |
 |---|---|---|
 | `frameserver` | the brains: dashboard, per-frame config, heartbeats, artifacts, `/admin`, `/mcp` | your server, always |
-| `simframe` | a fake frame: headless WPE + agent (fast) or the real SD image in QEMU (full OS) | dev machine, `--profile sim` |
+| `simframe` | a fake frame: headless WPE + agent. The real image in QEMU is `sim/qemu/run.sh`, on the host (sim/README.md) | dev machine, `--profile sim` |
 
 ```sh
 docker compose up -d                       # production: frameserver only
@@ -127,7 +127,7 @@ TASKS.md, and the only one CI enforces is the tfctl size.
 
 1. Server: `docker compose up -d` on any box with Docker.
 2. Card: `curl -fsSL https://raw.githubusercontent.com/MikeO7/thinframe/main/scripts/flash.sh | bash`
-   and answer four questions (Wi-Fi, password, server, frame name).
+   and name the frame (Wi-Fi comes from this Mac, the frame finds the server; `e` edits both).
 3. Card in the frame, power on, wait a minute. It appears in `/admin`.
 
 Full walkthrough and troubleshooting: [docs/flashing.md](docs/flashing.md). Setting up another

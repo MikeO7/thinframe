@@ -1,5 +1,5 @@
 // thinframe app SDK. The server injects it into every app page (internal/api/apps.go) as
-// window.thinframe; docs/apps.md and the MCP tool app_guide describe it.
+// window.thinframe; the MCP tool app_guide and docs/decisions.md "Apps" describe it.
 //
 // An app runs sandboxed (an opaque origin). Shown full screen it talks to the server itself:
 // one event stream, the liveness beacon, reload on update. Inside an "app" widget it asks the
@@ -70,12 +70,12 @@
       .then(r => r.text().then(t => ({ status: r.status, body: t })))
       .catch(e => ({ status: 0, body: String(e) }));
     readyResolve(tf);
+    let lost = false;
     const stream = () => {
       // Any id works for app messages; a preview without ?frame= uses "preview".
       const es = new EventSource('/api/stream/' + enc(tf.frame || 'preview') + '?apps=1');
-      let lost = false;
       es.onmessage = ev => { try { onServer(JSON.parse(ev.data)); } catch (e) { /* not ours */ } };
-      es.onopen = () => { if (lost) refetch(); };
+      es.onopen = () => { if (lost) { lost = false; refetch(); } };
       es.onerror = () => { lost = true; es.close(); setTimeout(stream, 5000); };
     };
     stream();

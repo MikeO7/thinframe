@@ -122,14 +122,3 @@ func (h *Hub) Online(id string) bool {
 	_, ok := h.conns[id]
 	return ok
 }
-
-// OnlineIDs lists connected frames.
-func (h *Hub) OnlineIDs() []string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	out := make([]string, 0, len(h.conns))
-	for id := range h.conns {
-		out = append(out, id)
-	}
-	return out
-}

@@ -342,8 +342,7 @@ func checkSplashPNG(s string) error {
 	return nil
 }
 
-// SetConfig merges non-nil fields into a frame's config, bumps page_version when the
-// page is affected, persists, and pushes to the frame if online.
+// SetConfig merges non-nil fields into a frame's config, persists, and pushes to the frame if online.
 func (s *Server) SetConfig(id string, patch map[string]any) (store.Frame, error) {
 	var bad error
 	f, err := s.Store.Update(id, func(f *store.Frame) {

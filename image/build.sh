@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build the thinframe SD image on a Mac.
 #
-#   image/build.sh            all: inputs rootfs assemble sums
-#   image/build.sh inputs     fetch/build U-Boot, kernel, DTB, panel + Wi-Fi modules via ormarch;
+#   image/build.sh            all: secrets inputs rootfs assemble sums
+#   image/build.sh inputs     U-Boot (built by ormarch), its DTS and panel patch, kernel and Wi-Fi sources;
 #                             U-Boot build E (eMMC slot) with image/uboot-emmc.sh
 #   image/build.sh rootfs     Buildroot (BR2_EXTERNAL image/buildroot) in Docker (image/br-run.sh);
 #                             its post-image.sh runs genimage -> image/out/thinframe-sd.img + system-<ver>.tar
