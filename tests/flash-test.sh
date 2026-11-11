@@ -37,19 +37,22 @@ chmod +x "$shim/uname" "$shim/lsblk"
 got="$(PATH="$shim:$PATH" list_cards | cut -f1 | tr '\n' ' ')"
 check "linux: only the free removable card is listed" "$got" "sdb "
 
-# macOS path: disk3 is a 32 GB card, disk4 a removable disk the Mac booted from, disk5 too big.
+# macOS path: disk3 is a 32 GB card, disk4 a removable disk the Mac booted from, disk5 too big,
+# disk6 a removable disk whose APFS container (disk7) holds the running system.
 printf '#!/usr/bin/env bash\necho Darwin\n' >"$shim/uname"
 cat >"$shim/diskutil" <<'SH'
 #!/usr/bin/env bash
 case "$1 $2" in
-"list external") printf '/dev/disk3 (external, physical):\n/dev/disk4 (external, physical):\n/dev/disk5 (external, physical):\n';;
+"list external") printf '/dev/disk3 (external, physical):\n/dev/disk4 (external, physical):\n/dev/disk5 (external, physical):\n/dev/disk6 (external, physical):\n';;
 "info disk3") printf '   Disk Size: 31.9 GB (31914983424 Bytes)\n   Removable Media: Removable\n   Media Name: SD Card Reader\n';;
 "info disk4") printf '   Disk Size: 64.0 GB (64000000000 Bytes)\n   Removable Media: Removable\n   Media Name: Boot Stick\n';;
+"info disk6") printf '   Disk Size: 32.0 GB (32000000000 Bytes)\n   Removable Media: Removable\n   Media Name: APFS Stick\n';;
+"apfs list") printf '+-- Container disk7 X\n|   APFS Container Reference:     disk7\n|   |   APFS Physical Store Disk:   disk6s2\n';;
 "info disk5") printf '   Disk Size: 128.0 GB (128000000000 Bytes)\n   Removable Media: Removable\n   Media Name: Big\n';;
 esac
 SH
-printf '#!/usr/bin/env bash\nprintf "/dev/disk3s1 on /Volumes/PFBOOT (msdos)\\n/dev/disk4s1 on / (apfs)\\n/dev/disk4s2 on /System/Volumes/Data (apfs)\\n"\n' >"$shim/mount"
+printf '#!/usr/bin/env bash\nprintf "/dev/disk3s1 on /Volumes/PFBOOT (msdos)\\n/dev/disk4s1 on / (apfs)\\n/dev/disk4s2 on /System/Volumes/Data (apfs)\\n/dev/disk7s3s1 on / (apfs)\\n"\n' >"$shim/mount"
 chmod +x "$shim/diskutil" "$shim/mount"
 got="$(PATH="$shim:$PATH" list_cards | tr '\t\n' '  ')"
-check "macos: the booted removable disk and the big one are skipped" "$got" "disk3 31914983424 SD Card Reader "
+check "macos: the booted disks (plain and APFS container) and the big one are skipped" "$got" "disk3 31914983424 SD Card Reader "
 [ "$fails" -eq 0 ] || exit 1

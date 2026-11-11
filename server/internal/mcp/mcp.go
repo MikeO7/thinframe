@@ -83,16 +83,17 @@ type frameOut struct {
 	Online  bool           `json:"online"`
 	Config  map[string]any `json:"config"`
 	Last    any            `json:"last_heartbeat,omitempty"`
+	Touch   *store.Touch   `json:"touch,omitempty"` // tap to paint: last, and the samples bench made
 	Pending int            `json:"pending_actions"`
 }
 
 func toOut(s *api.Server, f store.Frame) frameOut {
-	return frameOut{ID: f.ID, Name: f.Name, Online: s.Online(f), Config: s.ConfigFor(f), Last: f.Last, Pending: len(f.Pending)}
+	return frameOut{ID: f.ID, Name: f.Name, Online: s.Online(f), Config: s.ConfigFor(f), Last: f.Last, Touch: f.Touch, Pending: len(f.Pending)}
 }
 
 func register(m *sdk.Server, s *api.Server) {
 	registerApps(m, s)
-	sdk.AddTool(m, tool("list_frames", "List frames", "List every known frame with online state, last heartbeat (ip, memory, temperature, latency, versions) and config.", readOnly),
+	sdk.AddTool(m, tool("list_frames", "List frames", "List every known frame with online state, last heartbeat (ip, memory, temperature, versions), touch latency (touch: last_ms and samples_ms) and config.", readOnly),
 		func(_ context.Context, _ *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, framesOut, error) {
 			fs := s.Store.List()
 			out := framesOut{Frames: make([]frameOut, len(fs))}

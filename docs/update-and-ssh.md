@@ -10,11 +10,12 @@ It works with no server and over a broken page. Tap Done, or leave it 3 minutes.
 ## Paths in
 1. Wi-Fi: `ssh frame@<frame name>` (hostname = FRAME_ID, router DNS) or the IP shown in `/admin`.
    Key: `~/.thinframe/frame_id_ed25519` on the Mac that ran `flash.sh` (or
-   `image/secrets/frame_id_ed25519` for a local build). Dropbear, key only, no root login (a `DEBUG=1` card also allows `ssh root@`, same key). [U]
+   `image/secrets/frame_id_ed25519` for a local build). Dropbear, key only, no root login (a `DEBUG=1` card also allows `ssh root@`, same key). [V 2026-10-22: boot timings read over SSH on Wi-Fi]
 2. USB-C data cable to the Mac: the kernel's built-in CDC gadget gives a USB Ethernet device
    (frame 192.168.7.2, the Mac gets 192.168.7.1 from the frame's udhcpd) and the kernel log
    on `ttyGS0`: `ssh frame@192.168.7.2`, or `screen /dev/tty.usbmodem* 115200` (kernel messages only,
-   no login prompt: `/dev/console` is tty1). [U]
+   no login prompt: `/dev/console` is tty1). [V 2026-10-29 for the link: gadget 0525:a4aa and ping;
+   an `ssh` login over the cable is not in the log, U]
 3. Pull the card: p1 (`PFBOOT`) is FAT32, readable on the Mac: `uEnv.txt` (slot, tries,
    `pf_mode`), `extlinux/slot-a.conf` / `slot-b.conf`, and `provision.txt` (dropped there by
    `flash.sh --settings-only`, applied and deleted on the next boot).

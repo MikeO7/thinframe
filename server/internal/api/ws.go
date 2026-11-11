@@ -117,6 +117,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// LocalTZ is the zone frames are told, for whatever else must agree with them (calendar, feeds).
+func LocalTZ() string { return localTZ() }
+
 // localTZ returns an IANA zone name for the frames: $TZ, else the /etc/localtime
 // symlink target, else UTC. Go's time.Local.String() is "Local" and useless to a frame.
 func localTZ() string {

@@ -29,9 +29,8 @@ list_cards() {
 			size=$(diskutil info "$name" | awk -F'[()]' '/Disk Size/ && !s {split($2,a," "); s=a[1]} END {print s+0}')
 			rm=$(diskutil info "$name" | awk '/Removable Media: +(Removable|Yes)/ {r=1} END {print r+0}')
 			card_ok "${size:-0}" "$rm" || continue
-			# a disk the Mac booted from, or that holds a system volume, is never a card
-			mnt=$(mount | awk -v d="/dev/${name}s" 'index($1, d) == 1 {print $3}' | grep -E "$sys" || true)
-			[ -z "$mnt" ] || continue
+			mnt=$(for d in "$name" $(diskutil apfs list 2>/dev/null | awk -v d="${name}s" '/APFS Container Reference:/ {c=$NF} /APFS Physical Store Disk:/ && index($NF, d) == 1 {print c}'); do mount | awk -v d="/dev/${d}s" 'index($1, d) == 1 {print $3}'; done | grep -E "$sys" || true)
+			[ -z "$mnt" ] || continue	# booted from it, or a system volume on it or in its APFS container: never a card
 			printf '%s\t%s\t%s\n' "$name" "$size" "$(diskutil info "$name" | awk -F': +' '/Media Name/ && !m {m=$2} END {print m}')"
 		done
 	else
@@ -83,9 +82,10 @@ write_card() {
 	bytes=$(wc -c < "$IMG" | tr -d ' '); printf '  %sreading the image (%s MB) to check the card against it…%s' "$D" $((bytes / 1000000)) "$N"
 	want="$(dd if="$IMG" bs=1048576 count=1 2>/dev/null | sha -) $(dd if="$IMG" bs=1048576 skip=1 2>/dev/null | sha -)"; printf '\r\033[K'
 	[ $((bytes % 1048576)) = 0 ] || stop "image size is not whole MiB"
-	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"; fi
 	# shellcheck disable=SC2024  # the prompt reads the terminal, not a file
 	sudo -v -p "  Your password, to write the card: " </dev/tty || stop "sudo was refused"
+	if [ "$(uname)" = Darwin ]; then diskutil unmountDisk "/dev/$dev" >/dev/null; raw="/dev/r$dev"
+	else lsblk -nr -o MOUNTPOINT "/dev/$dev" | while read -r m; do [ -z "$m" ] || sudo umount "$m"; done; fi	# a desktop auto-mounts the card
 	got=$(sudo bash -c "$ROOT_WRITE" _ "$IMG" "$raw" "$bytes")
 	[ "$got" = "$want" ] || stop "the card reads back different from the image; do not use this card"; ok "written and verified"
 }
@@ -111,7 +111,7 @@ ask() { local in; read -r -p "  $2${!1:+ [${!1}]}: " in </dev/tty; printf -v "$1
 	case "${!1}" in *'"'*|*$'\n'*) stop "no quotes or newlines in answers";; esac; }
 # settings: remembered answers, else this Mac's Wi-Fi and address; the password from the Keychain.
 settings() {
-	[ -n "${WIFI_SSID:-}" ] || WIFI_SSID=$(ipconfig getsummary en0 2>/dev/null | awk -F' SSID : ' '/ SSID : /{print $2; exit}' || true)
+	[ -n "${WIFI_SSID:-}" ] || WIFI_SSID=$(ipconfig getsummary en0 2>/dev/null | awk -F' SSID : ' '/ SSID : /{print $2; exit}' || true); [ "$WIFI_SSID" != "<redacted>" ] || WIFI_SSID=""	# macOS hides it without Location access
 	SERVER_URL=${SERVER_URL:-}; FRAME_ID=${FRAME_ID:-}; FRAME_TOKEN=${FRAME_TOKEN:-}
 	printf '  Wi-Fi   %s\n  Server  %s\n' "${WIFI_SSID:-none, pick it on the frame}" "${SERVER_URL:-found on the network}"
 	local a; read -r -p "  Enter to use these, e to edit: " a </dev/tty

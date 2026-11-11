@@ -125,10 +125,12 @@ TASKS.md, and the only one CI enforces is the tfctl size.
 
 ## Quick start
 
-1. Server: `docker compose up -d` on any box with Docker.
+1. Server: `docker compose up -d` on any box with Docker. `compose.yml` uses a bridge network,
+   which the frame's discovery broadcast does not cross: give the card the server URL in step 2
+   (press `e`), or run the server with host networking (`scripts/server-deploy.sh HOST`).
 2. Card: `curl -fsSL https://raw.githubusercontent.com/MikeO7/thinframe/main/scripts/flash.sh | bash`
    and name the frame (Wi-Fi comes from this Mac, the frame finds the server; `e` edits both).
-3. Card in the frame, power on, wait a minute. It appears in `/admin`.
+3. Card in the frame, power on, wait a minute. It shows a 6-digit code: type it on `/admin`.
 
 Full walkthrough and troubleshooting: [docs/flashing.md](docs/flashing.md). Setting up another
 frame from start to finish, with the server on a Mac: [docs/new-frame.md](docs/new-frame.md).

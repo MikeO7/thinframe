@@ -30,6 +30,9 @@ const (
 	imgMaxBytes = 20 << 20
 	imgKeep     = 160 // cached pictures, a few KB to ~30 KB each
 	imgTimeout  = 15 * time.Second
+	// imgFailFor: a URL that failed is not fetched again for this long (a dead poster would
+	// otherwise cost every page load of every frame a fetch of up to imgTimeout).
+	imgFailFor = time.Minute
 )
 
 // imgWidths are the sizes served; a request is rounded up to one, so the cache stays small.
@@ -40,11 +43,17 @@ type imgCache struct {
 	m       map[string][]byte
 	order   []string
 	pending map[string]chan struct{}
+	failed  map[string]imgFail
 	client  *http.Client
 }
 
+type imgFail struct {
+	at  time.Time
+	err error
+}
+
 func newImgCache() *imgCache {
-	return &imgCache{m: map[string][]byte{}, pending: map[string]chan struct{}{},
+	return &imgCache{m: map[string][]byte{}, pending: map[string]chan struct{}{}, failed: map[string]imgFail{},
 		client: &http.Client{Timeout: imgTimeout, CheckRedirect: imgRedirect}}
 }
 
@@ -97,6 +106,13 @@ func (c *imgCache) get(ctx context.Context, u string, w int) ([]byte, error) {
 			c.mu.Unlock()
 			return b, nil
 		}
+		if f, ok := c.failed[key]; ok {
+			if time.Since(f.at) < imgFailFor {
+				c.mu.Unlock()
+				return nil, f.err
+			}
+			delete(c.failed, key)
+		}
 		ch, busy := c.pending[key]
 		if !busy {
 			ch = make(chan struct{})
@@ -105,6 +121,12 @@ func (c *imgCache) get(ctx context.Context, u string, w int) ([]byte, error) {
 			b, err := c.fetch(ctx, u, w)
 			c.mu.Lock()
 			delete(c.pending, key)
+			if err != nil && ctx.Err() == nil { // not the asker going away: the picture itself
+				if len(c.failed) >= imgKeep {
+					clear(c.failed)
+				}
+				c.failed[key] = imgFail{time.Now(), err}
+			}
 			if err == nil {
 				c.m[key] = b
 				c.order = append(c.order, key)

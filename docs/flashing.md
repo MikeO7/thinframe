@@ -7,7 +7,9 @@ Three steps. No SSH, no editing files, no building. About ten minutes, mostly wa
 - A microSD card, 4 to 64 GB. It becomes the frame's disk. The frame's internal storage is never touched.
 - A Mac with a card reader.
 - `frameserver` running on your network: natively, or in a container with host networking so the
-  frame's discovery broadcast (UDP 41007) reaches it. Note its token.
+  frame's discovery broadcast (UDP 41007) reaches it. The root `compose.yml` is bridged: with it,
+  press `e` below and type the server URL. Its token (`FRAME_TOKEN`) is the `/admin` password;
+  the card does not need it.
 
 ## 1. Flash the card
 
@@ -35,13 +37,15 @@ password except for the one `sudo` the write itself needs.
 ## 2. Put the card in, plug the frame in
 
 Power off the frame. Card in the TF slot, label facing the back. Power on. Leave it alone for
-about a minute. First boot: the screen stays dark for 20 to 30 seconds, then shows the thinframe
-logo, then the dashboard.
+about a minute. First boot: the thinframe logo within about 4 seconds (splash at 3.8 s **[V]**
+2026-10-27, later boots; the first boot also grows the card's data partition **[U]**), then a
+6-digit pairing code.
 
-## 3. Check it arrived
+## 3. Pair it
 
-Open `http://nas.local:41007/admin`. The frame is listed under the name you gave, with its IP,
-version and temperature. Or ask Claude: "is the kitchen frame online?"
+Open `http://nas.local:41007/admin`. The frame is listed under "Waiting to pair": type the code
+from its screen and press pair (or tell Claude the code). Within a few seconds the frame opens its
+dashboard and is listed under the name you gave, with its IP, version and temperature.
 If the server has `FRAME_TOKEN` set, the browser asks for a login first: any user name, the
 token as password **[V]** (server tests `TestAdminAuth`).
 

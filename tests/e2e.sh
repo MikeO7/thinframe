@@ -24,7 +24,7 @@ wait_for() {	# seconds cmd...
 	return 1
 }
 dims() { local h; h=$(od -An -tx1 -j16 -N8 "$SHOT" | tr -d ' \n'); echo "$((16#${h:0:8}))x$((16#${h:8:8}))"; }
-online() { api "$BASE/api/frames" | grep -q '"id":"sim"'; }
+online() { api "$BASE/api/frames" | grep '"id":"sim"' >/dev/null; }
 
 echo "== build and start (first build pulls Debian WPE packages)"
 "${DC[@]}" up -d --build >"$TMP/up.log" 2>&1 || { cat "$TMP/up.log" >&2; fail "compose up"; }
@@ -32,13 +32,13 @@ wait_for 120 curl -fsS "$BASE/healthz" || fail "frameserver never answered on :$
 wait_for 180 online || fail "sim frame never came online"
 echo "ok   sim frame online"
 
-mcp set_frame_config '{"id":"sim","rotation":0}' | grep -q '"rotation":0' || fail "MCP set rotation 0"
+mcp set_frame_config '{"id":"sim","rotation":0}' | grep '"rotation":0' >/dev/null || fail "MCP set rotation 0"
 rm -f "$SHOT"; wait_for 120 test -s "$SHOT" || fail "no screenshot"
 sleep 6; before=$(dims); sum_before=$(shasum -a 256 "$SHOT" | cut -c1-64)
 echo "ok   screenshot at rotation 0: $before"
 
 out=$(mcp set_frame_config '{"id":"sim","rotation":3}') || fail "MCP call"
-echo "$out" | grep -q '"rotation":3' || fail "MCP set_frame_config did not return rotation 3: $out"
+echo "$out" | grep '"rotation":3' >/dev/null || fail "MCP set_frame_config did not return rotation 3: $out"
 echo "ok   MCP set_frame_config rotation=3"
 changed() { [ "$(dims)" != "$before" ] && [ "$(shasum -a 256 "$SHOT" | cut -c1-64)" != "$sum_before" ]; }
 wait_for 60 changed || fail "screenshot did not change after rotation 3 (still $before)"
@@ -46,7 +46,7 @@ echo "ok   screenshot changed: $before -> $(dims)"
 
 # Hung page: freeze the WebProcess (its JS ping timer stops; the network process keeps the
 # sockets), and the server must restart cog (TASK 9, server/internal/api/watchdog.go).
-hung() { api "$BASE/api/frames/sim" | grep -q 'restarting cog'; }
+hung() { api "$BASE/api/frames/sim" | grep 'restarting cog' >/dev/null; }
 sleep 30; ! hung || fail "restart-kiosk while the page was alive"
 # shellcheck disable=SC2016  # runs in the container
 "${DC[@]}" exec -T simframe sh -c 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = WPEWebProcess ] && kill -STOP "${p#/proc/}"; done; true'

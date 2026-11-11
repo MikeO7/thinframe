@@ -19,7 +19,10 @@ If a gate cannot pass, write why in `docs/log.md` and stop; do not loosen the ga
 
 ## Safety
 
-- **The eMMC is written only by `tfctl emmc install`.** No `dd`, `sfdisk`, `mkfs` or
+- **The eMMC is written only by tfctl: `tfctl emmc install` puts thinframe there.** On a frame
+  that then runs from the eMMC, tfctl's own boot (it grows and repairs /data) and A/B system
+  update write it too; `slot::find_disk` keeps them on the disk the frame booted from. No `dd`,
+  `sfdisk`, `mkfs` or
   `fastboot flash` to the eMMC (`/dev/mmcblk2` on our kernel) by hand, ever. The install runs from
   the card, after `tfctl emmc backup` was verified off the frame (two copies), with the owner's go
   (given 2026-10-26, docs/decisions.md "Running from the eMMC"). A thinframe card always boots

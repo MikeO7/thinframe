@@ -216,7 +216,6 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		LatencyMS   int             `json:"latency_ms"`
 		PaintedAtMS int64           `json:"painted_at_ms"`
-		Widget      string          `json:"widget"`
 		Load        *store.PageLoad `json:"load"`
 	}
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in)
@@ -257,18 +256,17 @@ func (s *Server) handleRelease(w http.ResponseWriter, _ *http.Request) {
 // ReleaseStatus reports carried versions and lagging frames.
 func (s *Server) ReleaseStatus() map[string]any {
 	out := map[string]any{"server_version": s.opts.Version}
-	if s.opts.Artifacts != nil {
-		out["artifacts"] = s.opts.Artifacts.Versions()
-	}
 	lag := []map[string]string{}
+	out["lagging"] = lag
+	if s.opts.Artifacts == nil {
+		return out
+	}
+	v := s.opts.Artifacts.Versions()
+	out["artifacts"] = v
 	for _, f := range s.Store.List() {
 		if f.Last == nil {
 			continue
 		}
-		if s.opts.Artifacts == nil {
-			continue
-		}
-		v := s.opts.Artifacts.Versions()
 		sysLag := f.Last.SystemVersion != "" && v.System != "" && f.Last.SystemVersion != v.System
 		swLag := f.Last.SoftwareVersion != "" && v.Software != "" && f.Last.SoftwareVersion != v.Software
 		if sysLag || swLag {

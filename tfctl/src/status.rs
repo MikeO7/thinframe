@@ -1,4 +1,4 @@
-//! One screen of state. Read /proc and /sys directly; shell out only for `ip` and `iwctl`.
+//! One screen of state. Read /proc and /sys directly; shell out only for `iwctl`.
 //! Every field is optional so this also runs on the Mac (nothing under /proc there).
 use crate::config::Config;
 use crate::json::Value;
@@ -29,7 +29,7 @@ fn read(path: &str) -> Option<String> {
 
 pub fn collect() -> Status {
     let mut st = Status {
-        uptime_s: read("/proc/uptime").and_then(|t| parse_uptime(&t)),
+        uptime_s: read("/proc/uptime").and_then(|t| crate::agent::uptime_s(&t)),
         software_version: read("/etc/thinframe.version").map(|s| s.trim().to_string()),
         system_version: read("/etc/thinframe.system-version").map(|s| s.trim().to_string()),
         slot: read("/proc/cmdline").and_then(|c| parse_slot(&c)),
@@ -66,14 +66,6 @@ pub fn ips() -> Vec<String> {
         .unwrap_or_default();
     ips.sort_by_key(|ip| ip == crate::statuspage::USB_IP);
     ips
-}
-
-pub fn parse_uptime(text: &str) -> Option<u64> {
-    text.split_whitespace()
-        .next()?
-        .parse::<f64>()
-        .ok()
-        .map(|s| s as u64)
 }
 
 /// (MemTotal, MemTotal - MemAvailable) in MiB.
@@ -156,10 +148,7 @@ fn show<T: std::fmt::Display>(v: &Option<T>) -> String {
 
 pub fn run(cfg: &Config) -> io::Result<()> {
     let st = collect();
-    println!(
-        "url      : {}  platform={} rotation={}",
-        cfg.url, cfg.platform, cfg.rotation
-    );
+    println!("url      : {}  rotation={}", cfg.url, cfg.rotation);
     println!("server   : {} id={}", cfg.server_url, cfg.frame_id);
     println!(
         "tfctl    : {VERSION}  software={} system={} slot={}",
@@ -193,7 +182,7 @@ mod tests {
 
     #[test]
     fn parses_proc_files() {
-        assert_eq!(parse_uptime("12345.67 23456.78\n"), Some(12345));
+        assert_eq!(crate::agent::uptime_s("12345.67 23456.78\n"), Some(12345));
         let m = "MemTotal:        1024000 kB\nMemFree:  10 kB\nMemAvailable:     512000 kB\n";
         assert_eq!(parse_meminfo(m), (Some(1000), Some(500)));
         assert_eq!(parse_meminfo("junk"), (None, None));

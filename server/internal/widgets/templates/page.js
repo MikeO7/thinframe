@@ -1151,11 +1151,10 @@
   addEventListener('pointerdown', e => {
     const now = performance.now();
     const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 10000 ? e.timeStamp : now;
-    const sec = e.target.closest('.w');
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const end = performance.now();
       navigator.sendBeacon('/api/frames/' + encodeURIComponent(TF.frame) + '/beacon', JSON.stringify({
-        latency_ms: Math.max(1, Math.round(end - t0)), widget: sec ? sec.id : '',
+        latency_ms: Math.max(1, Math.round(end - t0)),
         painted_at_ms: Math.round(performance.timeOrigin + end) }));
     }));
   }, { passive: true });

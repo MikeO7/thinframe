@@ -1,7 +1,7 @@
 #!/bin/sh
 # QEMU=1 image only (qemu.fragment overlay; never in a frame image): a fake Wi-Fi neighbourhood
 # for the on-screen setup (TASK 17). mac80211_hwsim makes three radios on one simulated medium:
-# wlan0 is the frame's station (iwd, /etc/default/iwd), wlan1 serves "Groovy Wifi" (WPA2,
+# wlan0 is the frame's station (iwd; tfctl only ever names wlan0), wlan1 serves "Groovy Wifi" (WPA2,
 # password "far out man"), wlan2 serves "Cafe" (open). Each AP hands out leases with udhcpd.
 [ "$1" = start ] || exit 0
 modprobe mac80211_hwsim radios=3 || exit 0

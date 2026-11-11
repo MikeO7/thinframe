@@ -1,0 +1,2 @@
+# The compose default DATA_DIR lives here; artifacts/ must stay in the context (COPY artifacts/).
+data

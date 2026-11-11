@@ -1,2 +1,0 @@
-# QEMU=1 image only: iwd drives wlan0, hostapd keeps the other hwsim radios (S35simwifi).
-IWD_ARGS="-i wlan0"

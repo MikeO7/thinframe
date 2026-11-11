@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
+/// Failed pairing steps in a row (5 s apart) before the server is looked for again.
+const PAIR_FAILS_REDISCOVER: u32 = 6;
 /// How long to wait between steps while the button is up, and after "already paired".
 pub const POLL: Duration = Duration::from_secs(2);
 pub const REFUSED_RETRY: Duration = Duration::from_secs(30);
@@ -162,10 +164,17 @@ impl Agent {
             Some(n) => self.pair_poll(&n),
         };
         match res {
-            Ok(d) => d,
+            Ok(d) => {
+                self.pair_fails = 0;
+                d
+            }
             Err(e) => {
                 eprintln!("tfctl: agent: pairing: {e}");
-                if !self.pair_page_up {
+                self.pair_fails += 1;
+                // With the code on screen one lost poll changes nothing; half a minute of them
+                // means the server is gone or moved.
+                if !self.pair_page_up || self.pair_fails >= PAIR_FAILS_REDISCOVER {
+                    self.pair_fails = 0;
                     self.server_failed();
                     // The server may have a new address (DHCP, another computer): ask the LAN,
                     // as the connected loop does. With no token any server's answer is taken.

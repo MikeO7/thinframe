@@ -18,18 +18,21 @@ reads touch via libinput and renders with GLES 2 on lima. One process, direct sc
 
 | Option | Processes | RAM idle (est., armv7) | Notes |
 |---|---|---|---|
-| **cog drm** | cog + WPEWebProcess + WPENetworkProcess | ~150-250 MB | Chosen. [U] until measured |
+| **cog drm** | cog + WPEWebProcess + WPENetworkProcess | ~150-250 MB | Chosen. [V 2026-10-29]: 117 MB used with the page up (`free -m`, whole system) |
 | cage + cog wayland | + compositor | +40 MB | Fallback if drm platform fails on lima |
 | cage + chromium | + 5-10 chromium processes | 400-600 MB | Too heavy for 1 GB, and Chromium armv7 builds are getting rare |
 | X + surf/midori | + Xorg | ~250 MB | No advantage, older stacks |
 
 Rotation: the panel is portrait. cog's drm platform takes a `rotation` platform param
 (`COG_PLATFORM_DRM_ROTATION` env or `--platform-params=rotation=N`, N in quarter turns).
-Verify the exact spelling against the installed cog version. [U]
+tfctl passes `--platform-params=renderer=gles,rotation=N` (kiosk.rs); rotation 3 is upright
+on the panel [V 2026-10-26, screenshot]. Only the gles renderer rotates (cog 0.18.4).
 
 If cog's drm platform ever fails on this board, the fallback is `cage` + `cog --platform=wl`
 (`COG_PLATFORM="wl"` in thinframe.conf; tfctl already knows both). Buildroot builds cog with
 the drm platform (`BR2_PACKAGE_COG_PLATFORM_DRM`) and it is what the frame runs [V].
+Superseded (2026-11-10): the fallback was never built (the image has no cage or seatd, and
+`BR2_PACKAGE_COG_PLATFORM_FDO` is off), so `COG_PLATFORM=wl` was removed from tfctl.
 
 ## Kernel: Buildroot builds mainline with the ormarch patches
 Mainline needs two things this board does not have upstream: the JD9365DA panel init table and
@@ -60,6 +63,10 @@ Exception: a `DEBUG=1` card (bench only, never released) also takes root over SS
 (`/root/.ssh` -> `/etc/dropbear`, dropbear without `-w`; post-build.sh), to iterate at the desk.
 
 ## Content as a local file by default
+Superseded (2026-10-18): see "Thin client". The page comes from the server; the config file is
+`/etc/thinframe.conf`, `FRAME_URL` is unset there and the local page is only the fallback
+(`FALLBACK_URL=file:///run/thinframe/status.html`). The first plan, kept for the record:
+
 `file:///var/lib/thinframe/www/index.html`. No web server needed on the frame. Set
 `FRAME_URL` in `/etc/conf.d/thinframe` to point at anything else (Home Assistant, a
 dashboard). The page itself can fetch whatever it wants.
@@ -105,7 +112,7 @@ and letting the frame's GPU composite it, and it needs a heavier client than cog
 Transport: see "Two planes" below. The frame opens one WebSocket; the server pushes.
 
 ## Languages: Rust on the frame, Go in the container (decided 2026-10-18)
-Rust on the frame is for the 1 MB static binary and zero-allocation idle. The container has no
+Rust on the frame is for the small static binary (about 1.1 MB; CI fails above 2 MB) and zero-allocation idle. The container has no
 size pressure, so Go: stdlib HTTP server + `embed` for static files, `CGO_ENABLED=0` static
 builds for amd64 and arm64 in one command, fast compiles, official MCP SDK. No other languages
 anywhere: no Python helpers, no Node in the dashboard build. The page is hand-written HTML/CSS/JS.
@@ -118,7 +125,8 @@ Three layers, three mechanisms:
 | Dashboard (HTML/JS/data) | Served live. `page_version` in config; agent reloads cog when it changes | server |
 | Frame software (`tfctl`) | Container image bundles `tfctl-armv7` (and, for system updates, `system-<ver>.tar`) with `versions.json`; every file has a sha256 (`scripts/make-artifacts.sh`, which makes no `overlay.tar.gz` and deletes a stale one) [V]. Config poll says `software_version`; agent downloads from `/api/artifacts/<name>`, verifies, installs, restarts [V] | agent |
 | Root filesystem (`image/rootfs/` and the rest of the OS) | Only as a whole system update into the other A/B slot ("Full OS updates" below), never unpacked into a running root [V: make-artifacts.sh] | agent |
-| Kernel, DTB, U-Boot | Card re-write. Rare. Optional later: A/B root partitions and `extlinux.conf` switching | human |
+| Kernel, DTB | With every system update: `zImage` is in `system-<ver>.tar` (post-image.sh) and goes to `zImage.<slot>`; DTBs change only with a card re-write or `tfctl emmc install` | agent |
+| U-Boot | Card re-write, or `tfctl emmc install` on the eMMC. Rare | human |
 
 So "rebuild the container" is the only deploy action. Every frame converges within one poll.
 Safety: agent keeps the previous `tfctl` as `tfctl.prev`; if the new one fails to start twice,
@@ -137,9 +145,9 @@ package manager: the image is immutable and replaced whole. Card layout grows fr
 | p1 FAT32 `PFBOOT` | U-Boot script, `extlinux.conf`, `uEnv.txt`, `zImage.a` `zImage.b`, DTBs | U-Boot picks the slot from `uEnv.txt` (`slot=a|b`, `tries=N`) |
 | p2 ext4 `rootA` | Buildroot root, read-only mount | active or standby |
 | p3 ext4 `rootB` | Buildroot root, read-only mount | standby or active |
-| p4 ext4 `data` | `/etc/thinframe.conf`, ssh host keys, iwd profiles, logs, www fallback | survives updates; linked or bind-mounted into the read-only root |
+| p4 ext4 `data` | `/etc/thinframe.conf`, ssh host keys, iwd profiles, the kiosk log mirror (the fallback `www/` is in the root, post-build.sh) | survives updates; linked or bind-mounted into the read-only root |
 
-Update flow: CI builds `system-<ver>.tar` = {zImage, modules, rootfs.ext4.zst, sha256}. The container
+Update flow: CI builds `system-<ver>.tar` = {zImage, rootfs.ext4.zst, sha256, version.json} (modules are inside the rootfs). The container
 ships it under `/api/artifacts/`. The agent sees `system_version` change, streams the rootfs into the
 standby slot, copies the kernel to `zImage.<slot>`, sets `slot=<new> tries=3` in `uEnv.txt`, reboots.
 U-Boot's `boot.scr` (already has a counter in the ormarch build) decrements `tries` before it loads the
@@ -174,8 +182,10 @@ upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edg
   mainline stable) lands.
 - Dependabot/Renovate on `server/` and `tfctl/` dependencies.
 - Baseline on the frame: root fs read-only; no password login anywhere; sshd key-only, `frame` user
-  only; no sudo or doas; iwd with WPA2/3 only; no inbound ports besides
-  22; all frame→server traffic over the LAN with a shared bearer token (`FRAME_TOKEN`); artifacts
+  only; no sudo or doas; iwd joins WPA2-PSK and open networks (SAE is off in the driver, log
+  2026-10-22, PR #93); no inbound ports besides
+  22; all frame→server traffic over the LAN with the frame's own token from pairing (or the shared
+  `FRAME_TOKEN` when one was provisioned; "Pairing"); artifacts
   verified by sha256 from the signed-in config response before install. Outbound HTTPS from the
   frame is unnecessary: the container fetches the world, the frame only talks to the container.
 - Secrets never in the image: host key, token and Wi-Fi PSK live on `data` and are provisioned once.
@@ -191,14 +201,15 @@ upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edg
 `frameserver` is production: one binary, one volume, no build tools. `simframe` is development
 only: it depends on `frameserver` and pretends to be a frame. They never share an image.
 Root `compose.yml` runs the first by default and both with `--profile sim`.
-`simframe` has two modes, picked by `SIM_MODE`:
+There is no `SIM_MODE` (the first plan): the container is the WPE tier only, and the real image
+in QEMU runs on the host (sim/README.md):
 
-| Mode | What runs | Speed | Tests |
+| Tier | What runs | Speed | Tests |
 |---|---|---|---|
-| `wpe` (default) | headless WPE WebKit + native tfctl agent, screenshots to `sim/out/` | seconds | dashboard rendering, config loop, heartbeats, tfctl updates |
-| `qemu` | the real SD image under `qemu-system-arm` (orangepi-pc board, serial console, user-mode net) | ~1 min boot | init, networking, A/B system update and rollback |
+| `simframe` container | headless WPE WebKit + native tfctl agent, screenshots to `sim/out/` | seconds | dashboard rendering, config loop, heartbeats, actions and acks |
+| `sim/qemu/run.sh`, `image/qemu-*-test.sh` | the real SD image under `qemu-system-arm -M virt` (virtio-gpu, virtio touch, user-mode net) | slow (TCG) | init, provisioning, Wi-Fi setup, A/B system update and rollback |
 
-Neither mode has the DSI panel or the touch controller; those two gates stay on hardware.
+Neither tier has the DSI panel or the touch controller; those two gates stay on hardware.
 
 ## MCP in the backend
 `frameserver` exposes an MCP server (streamable HTTP at `/mcp`, bearer token) so Claude Code or
@@ -223,28 +234,31 @@ Python `mcp` 2.3.0 and 1.30.0 (what Hermes Agent uses), the TypeScript Inspector
   authorization server would be a second service for a home LAN. Every client named above takes a
   header. **[U]** enough until a client needs OAuth.
 
-Initial tool list (TASK S7):
+Tool list (TASK S7, as registered in `server/internal/mcp/` on 2026-11-10):
 
 | Tool | Does |
 |---|---|
 | `list_frames` | ids, ip, last heartbeat, versions, slot, temp, mem |
 | `get_frame` / `set_frame_config` | read / change url, rotation, brightness, page_version, tags |
-| `frame_action` | reboot, restart-kiosk, update-software, update-system, rollback |
+| `pair_frame` | give a waiting frame its token from the 6-digit code on its screen ("Pairing") |
+| `frame_action` | reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot, bench, report, wake (`ValidActions`, server.go) |
+| `list_reports` / `get_report` | debug reports a frame posted ("Remote debugging") |
+| `set_source` / `list_sources` | the named JSON sources the page reads ("Tabs, pushed sources") |
 | `screenshot` | PNG of what a real frame's panel shows (2026-10-26, below; the sim had `get_screenshot`) |
 | `list_widgets` / `set_layout` | dashboard composition stored per frame as JSON the page reads |
 | `get_logs` | last N heartbeats and agent events for a frame |
 | `release_status` | what system/software versions the container carries and which frames lag |
 | apps (2026-10-26) | `app_guide`, `put_app`, `get_app`, `list_apps`, `rollback_app`, `delete_app`, `show_app`, `get_app_events`, `get_app_state`, `set_app_state`, `send_to_app`, `set_hook`/`list_hooks`/`delete_hook`, `set_poll`/`list_polls`/`delete_poll` (section "Apps", below) |
 
-Writes that touch many frames (`update_system` with no id) require `confirm: true`.
+Writes that touch many frames (`frame_action` with no id) require `confirm: true`.
 
 ## Buttery smooth: the frame does nothing but render
 Interaction latency is the product. Everything else in this repo exists to keep the frame idle
 when a finger is not on it, and fully available when one is.
 
 What the frame runs when the page is up: kernel, BusyBox init (asleep), udev (asleep), dropbear
-(asleep until a connection), dbus-daemon, iwd + dhcpcd (asleep), tfctl (one thread, wakes every 15 s for a
-~1 KB HTTP poll), cog's UIProcess + WebProcess + NetworkProcess. That is the whole list, and
+(asleep until a connection), dbus-daemon, iwd + dhcpcd (asleep), tfctl (asleep on its control socket and timers: the kiosk loop, the agent, the watchdog beat, the
+log mirror and, with a light sensor, a 10 Hz read; "Two planes" replaced the 15 s HTTP poll), cog's UIProcess + WebProcess + NetworkProcess. That is the whole list, and
 TASK 9's `ps` audit fails if anything else appears.
 
 Levers, in the order to pull them (TASK 13):
@@ -293,7 +307,7 @@ objects with a `type` field.
 | frame → server | `heartbeat` (every 60 s, and on change) | mem_used_mb, temp_c, wifi_rssi, page_url, uptime_s (touch latency comes from the page's beacon) |
 | frame → server | `ack` | id of the command, ok/error |
 | server → frame | `config` | the full config object (same as GET /config) |
-| server → frame | `action` | id + one of reboot, restart-kiosk, reload-page, update-software, update-system, rollback, screenshot |
+| server → frame | `action` | id + one of reboot, restart-kiosk, reload-page, screen, update-software, update-system, rollback, screenshot, bench, report, wake |
 | server → frame | `ping` / frame → server `pong` | |
 
 Rules:
@@ -327,7 +341,16 @@ and serves `/api/data/photo/next?frame=<id>` with a per-frame rotation and a "re
 Google Photos, iCloud shared albums and Immich are later adapters behind the same interface
 (`PhotoSource` with `List()` and `Open(id)`). The frame only ever downloads a pre-sized JPEG.
 
+`golang.org/x/image` is the one module this needs: `draw.CatmullRom` scales the photos
+(`internal/photos/photos.go`), because the standard library has no resampling scaler and a box
+filter looks soft on photographs at panel size. Nothing else imports it. It is the third direct
+Go module, next to the MCP SDK and `coder/websocket`.
+
 ## Clock comes from the server
+Superseded in part (2026-10-26): see "Recovery from anything" ("No server for the clock"). The
+hello still sets the clock, and tfctl also reads the RTC and asks SNTP (clock.rs), so a frame
+without a server keeps time. There is still no NTP daemon.
+
 The A33 has an RTC with no backup battery; the frame boots in 1970. The server's `hello` reply
 carries `time_unix` and `tz`; `tfctl` sets the system clock and `TZ` on every connect. No NTP
 daemon on the frame. Without a server the clock is wrong and the fallback page says so.
@@ -436,7 +459,8 @@ which only a server holding that token (or its stored hash) can make, so answeri
 does not collect a token. mDNS was not chosen: it needs a responder on the server host and a
 resolver on the frame, where one datagram each way does the job. Broadcasts do not cross Docker's
 bridge network or QEMU's user network: the server needs host networking there, or `SERVER_URL`
-set by hand (`DISCOVERY=off` turns the responder off). [U] on the frame until measured.
+set by hand (`DISCOVERY=off` turns the responder off). [V 2026-10-22]: the office frame found a
+server that had moved and checked its proof (docs/log.md).
 
 ## Seventies splash and its font
 Chosen by the owner on 2026-10-20 from browser mockups. The lettering is Shrikhand (SIL Open Font
@@ -612,8 +636,9 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
 - `udevadm settle` does not wait (`/etc/default/udevd` SETTLE_TIMEOUT=0): it held rcS for 3.9 s,
   and nothing after it needs a settled device tree (tfctl waits for what it uses).
 - `tfctl` reads cog, WebKit and the libraries into the page cache in a thread at kiosk start
-  (`prewarm.rs`), and the splash stays until the agent names the page (`FIRST_PAGE_HOLD`, 12 s at
+  (`prewarm.rs`), and the splash stays until the agent names the page (12 s at
   most), so cog starts once, on the dashboard, instead of on the status page and again.
+  Superseded (2026-10-27): see "Speed"; cog now starts at boot on the saved dashboard.
 - The agent starts the moment wlan0 or its SDIO device exists, not after a fixed wait.
 - When Wi-Fi has been down 20 s, the frame also looks for the server on the USB cable, so a frame
   with broken Wi-Fi can still be reached and fixed.
@@ -633,10 +658,13 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   names; a real frame's layout and sources live in `DATA_DIR`. Images are `asset:` files there,
   served publicly like the page (the frame's browser has no token), limited to raster images and
   woff2 so a file opened directly cannot run script.
-- **Controls are display-only.** The page is public by design (cog has no token), so a button on it
+- **Controls are display-only.** (Superseded 2026-10-26 for rooms and apps: see "Apps". Room
+  switches run the hooks `room_on`/`room_off` with the frame's emit key; the built-in car
+  controls are still display-only.) The page is public by design (cog has no token), so a button on it
   that unlocks a car could be pressed by anyone on the LAN. Acting needs a per-frame credential on
   the page plane first; until then the cards show state only.
-- **No font in the repo.** Inter is OFL but 300 KB+; the Obsidian theme uses it when the owner drops
+- **No font in the repo.** (Superseded 2026-10-26: Manrope is bundled, see "Aurora, turned up".)
+  Inter is OFL but 300 KB+; the Obsidian theme uses it when the owner drops
   `inter.woff2` into `DATA_DIR/assets` and falls back to DejaVu Sans, the frame's only font.
 - **No new crates or modules.** Rendering is the existing html/template plus page.js; tabs are CSS
   pages toggled by class, no animation beyond opacity, for the Mali-400.
@@ -651,7 +679,10 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   `GET /containers/json`, but anyone who took over the process could use the socket fully (`:ro`
   protects the file, not the API) [V: Docker docs]. The same host already gives the socket to
   two management containers; a filtering socket proxy is the step up if that changes.
-- The Mac server keeps `DISCOVERY=off`, so a frame that loses production cannot land on it.
+  Superseded (2026-10-31, PR #168): that proxy is in place. Only it holds the socket and it
+  answers `GET /containers/json` alone (scripts/server-deploy.sh) [V: docs/log.md].
+- The Mac server keeps `DISCOVERY=off`, so a frame that loses production cannot land on it. It is
+  set by hand in `~/.thinframe/env`; `scripts/server-mac.sh` does not write it (docs/new-frame.md).
 - Page speed on the A33: widgets on hidden tabs are drawn when shown, repeated data is skipped
   in the page and on the server, icons are parsed once, no blurred shadows. In WPE 2.48 (sim,
   arm64 container): load 70 ms, tab switch 1 to 38 ms, all draws 25 ms [V 2026-10-25, sim].
@@ -993,7 +1024,8 @@ backup` (raw to stdout, hash to stderr and `/data/thinframe/emmc-backup`) does i
 ("PF0E"), so its PARTUUIDs never clash with a card's. `slot::find_disk` follows the signature of
 the running root: booted from the card it never returns the eMMC (as before, sysfs
 `device/type` MMC is skipped); booted from the eMMC it returns only the eMMC. Every writer
-(`tfctl boot`, update, sysupdate) goes through it. Kernel aliases keep the card at mmcblk0 and
+(`tfctl boot`, update, sysupdate) goes through it, so a frame that runs from the eMMC grows its
+/data and takes A/B system updates there (CLAUDE.md "Safety"). Kernel aliases keep the card at mmcblk0 and
 the eMMC at mmcblk2.
 
 **Boot chain.** U-Boot build E (`image/uboot-emmc.sh`) is ormarch's build L from the same tree
@@ -1003,21 +1035,26 @@ from `mmc ${mmc_bootdev}:1` (`board/sunxi/board.c`: 0 = card, 1 = eMMC; its DT a
 to the eMMC). The script stops if the config differs from build L in anything else (the
 fastboot default device follows the slot; fastboot never runs). One `boot.scr` serves both:
 every `mmc 0:1` reads `${pf_dev}`, which is `mmc_bootdev` or 0. The kernel DTBs `full` and
-`pmic` have the eMMC on; `min` stays card-only, so on the eMMC the install renames the last-resort `min` label to `pmic` and boots pmic.dtb (min.dtb there would wait at rootwait forever) [U: the label has not been booted from the eMMC].
+`pmic` have the eMMC on; `min` stays card-only. Build E drives the eMMC at 4-bit, 26 MHz (its DTS; PR #159, 2026-10-29).
+On the eMMC the install renames the last-resort `min` label to `pmic` and boots pmic.dtb (min.dtb there would wait at rootwait forever) [U: the label has not been booted from the eMMC].
 
 **Install** (`tfctl emmc install --backup-sha256 HEX`): only from the card, the eMMC opened
 `O_EXCL`, the running slot confirmed, HEX equal to the recorded backup. Order: clear the vendor
-eGON at 8 KiB; PARTITION_CONFIG to 0 (read back) and boot0's header cleared, so the boot ROM
-reads the user area as on any A33 with a fresh eMMC; the MBR; p1 to p3 copied from the card and
+eGON at 8 KiB and boot0's header; the MBR; p1 to p3 copied from the card and
 read back by hash with the page cache dropped; on p1 the extlinux roots move to `50463045`,
 `boot.scr` and the DTBs come from the image, uEnv names the running slot with tries 0;
 `mkfs.ext4` p4 and a copy of /data; `e2fsck -f -n` on p2 to p4 (fsck.vfat is not in the image,
-p1 is checked by hash), any error stops here; U-Boot last, read back. Until that last write the eMMC has
+p1 is checked by hash), any error stops here; U-Boot last, read back: at 8 KiB in the user area
+and at the start of boot0, then PARTITION_CONFIG 0x48 and BOOT_BUS_CONDITIONS 0x01, the vendor's
+own setting. (The first installs set PARTITION_CONFIG 0 and left boot0 empty; with the card out
+that never started [V 2026-10-29], emmc.rs header.) Until that last write the eMMC has
 no boot code, so a cut or an error midway leaves a frame that starts from the card (or FEL),
 never a half system. For its whole run the install holds `/run/thinframe/emmc-install` (its
 pid; a dead pid is stale): the agent then refuses update-software, update-system, rollback and
 reboot with an error ack, defers automatic updates, and `reboot_soon` (GPU hang, Settings)
-waits for the install to end. [U] until the next install on the frame.
+waits for the install to end. [V 2026-10-31]: reinstall exit 0, U-Boot at 8 KiB and in boot0
+equal, PARTITION_CONFIG 0x48 read back; the card-out start from this layout [V 2026-10-29].
+The install lock against agent actions is [U] on the frame.
 
 | Fails | Way back |
 |---|---|
@@ -1102,8 +1139,8 @@ roam-scanning twice a minute at -16 dBm, a new Wi-Fi address and DHCP lease at e
   now reads the same four SID words from the registers (read-only `/dev/mem` mapping, PF1007L
   only) before it falls back to the serial, so both starts get be:4f:41:70:0f:bb [V].
   The ID is fixed in the chip, so the address survives A/B updates, a new card and the eMMC
-  install; nothing is stored. `tfctl netid` shows it. Whether the A33 reads a unique root key
-  this way is [U] until it is read on the frame.
+  install; nothing is stored. `tfctl netid` shows it. Read on the frame [V 2026-11-07]:
+  both starts give be:4f:41:70:0f:bb. Whether the value is unique per unit is [U] with one frame.
 - **DHCP lease kept.** dhcpcd's database (`/var/db/dhcpcd`) is now `/data/dhcpcd`. The old
   `ln -sfn ../tmp /var/db` had gone inside the directory dhcpcd's install made, so leases went to
   the read-only root and were never saved. With the lease, dhcpcd asks for its old address.

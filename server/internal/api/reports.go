@@ -52,7 +52,7 @@ func (s *Server) SaveReport(id string, body []byte) (Report, error) {
 	}
 	now := time.Now().UTC()
 	name := now.Format("20060102T150405Z") + ".txt"
-	// Two reports in one second: keep the newer one by appending.
+	// Two reports in one second share a name: the second is appended to the first.
 	f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return Report{}, err

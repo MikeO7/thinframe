@@ -30,10 +30,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 
 ## 2. Buildroot image (Docker, cross-compile; no armv7 emulation needed)
 - [x] `image/buildroot/` is a BR2_EXTERNAL tree: `external.desc`, `Config.in`, `external.mk`,
-      `configs/pf1007l_defconfig`, `board/pf1007l/{linux.config,linux.fragment,patches/,dts/,
-      rootfs-overlay -> ../../rootfs,post-image.sh,genimage.cfg,uboot/}`, `package/aic8800/`
-      (kernel module package from the radxa source ormarch pinned), `package/tfctl/` (installs the
-      prebuilt armv7 binary from tfctl/).
+      `configs/pf1007l_defconfig`, `board/pf1007l/{linux.fragment,busybox.fragment,debug.fragment,
+      post-build.sh,post-image.sh,genimage.cfg,boot.cmd.patch,users.txt}` plus the QEMU=1 files
+      (`qemu.fragment`, `linux-qemu.fragment`, `uboot-qemu.fragment`, `qemu-overlay/`),
+      `patches/cog/`, `package/aic8800/` (kernel module package from the radxa source ormarch
+      pinned), `package/tfctl/` (installs the prebuilt armv7 binary from tfctl/). The root overlay
+      is `image/rootfs` (`BR2_ROOTFS_OVERLAY`); the DTS and the panel patch come from
+      `image/work/inputs` (TASK 1).
 - [x] Defconfig: arm cortex-a7 neon-vfpv4 musl, BusyBox init, mainline kernel pinned to the ormarch
       7.2.x tag with the panel patch + DTS, mesa3d (lima, gbm, egl, gles), libdrm, libinput, eudev,
       wpewebkit (no wayland), cog with `BR2_PACKAGE_COG_PLATFORM_DRM`, iwd, dhcpcd, dropbear,
@@ -73,10 +76,11 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - Gate: `uname -a` shows 7.2.10; `dmesg | grep -i -E 'panel|dsi'` shows the panel bound.
 
 ## 5. Display
-- [x] Console appears on the panel (DTB `full`, panel module loaded by `modules-load.d`).
+- [x] Console appears on the panel (DTB `full`; udev loads the panel module, there is no `modules-load.d`).
       (Superseded by TASK 15: the console is kept off the panel, `fbcon=map:9`; the panel is bound and cog draws on DSI-1, docs/log.md.)
 - [x] `tfctl kiosk` (tfctl/src/kiosk.rs): spawn cog, restart on exit with back-off, SIGTERM passthrough.
-      (On the frame: cog on the panel, `restart-kiosk` acks and the page watchdog's restart, docs/log.md.)
+      (On the frame: cog on the panel and `restart-kiosk` acks, docs/log.md; the page watchdog's own
+      restart is not logged there, see section 9.)
 - [x] `/etc/init.d/S90thinframe start` shows `www/index.html` full screen, landscape.
       (Superseded: the dashboard comes from the server; rotation 3 is upright on the panel, docs/log.md.)
       Tune `COG_ROTATION` in `/etc/thinframe.conf` (expect 3, [U]).
@@ -90,12 +94,16 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       sector 172032`, `/data/thinframe/firmware/silead/gsl_m86_hd.fw` has SHA-256 e11ffa8a…, taps work.
 - [ ] Tapping the four corners of `www/index.html` (it prints coordinates) matches. Fix with
       `LIBINPUT_CALIBRATION_MATRIX` in `image/rootfs/etc/udev/rules.d/90-touch.rules`.
-      Upstream found a vertical flip is needed relative to the rotated output. [D]
+      (Measured 2026-10-26: the matrix is the swap `0 1 0 1 0 0`, shipped in `90-touch.rules` [V];
+      upstream's vertical flip [D] did not apply.)
 - Gate: all four corners within 10 px.
+  (Log 2026-10-26: every target within 21 px with the swap matrix `0 1 0 1 0 0`. That is outside
+  this gate: the owner accepts 21 px or re-measures.)
 
 ## 7. Wi-Fi
 - [x] `tfctl wifi "SSID" "psk"` (tfctl/src/wifi.rs) writes `/var/lib/iwd/<SSID>.psk` and iwd connects.
-      Modules `aic8800_bsp aic8800_fdrv` load from `modules-load.d` in that order. [D]
+      `tfctl boot fsck` starts `modprobe aic8800_fdrv` early (speed.rs; modprobe pulls in
+      `aic8800_bsp`), else udev loads it; there is no `modules-load.d`. [V 2026-10-27 dmesg]
 - [ ] Reboot with no USB data cable: ssh by the DHCP-assigned name/IP works (no avahi: the router
       learns the hostname from dhcpcd).
 - [x] Gate: three reboots in a row reconnect without help.
@@ -122,10 +130,13 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       for 3 attempts. Runs as a thread inside `tfctl kiosk` when SERVER_URL is set.
 - [x] Unit tests for the frame codec (mask/unmask, fragment, close) and the message types.
 - [x] Set system clock and TZ from the `hello` reply on every connect (no NTP on the frame).
-      (agent.rs `on_hello`: `date -s @N` when off by >2 s, TZ copied from zoneinfo. Hardware unverified.)
+      (agent.rs `on_hello`: `date -s @N` when off by >2 s, TZ copied from zoneinfo. Since 2026-10-26 also
+      the RTC and SNTP, clock.rs. On the frame [V]: `tfctl clock` 1 s off both NTP servers, log 2026-10-26;
+      a screenshot after `wake` shows the current time, log 2026-10-27.)
 - [x] `brightness` and `schedule` in config: backlight via sysfs, cog SIGSTOP/SIGCONT, touch wakes
       for 60 s, `screen` action, `screen_state` in heartbeat. Evaluated locally so it survives outages.
-      (screen.rs + kiosk.rs `tick_schedule`; unit-tested windows, e2e acks `screen`. Backlight unverified.)
+      (screen.rs + kiosk.rs `tick_schedule`; unit-tested windows, e2e acks `screen`. On the frame [V]:
+      screen off = backlight 0 and cog stopped, auto-brightness backlight 10 of 10 in daylight, log 2026-10-26.)
 - [x] `tfctl set KEY VALUE` rewrites one key in /etc/thinframe.conf (used for first pairing).
 - Gate: change rotation in /admin, frame re-renders within 1 s; stop the container, frame shows the
   fallback page within 3 reconnect attempts; start it, frame comes back and acks queued actions.
@@ -133,7 +144,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 ## 12. System (OS) update, A/B
 - [x] Agent: on `system_version` change, stream `rootfs.ext4.zst` to the standby slot via `zstd -d | dd`,
       copy `zImage.<slot>`, verify both sha256, set `slot=<new> tries=3`, reboot.
-      (tfctl/src/sysupdate.rs + slot.rs; `dd` only to the disk with MBR signature 50463037. Hardware unverified.)
+      (tfctl/src/sysupdate.rs + slot.rs; `dd` only to the disk the frame booted from, found by its MBR
+      signature. On the frame [V]: three A/B updates, each `slot-confirmed`, log 2026-10-22.)
 - [x] First heartbeat after boot writes `tries=0` (slot good) and reports `slot`, `system_version`.
       (On every agent connect: `confirm_slot`, event `slot-confirmed`. `/etc/thinframe.system-version` must be in the image.)
 - [x] Rollback test in sim qemu mode: ship a bundle with a broken init, watch U-Boot flip back after 3 tries.
@@ -148,12 +160,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       COG_ROTATION), `authorized_keys` from SSH_PUBKEY, hostname = FRAME_ID; delete the file; continue boot.
       (tfctl/src/provision.rs, `--boot-dir`; keys go to /home/frame/.ssh and /data/ssh/authorized_keys, the
       image bind-mounts /data/ssh over /etc/dropbear. Init must mount PFBOOT rw around the call.)
-- [ ] On-screen status page (local file, shown by cog until the server answers): "connecting to Wi-Fi",
-      "cannot reach http://…", with the IP once it has one. This is the only local page besides fallback.
-      (tfctl/src/statuspage.rs: the kiosk opens cog on it before the agent starts, "joining <ssid>" /
-      "no Wi-Fi configured" / "reaching <server>" / "cannot reach <server>" + IP, refreshed on every
-      failed attempt; the first server answer switches to the dashboard. QEMU: written as "reaching".
-      Pending: seen on the panel.)
+- On-screen status page: one item with section 15 ("Local status page"); tracked there.
 - [x] 14b Linux variant of flash.sh (lsblk instead of diskutil). (`tests/flash-test.sh` covers discovery with a fake lsblk; the write path is untested.)
 - Gate: a person who has not read the repo flashes a frame from docs/flashing.md alone, timed, no questions asked.
 
@@ -168,9 +175,12 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (Done: background + centred text line, SPLASH_BG/SPLASH_TEXT, rotation, kiosk draws it before cog and
       holds "cog missing" if cog is absent; PNG decoder (tfctl/src/png.rs, own inflate, 8-bit non-interlaced) blends
       `/etc/thinframe/splash.png` above the text; tfctl/src/{drm,splash,font,png}.rs. Pending: ship a logo, hardware check.)
-- [ ] Local status page (`/run/thinframe/status.html`) shows the same logo and live text:
-      "joining <ssid>", "reaching <server>", IP, then hands over to the dashboard.
-      (Software done with the item in 14; the page shows the splash logo. Pending: seen on the panel.)
+- [ ] Local status page (`/run/thinframe/status.html`, shown by cog until the server answers; the
+      only local page besides the fallback) shows the same logo and live text: "joining <ssid>" /
+      "no Wi-Fi configured" / "reaching <server>" / "cannot reach <server>" + IP, refreshed on
+      every failed attempt, then hands over to the dashboard.
+      (tfctl/src/statuspage.rs. QEMU: written as "reaching". On the frame [V]: the page was up and
+      its Settings button took a tap, log 2026-10-26 night; no photo of it in docs/img/ yet.)
 - [x] Config fields `splash_text` and `splash_png` (base64 or artifact name) so the server/MCP can change
       the logo; tfctl writes them to the data partition.
       (Plus `splash_bg`. Server validates #rrggbb and a PNG of at most 48 KiB; REST and MCP
@@ -179,7 +189,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] Dawn splash (`SPLASH_STYLE=dawn`, the default): a frosted-glass sunrise, thin title, status
       line and address; the status page matches it. tfctl/src/dawn.rs, Poppins atlas, docs/decisions.md.
       [V in QEMU: docs/img/boot-dawn.jpg is the virtio screen at boot; the status line was checked
-      in Chrome over the same backdrop. On the panel: not seen. The Wi-Fi, keyboard, joining and PAIR
+      in Chrome over the same backdrop. On the panel: the splash draws on card1 (log 2026-10-22), no
+      photo yet. The Wi-Fi, keyboard, joining and PAIR
       pages sit on the same sheet, one shared stylesheet (tfctl/src/dawnpage.rs); QEMU journey 41/41.]
 - Gate: power on → dark ≤10 s → logo → status text → dashboard, no kernel or console text visible; photo in docs/img/.
 
@@ -188,7 +199,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (token once), per-frame token hash in the store, scoped auth, "forget pairing" on /admin.
       (server/internal/api/pair.go, tests pair_test.go.)
 - [x] tfctl: without FRAME_TOKEN the agent pairs first and shows the PAIR page; a 401 clears the token.
-      (tfctl/src/pair.rs.) flash.sh: the token prompt may be left empty.
+      (tfctl/src/pair.rs.) flash.sh has no token prompt: `FRAME_TOKEN` comes from the environment or stays empty.
 - [x] Gate: in QEMU, a frame flashed without a token shows PAIR, one tap pairs it, the dashboard loads,
   a reboot goes straight to the dashboard, a second pairing request is refused, "forget pairing"
   brings the button back. Evidence in docs/log.md (2026-10-20, docs/img/pair-qemu-*).
@@ -219,8 +230,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 
 ## 11. Auto-update from the container (frame side)
 - [x] Agent compares `software_version` from config with `/etc/thinframe.version`; on change downloads
-      `tfctl-armv7` and `overlay.tar.gz` from `/api/artifacts/`, checks sha256 from config, installs
-      (`tfctl.prev` kept), applies overlay with the exclusions, writes the version, restarts service.
+      `tfctl-armv7` from `/api/artifacts/`, checks sha256 from config, installs (`tfctl.prev` kept),
+      writes the version, restarts service. (No `overlay.tar.gz` since #72: the root is read-only.)
       (tfctl/src/update.rs; restart = tfctl stops cog and exits 0, the inittab respawn runs the new binary.)
 - [x] Rollback: if tfctl exits twice within 60 s after an update, service start_pre swaps `tfctl.prev` back.
       (Done inside tfctl itself: `update::record_start` at kiosk start, starts log in /data/thinframe/starts,
@@ -230,7 +241,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 
 ## S. Server (any box with Docker)
 - [x] S0 CI job for `server/`: gofmt, `go vet`, `go build`, `go test ./...` (multi-arch image: release.yml on tags).
-- [x] S1 `server/`: stdlib ServeMux serving static/ at /frame/{id}, config GET/PUT, heartbeat POST,
+- [x] S1 `server/`: stdlib ServeMux serving the page (now `internal/widgets/templates/`) at /frame/{id}, config GET/PUT, heartbeat POST,
       JSON files in /data (internal/store). `go test` covers the config merge and one-shot action clearing.
 - [x] S1b `/api/frames/{id}/ws`: one goroutine per frame, hub keyed by id, push `config` on PUT and
       `action` on request, resend unacked actions on reconnect, mark offline on socket close. Admin,
@@ -239,7 +250,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] S2 `/admin`: plain HTML table of frames (id, ip, last seen, mem, temp) + edit form.
 - [x] S3 Dockerfile builds a static Go binary for amd64/arm64 (scratch, 11 MB); `docker compose up`
       works; release.yml pushes ghcr.io/mikeo7/thinframe-server on tags.
-- [x] S4 FRAME_TOKEN bearer auth on /api and /mcp (frame page and admin stay LAN-open).
+- [x] S4 FRAME_TOKEN bearer auth on /api and /mcp (the frame page stays LAN-open; `/admin` asks for the
+      token as HTTP Basic password when it is set).
 - [x] S7 MCP: `/mcp` streamable HTTP with bearer auth, tools from decisions.md table, each calling the
       same handler as REST. Gate: from Claude Code, "rotate frame sim to 1" changes the sim screenshot.
 - [x] S8 Weekly `release.yml`: rebuild the Buildroot image on the pinned LTS branch + pinned kernel, QEMU boot test, publish
@@ -251,7 +263,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] S10 `release.yml` publishes `thinframe-sd.img.zst` + `.sha256` as a GitHub release asset on tag,
       so flash.sh never needs a local build. (v2026.10.20: thinframe-sd.img.zst 64 MB + .sha256.)
 - [x] S6 Artifacts: `scripts/make-artifacts.sh` (run by release.yml after cross-building tfctl) stages
-      `tfctl-armv7`, `overlay.tar.gz`, `versions.json` into `server/artifacts/`, which the Dockerfile copies to
+      `tfctl-armv7`, `versions.json` (no `overlay.tar.gz` since #72) into `server/artifacts/`, which the Dockerfile copies to
       `/artifacts`; server exposes them at `/api/artifacts/` with sha256 and sets `software_version` in config.
       (tests/e2e-native.sh checks the sidecar hash and the config field; Go test `TestConfigCarriesArtifactVersions`
       checks config versions/sums and token-gated file + sidecar serving. Server side is done; the Dockerfile has no
@@ -262,7 +274,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] S5b Photo adapter: `PHOTOS_DIR` scan, resize to 1280x800 and 800x1280, EXIF strip, cache,
       `/api/data/photo/next`. Interface `PhotoSource` so Immich/Google/iCloud can be added later.
 - [x] S5c `hello` reply carries `time_unix` and `tz`; weather and calendar adapters (open-meteo, public .ics via
-      `CALENDAR_ICS_URL`, no recurrence expansion) feed widgets over SSE (on connect + every 10 min) and
+      `CALENDAR_ICS_URL`; repeating events expand since rrule.go) feed widgets over SSE (on connect + every 10 min) and
       `GET /api/data/weather|calendar`; the page never calls third parties directly. Covered by
       `internal/api/data_test.go` with httptest fakes (log 2026-10-20).
 - Gate: two frames with different ids show different pages from one container.
@@ -272,8 +284,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       frame `sim`, screenshots to `sim/out/frame.png`. Gate passed 2026-10-18: rotation 0 via REST
       gave a 375x600 portrait shot, rotation 3 gave 800x500 landscape; a layout PUT changed the shot.
 - [x] M2 `sim/qemu/`: the REAL Buildroot image under `qemu-system-arm -M virt` (same rootfs.ext4,
-      same tfctl, same cog on DRM): a `pf1007l_qemu_defconfig` that reuses the main defconfig with
-      the virt kernel fragment (virtio-gpu for /dev/dri/card0, virtio-input touchscreen, virtio-net,
+      same tfctl, same cog on DRM): `QEMU=1` builds the main defconfig plus `qemu.fragment` (there is no
+      separate defconfig) with the virt kernel fragment (virtio-gpu for /dev/dri/card0, virtio-input touchscreen, virtio-net,
       virtio-blk) and mesa swrast for GLES; `sim/qemu/run.sh` boots the A/B SD image with user-mode
       net (`hostfwd` 22 and the frameserver reachable), screenshots via the QEMU monitor `screendump`
       every N s into `sim/out/frame.png`, touch via QEMU `input-send-event`.
@@ -299,7 +311,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (Page side done: server page.css `touch-action:none`, page.js pointer events; the local Wi-Fi and
       PAIR pages use `touch-action:manipulation` (the network list scrolls). libinput: on the frame.)
 - [x] No swap/zram; WebProcess memory cap env; `ps` audit shows only the allowed process list.
-      (Kernel without CONFIG_SWAP, no zram. The cap is cog `--web-mem-limit=256` (MiB, kiosk.rs). The
+      (Kernel without CONFIG_SWAP, no zram. The cap is cog `--web-mem-limit=512` (MiB, kiosk.rs). The
       journey test's audit allows only the README list (+ hostapd, the QEMU image's simulated AP) and
       `free -m` under 300 MB with the page up [V in QEMU, docs/log.md]. On the panel: section 5.)
 - [x] `tfctl bench`: replay a tap, record touch→first-paint; beacon from page; shown in /admin.
@@ -338,7 +350,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
 - [x] Health check in `tfctl kiosk`: detect a hung WebProcess and restart cog.
       (Done server-side: the page pings `/alive` from a JS timer; a page that pinged during this agent
       connection and is quiet for PAGE_STALE (3 min) gets one `restart-kiosk`. server/internal/api/
-      watchdog.go; tests/e2e.sh freezes the sim WebProcess with SIGSTOP. On the panel: not seen.)
+      watchdog.go; tests/e2e.sh freezes the sim WebProcess with SIGSTOP. On the frame: `restart-kiosk`
+      itself works (4.1 s to a loaded page, log 2026-10-28); a watchdog-triggered one is not logged.)
 - [x] `tfctl status` (tfctl/src/status.rs): read /proc and /sys, no shelling out except iwctl.
       (IPs from /proc/net/fib_trie, USB-C address last; QEMU check `tfctl status` shows 10.0.2.15.)
 - [x] Size audit: `du -sh` of the root, `ps` list at idle. Remove anything not in the README budget.

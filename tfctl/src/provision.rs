@@ -2,13 +2,14 @@
 //! the PFBOOT partition, written by `scripts/flash.sh` (format: image/boot/provision.txt.example).
 //!
 //! Writes, in order: the iwd profile (`wifi.rs`, no service restart: iwd starts after us),
-//! `/etc/thinframe.conf` overrides, `authorized_keys` for the `frame` user and for dropbear,
+//! `/etc/thinframe.conf` overrides, dropbear's `authorized_keys`,
 //! the hostname, then deletes `provision.txt`. The FAT partition is mounted rw at /boot only
 //! while this runs (the init script mounts it before and unmounts after). Absent file = exit 0.
 //!
 //! Dropbear's authorized_keys: the image bind-mounts `/data/ssh` over `/etc/dropbear`, so the
-//! key is written to `/data/ssh/authorized_keys` (parameter `dropbear_keys`); the frame user's
-//! `~/.ssh/authorized_keys` is written too, for whichever path the image ends up reading.
+//! key is written to `/data/ssh/authorized_keys` (parameter `dropbear_keys`). `~frame/.ssh` is a
+//! link to /etc/dropbear on the image (post-build.sh), so that is the one file. The hostname is
+//! not stored: `tfctl boot` sets it from FRAME_ID on every boot (the root is read-only).
 use crate::config;
 use crate::wifi;
 use std::fs;
@@ -80,13 +81,8 @@ pub struct Targets {
     pub boot_dir: PathBuf,
     pub iwd_dir: PathBuf,
     pub conf: PathBuf,
-    /// `~frame/.ssh/authorized_keys`
-    pub user_keys: PathBuf,
     /// `/data/ssh/authorized_keys`, bind-mounted over /etc/dropbear by the image.
     pub dropbear_keys: PathBuf,
-    /// Where to keep the name; None on the frame, whose root is read-only: `tfctl boot` sets the
-    /// hostname from FRAME_ID in thinframe.conf on every boot instead.
-    pub hostname_file: Option<PathBuf>,
     /// Run `hostname NAME` too (only on the frame).
     pub set_hostname: bool,
 }
@@ -97,9 +93,7 @@ impl Targets {
             boot_dir: boot_dir.into(),
             iwd_dir: wifi::IWD_DIR.into(),
             conf: config::path().into(),
-            user_keys: "/home/frame/.ssh/authorized_keys".into(),
             dropbear_keys: "/data/ssh/authorized_keys".into(),
-            hostname_file: None,
             set_hostname: true,
         }
     }
@@ -110,9 +104,7 @@ impl Targets {
             boot_dir: base.join("boot"),
             iwd_dir: base.join("iwd"),
             conf: base.join("thinframe.conf"),
-            user_keys: base.join("home/.ssh/authorized_keys"),
             dropbear_keys: base.join("data/ssh/authorized_keys"),
-            hostname_file: Some(base.join("hostname")),
             set_hostname: false,
         }
     }
@@ -207,18 +199,11 @@ fn apply_text(t: &Targets, text: &str) -> io::Result<bool> {
         );
     }
     if let Some(key) = &p.ssh_pubkey {
-        for path in [&t.user_keys, &t.dropbear_keys] {
-            if let Err(e) = add_authorized_key(path, key) {
-                eprintln!("tfctl: provision: {}: {e}", path.display());
-            }
+        if let Err(e) = add_authorized_key(&t.dropbear_keys, key) {
+            eprintln!("tfctl: provision: {}: {e}", t.dropbear_keys.display());
         }
     }
     if let Some(name) = &p.frame_id {
-        if let Some(f) = &t.hostname_file {
-            if let Err(e) = fs::write(f, format!("{name}\n")) {
-                eprintln!("tfctl: provision: {}: {e}", f.display());
-            }
-        }
         if t.set_hostname {
             let _ = Command::new("hostname").arg(name).status();
         }
@@ -309,32 +294,33 @@ mod tests {
         assert_eq!(c.token, "dev-token");
         assert_eq!(c.rotation, 1);
         assert_eq!(c.url, "http://nas.local:8080/frame/kitchen");
-        for keys in [&t.user_keys, &t.dropbear_keys] {
-            assert_eq!(
-                fs::read_to_string(keys).unwrap(),
-                "ssh-ed25519 AAAAC3Nza you@mac\n"
-            );
-            assert_eq!(
-                fs::metadata(keys).unwrap().permissions().mode() & 0o777,
-                0o644
-            );
-            assert_eq!(
-                fs::metadata(keys.parent().unwrap())
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o755
-            );
-        }
+        let keys = &t.dropbear_keys;
         assert_eq!(
-            fs::read_to_string(t.hostname_file.as_ref().unwrap()).unwrap(),
-            "kitchen\n"
+            fs::read_to_string(keys).unwrap(),
+            "ssh-ed25519 AAAAC3Nza you@mac\n"
+        );
+        assert_eq!(
+            fs::metadata(keys).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(
+            fs::metadata(keys.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
         );
         // Second run with the same file: same result, key not duplicated.
         fs::write(t.boot_dir.join(FILE), EXAMPLE).unwrap();
         assert!(apply(&t).unwrap());
-        assert_eq!(fs::read_to_string(&t.user_keys).unwrap().lines().count(), 1);
+        assert_eq!(
+            fs::read_to_string(&t.dropbear_keys)
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
         assert!(!apply(&t).unwrap());
         fs::remove_dir_all(&base).unwrap();
     }
@@ -352,8 +338,7 @@ mod tests {
         .unwrap();
         assert!(apply(&t).unwrap());
         assert!(!t.iwd_dir.exists(), "short psk rejected");
-        assert!(!t.user_keys.exists());
-        assert!(!t.hostname_file.as_ref().unwrap().exists());
+        assert!(!t.dropbear_keys.exists());
         let c = config::load(t.conf.to_str().unwrap()).unwrap();
         assert_eq!((c.token.as_str(), c.frame_id.as_str()), ("abc", "frame"));
         assert!(run(&["--bogus".into()]).is_err());

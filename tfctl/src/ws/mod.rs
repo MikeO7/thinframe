@@ -19,6 +19,8 @@ pub struct Client {
 
 impl Client {
     pub fn connect(url: &Url, token: &str, timeout: Duration) -> io::Result<Client> {
+        http::request_safe(&url.path)?;
+        http::request_safe(token)?;
         let mut stream = http::connect(url, timeout)?;
         let mut rng = seed();
         let mut nonce = [0u8; 16];

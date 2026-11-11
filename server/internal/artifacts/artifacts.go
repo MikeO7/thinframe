@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,18 +29,34 @@ type Dir struct {
 	Path string
 	mu   sync.Mutex
 	sums map[string]string
+	// versions.json as last parsed, and the file it came from (size, mtime).
+	ver    Versions
+	verKey string
 }
 
 // New returns a Dir (missing directory is fine: no artifacts).
 func New(path string) *Dir { return &Dir{Path: path, sums: map[string]string{}} }
 
-// Versions reads versions.json; zero value when absent.
+// Versions reads versions.json; zero value when absent. Every config reply asks, so the file
+// is parsed again only when its size or mtime changed.
 func (d *Dir) Versions() Versions {
-	var v Versions
-	b, err := os.ReadFile(filepath.Join(d.Path, "versions.json"))
-	if err == nil {
-		_ = json.Unmarshal(b, &v)
+	p := filepath.Join(d.Path, "versions.json")
+	st, err := os.Stat(p)
+	if err != nil {
+		return Versions{}
 	}
+	key := st.ModTime().String() + "|" + strconv.FormatInt(st.Size(), 10)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if key != d.verKey {
+		var v Versions
+		if b, err := os.ReadFile(p); err == nil {
+			_ = json.Unmarshal(b, &v)
+		}
+		d.ver, d.verKey = v, key
+	}
+	v := d.ver
+	v.Files = maps.Clone(d.ver.Files) // callers own what they get
 	return v
 }
 

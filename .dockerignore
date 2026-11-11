@@ -1,0 +1,15 @@
+# Root context: only sim/Dockerfile builds from here (COPY tfctl/, sim/go.mod, sim/cmd).
+.git
+.claude
+tfctl/target
+tfctl/tools/fontgen/target
+image/cache
+image/work
+image/out
+image/secrets
+image/vendor
+sim/out
+sim/qemu/work
+server/data
+server/artifacts
+docs

@@ -780,7 +780,7 @@ main{padding:0 4vw 4vh;height:78vh;overflow-y:auto}\
 b{display:block;font-weight:400;color:#8f99ad;font-size:2.2vh;letter-spacing:.18em;text-transform:uppercase;margin-bottom:.8vh}\
 .v{font-size:4.4vh;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.25}\
 .sub{margin-top:1vh;font-size:2.8vh;color:#9aa4b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\
-.small{font-size:3vh}.dim{color:#8f99ad}.ok{color:#5fe3a1}.bad{color:#ff7a6e}\
+.dim{color:#8f99ad}.ok{color:#5fe3a1}.bad{color:#ff7a6e}\
 .ic{flex:none;display:flex;align-items:center;justify-content:center;width:10vh;height:10vh;border-radius:2.8vh;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}\
 .ic svg{width:5vh;height:5vh;stroke-width:1.8}\
 .ic.wifi{background:linear-gradient(140deg,#38bdf8,#4f6bff)}.ic.server{background:linear-gradient(140deg,#a78bfa,#6d4aff)}\
@@ -789,7 +789,6 @@ b{display:block;font-weight:400;color:#8f99ad;font-size:2.2vh;letter-spacing:.18
 .pill{display:inline-flex;align-items:center;gap:.9vh;padding:.5vh 1.6vh;border-radius:99px;font-size:2.5vh;background:rgba(255,255,255,.08);color:#c6cdda;vertical-align:.3vh}\
 .pill.ok{background:rgba(95,227,161,.14);color:#7ef0b5}.pill.bad{background:rgba(255,122,110,.15);color:#ff9b91}\
 .pill.ok::before,.pill.bad::before{content:'';width:1.1vh;height:1.1vh;border-radius:50%;background:currentColor}\
-.chips{display:flex;flex-wrap:wrap;gap:1vh}.chips span{padding:.7vh 1.6vh;border-radius:99px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);font-size:2.5vh;color:#c6cdda;white-space:nowrap}\
 button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:1.1vh;font:3.2vh P,'DejaVu Sans',sans-serif;color:#fff;background:linear-gradient(135deg,#7c5cff,#4f8cff);border:0;border-radius:99px;padding:2vh 3vw;text-decoration:none;white-space:nowrap;box-shadow:0 .8vh 2.4vh rgba(92,108,255,.3),inset 0 1px 0 rgba(255,255,255,.25)}\
 button svg,.btn svg{width:3.2vh;height:3.2vh;stroke-width:2.1}\
 .btn2{background:rgba(255,255,255,.08);color:#eef1f7;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}\
@@ -820,8 +819,6 @@ ul.plain li::before{content:'';width:.9vh;height:.9vh;border-radius:50%;backgrou
 #kb button.k2{background:rgba(255,255,255,.035);min-width:10.5vw;font:2.8vh P,sans-serif}\
 #kb button.on{background:linear-gradient(135deg,#7c5cff,#4f8cff);color:#fff}#kb button.sp{min-width:44vw;font:2.8vh P,sans-serif}";
 
-/// A page: title, a back link (empty: none), the body, an optional self-refresh in seconds
-/// (marked `auto` so it does not count as use).
 /// Reset network and server: forget every saved Wi-Fi network (`forget` per SSID found in
 /// `iwd_dir`) and blank SERVER_URL, FRAME_URL and the pairing token in `conf`. The rest of the
 /// config (rotation, splash, touch) stays.
@@ -837,6 +834,8 @@ fn reset(conf: &str, iwd_dir: &Path, forget: impl Fn(&str)) -> io::Result<()> {
     Ok(())
 }
 
+/// A page: title, a back link (empty: none), the body, an optional self-refresh in seconds
+/// (marked `auto` so it does not count as use).
 fn page(title: &str, back: &str, body: &str, refresh: Option<u32>) -> String {
     let meta = refresh
         .map(|r| format!("<meta http-equiv=\"refresh\" content=\"{r};url=?auto=1\">"))

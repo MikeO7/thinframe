@@ -145,11 +145,9 @@ func (s *Server) cameraAllowed(ctx context.Context, id string) bool {
 		return true
 	}
 	all, _ := s.opts.Protect.Cameras(ctx)
-	for _, f := range s.Store.List() {
-		for _, w := range f.Layout.Widgets {
-			if w.Type == "cameras" && slices.ContainsFunc(camerasFor(w, all), func(c protect.Camera) bool { return c.ID == id }) {
-				return true
-			}
+	for _, w := range s.Store.WidgetsOfType("cameras") {
+		if slices.ContainsFunc(camerasFor(w, all), func(c protect.Camera) bool { return c.ID == id }) {
+			return true
 		}
 	}
 	return false

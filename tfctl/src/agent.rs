@@ -126,10 +126,12 @@ pub struct Agent {
     pub(crate) exit: bool,
     /// Versions an automatic update already failed on; retried only after a new config push.
     pub(crate) tried: Vec<String>,
-    /// Open pairing request (pair.rs): the nonce the PAIR button sends back.
+    /// Open pairing request (pair.rs): the nonce the pairing poll carries.
     pub(crate) pair_nonce: Option<String>,
     /// The pairing page is on screen.
     pub(crate) pair_page_up: bool,
+    /// Pairing steps that failed in a row (pair.rs looks for the server again after a few).
+    pub(crate) pair_fails: u32,
     /// Debug mode: one report per process, on the first server contact.
     pub(crate) reported: bool,
     /// Wi-Fi first (wifisetup.rs): the radio, the setup page's state once it ran, since when the
@@ -178,6 +180,7 @@ impl Agent {
             tried: Vec::new(),
             pair_nonce: None,
             pair_page_up: false,
+            pair_fails: 0,
             reported: false,
             radio: Arc::new(crate::wifi::Iwctl),
             wifi_ui: None,
@@ -673,12 +676,12 @@ impl Agent {
     }
 }
 
-/// Whole seconds since boot from the text of /proc/uptime ("123.45 678.90").
 /// Whether a Wi-Fi link down for `down_for` ends the server session.
 fn link_lost_for(down_for: Duration) -> bool {
     down_for >= LINK_LOST
 }
 
+/// Whole seconds since boot from the text of /proc/uptime ("123.45 678.90").
 pub fn uptime_s(text: &str) -> Option<u64> {
     let first = text.split_whitespace().next()?;
     first.split('.').next()?.parse().ok()
