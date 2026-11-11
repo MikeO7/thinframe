@@ -100,9 +100,9 @@ jobs:
     permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: image, path: image/out }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: tfctl-built, path: tfctl-built }
       - name: stage frame software (tfctl-armv7, system bundle, versions.json)
         run: |
@@ -135,9 +135,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions: { contents: write }
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: image, path: out }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: tfctl, path: out }
       - env: { GH_TOKEN: "${{ github.token }}", V: "${{ needs.image.outputs.version }}" }
         run: |
