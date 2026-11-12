@@ -43,14 +43,14 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           docker system prune -af >/dev/null; df -h /
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: image/cache/dl
           key: br-dl-${{ hashFiles('image/build.sh', 'image/buildroot/configs/*') }}
           restore-keys: br-dl-
       # A cold build (WebKit on 4 cores) does not fit in one 6 h job. ccache is saved even when the
       # build step times out, so the next run (re-dispatch, or next week) resumes from it.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         with:
           path: image/cache/ccache
           key: br-ccache-${{ github.run_id }}
@@ -67,7 +67,7 @@ jobs:
         env: { THINFRAME_CCACHE: "${{ github.workspace }}/image/cache/ccache" }
         run: RELEASE=1 THINFRAME_VERSION="${{ needs.tag.outputs.version }}" image/build.sh all
       - if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: image/cache/ccache
           key: br-ccache-${{ github.run_id }}
