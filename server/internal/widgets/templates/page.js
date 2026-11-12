@@ -813,7 +813,12 @@
     if (tapped(e.target)) e.preventDefault(); // no pointer events (an old engine): the click
   }, true);
   // The gear: its form posts to tfctl's Settings (127.0.0.1:8092, tfctl/src/settings.rs).
-  onTap(t => { const f = t.closest('form.tab-set'); if (!f) return false; f.submit(); return true; });
+  // It lights up at once: the frame takes a moment to swap pages, and a dead-looking button gets a second tap.
+  onTap(t => {
+    const f = t.closest('form.tab-set'); if (!f) return false;
+    f.classList.add('go'); setTimeout(() => f.classList.remove('go'), 2000);
+    f.submit(); return true;
+  });
   // Car and home controls are display-only for now: say so instead of doing nothing.
   onTap(t => { if (!t.closest('[data-act]')) return false; window.toast('Controls are not connected yet'); return true; });
   // Emits carry the frame's emit key (server/internal/api/apps.go EmitKey): only pages the

@@ -26,6 +26,8 @@ pub const HOLD: Duration = Duration::from_secs(5);
 /// Untouched this long, Settings closes and the frame goes back to its page.
 pub const IDLE: Duration = Duration::from_secs(180);
 const RESCAN: Duration = Duration::from_secs(20);
+/// How long the home page's Wi-Fi name and server answer stay good before they are asked again.
+const RECHECK: Duration = Duration::from_secs(10);
 const OPEN_EVERY: Duration = Duration::from_secs(10);
 /// An address typed without a port: the server's default (discover::PORT), the old default,
 /// then plain HTTP.
@@ -76,6 +78,13 @@ pub struct State {
     unanswered: Option<String>,
     /// When a page last opened Settings with POST /settings/open.
     opened: Option<Instant>,
+    /// The network the frame is on, as the last background check saw it (None: not asked yet).
+    /// Asking takes an iwctl run and a request to the server, so no page waits for it.
+    wifi: Option<Option<String>>,
+    /// The server that check asked, and whether it answered.
+    server_ok: Option<(String, bool)>,
+    checked: Option<Instant>,
+    checking: bool,
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -92,6 +101,7 @@ pub fn open(st: &Shared) {
     s.note = None;
     s.found = None;
     s.unanswered = None;
+    s.checked = None;
 }
 
 pub fn close(st: &Shared) {
@@ -237,6 +247,7 @@ impl Ctx {
             s.opened = Some(Instant::now());
             drop(s);
             open(&self.st);
+            self.check_if_stale(); // under way before cog asks for the page
             let _ = self.kiosk.send(KioskCmd::SettingsShown("/settings".into()));
             return see_other("/settings");
         }
@@ -254,8 +265,14 @@ impl Ctx {
             eprintln!("tfctl: settings: refused {} from {}", req.path, req.origin);
             return not_found();
         }
-        if field(&req.query, "auto").is_none() {
-            lock(&self.st).last_used = Some(Instant::now());
+        {
+            let mut s = lock(&self.st);
+            if field(&req.query, "auto").is_none() {
+                s.last_used = Some(Instant::now());
+            }
+            if req.method == "POST" {
+                s.checked = None; // a form may have changed Wi-Fi or the server
+            }
         }
         match (req.method.as_str(), req.path.as_str()) {
             ("GET", "/settings") => html(self.home()),
@@ -369,6 +386,36 @@ impl Ctx {
         }
     }
 
+    /// Ask iwd for the network and the server for an answer, both at once and in the
+    /// background; the pages show what the last check saw.
+    fn check_if_stale(&self) {
+        let mut s = lock(&self.st);
+        if s.checking || s.checked.is_some_and(|t| t.elapsed() < RECHECK) {
+            return;
+        }
+        s.checking = true;
+        drop(s);
+        let (st, url) = (self.st.clone(), self.cfg().server_url);
+        let spawned = thread::Builder::new()
+            .name("settings-check".into())
+            .spawn(move || {
+                let server = url.clone();
+                let asked = thread::spawn(move || {
+                    !server.is_empty() && probe(&server, Duration::from_millis(1500))
+                });
+                let ssid = wifi::connected_ssid();
+                lock(&st).wifi = Some(ssid);
+                let ok = asked.join().unwrap_or(false);
+                let mut s = lock(&st);
+                s.server_ok = Some((url, ok));
+                s.checked = Some(Instant::now());
+                s.checking = false;
+            });
+        if spawned.is_err() {
+            lock(&self.st).checking = false;
+        }
+    }
+
     fn scan_if_stale(&self) {
         let mut s = lock(&self.st);
         if s.scanning || s.joining.is_some() || s.scanned.is_some_and(|t| t.elapsed() < RESCAN) {
@@ -418,6 +465,7 @@ impl Ctx {
                 let r = radio.join(&ssid, (!open).then_some(psk.as_str()));
                 let mut s = lock(&st);
                 s.joining = None;
+                s.checked = None;
                 s.note = Some(match r {
                     Ok(()) => {
                         eprintln!("tfctl: settings: joined Wi-Fi {ssid}");
@@ -527,13 +575,19 @@ impl Ctx {
 
     fn home(&self) -> String {
         let cfg = self.cfg();
-        let st = crate::status::collect();
+        self.check_if_stale();
+        let (wifi, server_ok, checking) = {
+            let s = lock(&self.st);
+            (s.wifi.clone(), s.server_ok.clone(), s.checking)
+        };
+        let st = crate::status::local();
         let ips: Vec<&String> = st
             .ips
             .iter()
             .filter(|ip| *ip != crate::statuspage::USB_IP)
             .collect();
-        let (wifi_name, wifi_state) = match (wifi::connected_ssid(), ips.first()) {
+        let asked = wifi.is_some();
+        let (wifi_name, wifi_state) = match (wifi.flatten(), ips.first()) {
             (Some(n), Some(ip)) => (
                 esc(&n),
                 format!("{} &middot; {ip}", pill(true, "Connected")),
@@ -543,16 +597,17 @@ impl Ctx {
                 "Online".into(),
                 format!("{} &middot; {ip}", pill(true, "Connected")),
             ),
+            (None, None) if !asked => ("Wi-Fi".into(), pill_dim("Checking")),
             (None, None) => ("No network".into(), pill(false, "Not connected")),
         };
         let (server_name, server_state) = if cfg.server_url.is_empty() {
             ("Not set".to_string(), pill(false, "Not set"))
         } else {
             let name = esc(cfg.server_url.trim_start_matches("http://"));
-            if probe(&cfg.server_url, Duration::from_millis(1500)) {
-                (name, pill(true, "Answering"))
-            } else {
-                (name, pill(false, "Not answering"))
+            match server_ok.filter(|(u, _)| *u == cfg.server_url) {
+                Some((_, true)) => (name, pill(true, "Answering")),
+                Some((_, false)) => (name, pill(false, "Not answering")),
+                None => (name, pill_dim("Checking")),
             }
         };
         let up = st.uptime_s.map_or("?".into(), |s| {
@@ -590,7 +645,8 @@ impl Ctx {
             ic_reset = ICON_RESET,
             ic_hand = ICON_HAND,
         );
-        page("Settings", "", &body, Some(15))
+        // While the check runs the page comes back in a second for its answer.
+        page("Settings", "", &body, Some(if checking { 1 } else { 15 }))
     }
 
     fn take_note(&self) -> String {
@@ -617,7 +673,11 @@ impl Ctx {
             );
             return page("Wi-Fi", "/settings", &body, Some(2));
         }
-        let current = wifi::connected_ssid();
+        self.check_if_stale();
+        let (current, checking) = {
+            let s = lock(&self.st);
+            (s.wifi.clone().flatten(), s.checking)
+        };
         let saved = wifi::configured_ssids(Path::new(wifi::IWD_DIR));
         let mut body = self.take_note();
         body.push_str("<div class=\"card col\"><b>Networks in range</b><ul>");
@@ -674,7 +734,13 @@ impl Ctx {
             }
             body.push_str("</ul></div>");
         }
-        let refresh = if scanning || nets.is_empty() { 3 } else { 20 };
+        let refresh = if checking {
+            1
+        } else if scanning || nets.is_empty() {
+            3
+        } else {
+            20
+        };
         page("Wi-Fi", "/settings", &body, Some(refresh))
     }
 
@@ -761,7 +827,7 @@ impl Ctx {
     }
 }
 
-const CSS: &str = "@font-face{font-family:P;src:url(/settings/poppins.ttf)}\
+const CSS: &str = "@font-face{font-family:P;src:url(/settings/poppins.ttf);font-display:swap}\
 *{box-sizing:border-box}\
 html,body{margin:0;height:100%;overflow:hidden;color:#eef1f7;font:3.6vh P,'DejaVu Sans',sans-serif;user-select:none;-webkit-user-select:none;touch-action:manipulation}\
 body{background:radial-gradient(70vw 70vh at 92% -18%,rgba(124,92,255,.30),transparent 62%),radial-gradient(60vw 60vh at -8% 112%,rgba(56,140,255,.22),transparent 60%),#070a14}\
@@ -947,6 +1013,62 @@ mod tests {
         s.read_to_string(&mut out).unwrap();
         let code = out[9..12].parse().unwrap();
         (code, out)
+    }
+
+    /// The home page used to wait for iwctl (twice) and for the server's answer (up to 1.5 s)
+    /// before it sent a byte: the gear felt dead. It answers at once and fills in after.
+    #[test]
+    fn the_home_page_does_not_wait_for_the_server() {
+        // A server that takes the connection and never answers.
+        let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+        let st: Shared = Arc::default();
+        let (tx, _rx) = mpsc::channel();
+        let dir = std::env::temp_dir().join(format!("tf-settings-fast-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conf = dir.join("thinframe.conf");
+        let url = format!("http://{}", silent.local_addr().unwrap());
+        std::fs::write(&conf, format!("FRAME_ID=\"den\"\nSERVER_URL=\"{url}\"\n")).unwrap();
+        let radio: Arc<dyn Radio> = Arc::new(Fake(AtomicBool::new(true)));
+        let port = start(
+            st.clone(),
+            radio,
+            tx,
+            conf.to_string_lossy().into(),
+            "127.0.0.1:0",
+        )
+        .unwrap();
+        let me = format!("127.0.0.1:{port}");
+        open(&st);
+        let t = Instant::now();
+        let (code, body) = get(port, "/settings", &me);
+        assert_eq!(code, 200);
+        assert!(
+            t.elapsed() < Duration::from_millis(700),
+            "{:?}",
+            t.elapsed()
+        );
+        assert!(
+            body.contains("Checking") && body.contains("content=\"1;"),
+            "{body}"
+        );
+        // The answer arrives on its own and the page settles to its slow refresh.
+        let end = Instant::now() + Duration::from_secs(5);
+        while lock(&st).checking && Instant::now() < end {
+            thread::sleep(Duration::from_millis(50));
+        }
+        let (_, body) = get(port, "/settings?auto=1", &me);
+        assert!(
+            body.contains("Not answering") && body.contains("content=\"15;"),
+            "{body}"
+        );
+        // The font may be cached; pages may not.
+        let (_, font) = get(port, "/settings/poppins.ttf", &me);
+        assert!(
+            !font.contains("max-age"),
+            "a missing font is not cached: {font}"
+        );
+        assert!(body.contains("Cache-Control: no-store"), "{body}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

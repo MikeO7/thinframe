@@ -320,7 +320,8 @@ pub fn iwctl(args: &[&str], limit: Duration) -> io::Result<(bool, String)> {
             let _ = child.wait();
             break None;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        // iwctl answers in tens of ms: a 100 ms step made every call take at least that.
+        std::thread::sleep(Duration::from_millis(10));
     };
     let mut text = String::new();
     for pipe in [
