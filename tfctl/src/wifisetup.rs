@@ -300,9 +300,16 @@ pub(crate) fn write_resp(s: &mut TcpStream, r: &Resp) -> io::Result<()> {
         400 => "Bad Request",
         _ => "Not Found",
     };
+    // Pages are never cached; the fonts never change under a running tfctl, and without this
+    // cog fetched and decoded them again for every page and every self-refresh.
+    let cache = if r.status == 200 && r.ctype.starts_with("font/") {
+        "max-age=86400, immutable"
+    } else {
+        "no-store"
+    };
     let mut head = format!(
         "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\
-         Cache-Control: no-store\r\nConnection: close\r\n",
+         Cache-Control: {cache}\r\nConnection: close\r\n",
         r.status,
         r.ctype,
         r.body.len()

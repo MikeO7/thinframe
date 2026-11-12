@@ -49,7 +49,7 @@ iframe{border:0;width:100%;height:100%;display:block}
 /* Settings (the frame's own page, served by tfctl on the frame): a round button, last in the rail. */
 .tab-set{margin:0;padding:0;flex:none;background:none}
 .tab-set button{all:unset;display:flex;align-items:center;justify-content:center;width:5.6rem;height:5.6rem;border-radius:50%;color:inherit;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
-.tab-set button:active{background:rgba(255,255,255,.14)}
+.tab-set button:active,.tab-set.go button{background:rgba(255,255,255,.22)}
 .tab-set svg{width:2.6rem;height:2.6rem}
 .nav-left .tab-set{flex:0 0 auto;min-height:0;padding:.4rem 0 .6rem;justify-content:center}
 .nav-left .seg{flex:none;flex-direction:column;margin:0;border-radius:2rem;width:100%;font-size:1.3rem;text-align:center}

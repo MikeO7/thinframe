@@ -1183,3 +1183,18 @@ The owner left the touch gate, `compose.yml` networking, the car names in `apps/
 weekly release to judgement. All four stay as they are; the reasons are in docs/decisions.md
 "Left as they are after the audit". No code changed. The touch gate is still open: it needs a
 stylus or `evtest` at the frame.
+
+## 2026-11-11 Settings opens without waiting
+- The gear felt slow because the Settings home page did all its asking before it sent a byte:
+  `iwctl station wlan0 show` twice (once for a signal level the page never shows), each at
+  least 100 ms because `wifi::iwctl` polled its child in 100 ms steps, then `GET /healthz` on
+  the server with a 1.5 s limit. The Poppins font was sent `no-store`, so cog fetched and
+  decoded it again for every page and every self-refresh, and text waited for it [V, read in
+  tfctl/src/settings.rs, wifi.rs, wifisetup.rs].
+- Now: the page is built from files only (`status::local`); the network name and the server's
+  answer come from one background check (both at once, started by the gear's POST) and the
+  page shows "Checking" and comes back after 1 s for them. `iwctl` is polled every 10 ms.
+  Fonts are cached for a day and text shows before the font arrives. The gear lights up on
+  the tap. Test `the_home_page_does_not_wait_for_the_server` (a server that never answers:
+  the page is there in under 700 ms, was 1.5 s) [V on the Mac].
+- Not measured on the frame: ssh to it was refused from the Mac this session [U].

@@ -266,7 +266,7 @@ impl Agent {
 
     /// Shows the pairing page; `nonce` only makes each request's page URL new.
     fn show_pair_page(&mut self, ask: Ask, secret: &str, nonce: &str) {
-        let st = crate::status::collect();
+        let st = crate::status::local();
         let ip = st
             .ips
             .iter()
