@@ -1197,3 +1197,20 @@ parsed and ran all of it again on the A7. Time to first byte 18 ms: the network 
   event thumbnails (the Integration API has no events endpoint: 404 [V]). [U] whether the
   integration events stream carries `smartDetectTypes`: none was seen in 6 quiet minutes.
 - The ring view is drawn for the Mali-400 like the rest (no animation, no blur, no blurred shadow).
+
+## Left as they are after the audit (2026-11-11)
+The owner left these four to judgement ("do what is best"); each stays, for the reason given.
+- **The touch gate stays 10 px.** The one measurement (21 px, 2026-10-26) was a finger on a
+  corner mark, which is not precise to 10 px itself, so it neither passes nor fails the gate.
+  Re-measure at the frame with a stylus or `evtest` coordinates; the gate is not loosened to fit
+  a number (CLAUDE.md). [U] until then.
+- **`compose.yml` stays on a bridge network.** It then works on any Docker, Docker Desktop on a
+  Mac included, and the sim profile reaches the server by name. The price: frames cannot find
+  it by broadcast, so the server URL is typed when flashing. Production uses host networking
+  (`scripts/server-deploy.sh`), where discovery works [V 2026-10-22].
+- **`apps/cars/` keeps the owner's car names.** `apps/` is the backup of what is installed on
+  the owner's server, not shipped code; reading the names from the `cars` source would change
+  a working app that cannot be tested here. It is the one exception to "names stay out of the
+  repo" (server/README.md).
+- **The weekly release stays** (TASK S8). Local builds are for iterating on the owner's frame;
+  the release is what `flash.sh` gives a new card and what keeps the published image patched.

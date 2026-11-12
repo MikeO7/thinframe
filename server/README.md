@@ -143,7 +143,8 @@ services widget, the host's time zone). `~/thinframe/env` is made once and then 
 local server for testing on another machine with `DISCOVERY=off`, so frames only find production.
 
 What is yours stays out of this repo: names, rooms, containers and pictures go in the layout you PUT
-and in `DATA_DIR`, never in Git. `examples/obsidian/` is a demo with made-up names:
+and in `DATA_DIR`, never in Git (one exception: `apps/` is the backup of the owner's installed
+apps, names included). `examples/obsidian/` is a demo with made-up names:
 `FRAME_TOKEN=... examples/obsidian/load.sh http://localhost:41007 demo`. Sources are server-wide,
 so load the demo on a server whose source keys you are not using.
 
