@@ -98,7 +98,8 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       upstream's vertical flip [D] did not apply.)
 - Gate: all four corners within 10 px.
   (Log 2026-10-26: every target within 21 px with the swap matrix `0 1 0 1 0 0`. That is outside
-  this gate: the owner accepts 21 px or re-measures.)
+  this gate, but a finger on a mark is not a 10 px measurement: re-measure with a stylus or
+  `evtest`, docs/decisions.md "Left as they are after the audit".)
 
 ## 7. Wi-Fi
 - [x] `tfctl wifi "SSID" "psk"` (tfctl/src/wifi.rs) writes `/var/lib/iwd/<SSID>.psk` and iwd connects.

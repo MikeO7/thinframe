@@ -1177,3 +1177,9 @@ run on the frame: every frame-side line is [V] in tests or code and [U] on hardw
   (not the same behaviour); the splash thread join (bounded by one scene build, 41 ms on the Mac).
 - Checks: `cargo test` 261 passed, clippy clean for host and armv7; `go test -race` ok;
   e2e-native ok [V].
+
+## 2026-11-11 Audit: four open questions closed
+The owner left the touch gate, `compose.yml` networking, the car names in `apps/cars` and the
+weekly release to judgement. All four stay as they are; the reasons are in docs/decisions.md
+"Left as they are after the audit". No code changed. The touch gate is still open: it needs a
+stylus or `evtest` at the frame.
