@@ -8,7 +8,7 @@ the measurement on this frame in `docs/log.md`; the rest of such a row is still 
 |---|---|---|
 | SoC | Allwinner A33 (sun8i), FEL id 00001667 | D |
 | Boot | Boot ROM reads SPL from 8 KiB of SD before eMMC (card wins over an installed eMMC: V 2026-10-27). U-Boot v2025.10 + Wes Bos patch + "build L" patch. Console UART0 unused; `CONFIG_SUNXI_CONSOLE_NO_PINMUX=y` because PL2 is Wi-Fi enable | D |
-| Kernel | Mainline 7.2.10 built by Buildroot with the ormarch panel patch and DTS (`image/build.sh` KVER); on the frame: 7.2.10, panel bound on DSI-1. Upstream ran the Arch package `linux-armv7 7.2.10-1` [D] | V 2026-10-29 |
+| Kernel | Mainline 7.3.4 built by Buildroot with the ormarch panel patch (refreshed, `image/linux-patches/v7.3.4`) and DTS (`image/build.sh` KVER); boots in QEMU [V 2026-11-14], not yet on the frame [U]. On the frame: 7.2.10, panel bound on DSI-1 [V 2026-10-29]. Upstream ran the Arch package `linux-armv7 7.2.10-1` [D] | U 2026-11-14 |
 | DTB | `sun8i-a33-pf1007l-full.dtb` (panel + touch + Wi-Fi + BT UART). `-min` and `-pmic` are debug steps | D |
 | Panel | DSI 4-lane RGB888 800x1280 @ 59.7 Hz, `panel-jadard-jd9365da-h3` with added pf1007l entry | D |
 | Rotation | cog `rotation=3` is upright landscape (`tfctl screenshot`: 1280x800 from card1, rotation 3). Upstream: Hyprland `transform 3`; Android used `ro.sf.rotation 90` [D] | V 2026-10-26 |
