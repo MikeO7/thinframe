@@ -1198,3 +1198,30 @@ stylus or `evtest` at the frame.
   the tap. Test `the_home_page_does_not_wait_for_the_server` (a server that never answers:
   the page is there in under 700 ms, was 1.5 s) [V on the Mac].
 - Not measured on the frame: ssh to it was refused from the Mac this session [U].
+
+## 2026-11-14 Everything to the latest release; TASK K1 up to the frame
+- Pins checked against upstream today [V]: kernel.org stable 7.3.4 (7.2 EOL at 7.2.15,
+  2026-11-01); buildroot.org LTS 2025.02.19 (we had .18); radxa-pkg/aic8800 HEAD 5562c25 (we had
+  e9e43ed); ormarch HEAD is still our 4207b5c; Go 1.27.4; base images float within their lines.
+- PR #186: golang.org/x/{image,oauth2,sync,sys} to latest, `go test ./...` passes; CI actions
+  cache v6, upload-artifact v7, download-artifact v8, setup-buildx v4. CI green [V].
+- PR #187 (K1): `KVER` 7.3.4, Buildroot 2025.02.19 (sha256 `e5e58bff…d69c`), aic8800 5562c25.
+  - ormarch's v7.2.10 panel patch fails on 7.3.4 with no fuzz (hunk 1: 7.3 added the
+    dcltek_dt300250 panel at the insertion point; macOS `patch` had applied it with fuzz
+    silently). Refreshed copy in `image/linux-patches/v7.3.4/`: the patched file is
+    byte-identical to the fuzzed result of the original [V, cmp].
+  - 7.3 needs host OpenSSL (`certs/extract-cert`, trusted keyring from
+    `CFG80211_REQUIRE_SIGNED_REGDB`): `BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y` [V, build log].
+  - 69 of 70 `linux.fragment` options are in the built `.config`. `MFD_SUN4I_GPADC=y` is not:
+    `depends on !TOUCHSCREEN_SUN4I`, which `sunxi_defconfig` sets, the same on 7.2.10 (Kconfig
+    identical), so not a regression; `SUN4I_GPADC` and `SUN8I_THERMAL` are on [V].
+  - Cold Buildroot build on the Mac (Docker, 8 CPU, 16 GB, 3 jobs): 139 min. rootfs.ext4
+    199229440 B (gate under 200 MB). `image/build.sh assemble`: 11 PASS. Card image sha256
+    `1d0a1494…143e`.
+  - `image/build.sh test` [V]: `qemu-test: all checks passed`, boot to login 20 s,
+    `PASS kernel 7.3.4`, read-only root, /data grew, registered with frameserver, kiosk under
+    init, Wi-Fi address from the SID.
+  - `release.yml` job `kernel-pin`: warning when `KVER` is behind kernel.org stable, failure once
+    its series is EOL (jq checked against today's releases.json: 7.3 false, 7.2 true, 6.9 gone).
+- Open for the owner (K1 gate): boot 7.3.4 on the frame; `uname -r` 7.3.4, panel bound on
+  DSI-1, touch, Wi-Fi joins with the aic8800 modules [U until then].
