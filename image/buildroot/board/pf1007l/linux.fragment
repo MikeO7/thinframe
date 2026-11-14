@@ -1,4 +1,4 @@
-# Layered over the in-tree sunxi_defconfig (v7.2.10). Option list from ormarch kernel/config-audit.md.
+# Layered over the in-tree sunxi_defconfig (v7.3.4; unchanged since v7.2.10). Option list from ormarch kernel/config-audit.md.
 # Display: DSI host, D-PHY, the patched JD9365DA panel, GPU, backlight. Built in: no module order.
 CONFIG_DRM_SUN4I=y
 CONFIG_DRM_SUN6I_DSI=y

@@ -22,9 +22,9 @@ set -euo pipefail
 # ---- pinned inputs (TASK 0/1, pinned 2026-10-20) ---------------------------
 ORMARCH_REPO="https://github.com/pangoleen/ormarch-picture-frame.git"
 ORMARCH_COMMIT="4207b5c2f6d6615bf6a18fb725cc7a77dd532065"   # 2026-10-12 tree that booted the frame
-BUILDROOT_VERSION="2025.02.18"   # current LTS (buildroot.org/download.html, 2026-10-20)
-BUILDROOT_SHA256="e38ad1df6ea0479fff6419a87a64535d02131674d463be154a763ef725b55321"
-KVER="7.2.10"
+BUILDROOT_VERSION="2025.02.19"   # current LTS (buildroot.org/download.html, 2026-11-14)
+BUILDROOT_SHA256="e5e58bff1da91f022f60cefdfe280140c08023cd0aeec1e5f6f9da0ea866d69c"
+KVER="7.3.4"                     # current stable (kernel.org, 2026-11-14), TASK K1
 
 # card layout (same as ormarch so the same U-Boot boot.scr works)
 SIG="50463037"                   # PARTUUID=50463037-01 .. -04
@@ -62,7 +62,7 @@ step_inputs() {
 	rm -rf "$in"; mkdir -p "$in/dts/allwinner" "$in/linux-patches"
 	cp "$om"/image/work/uboot/{u-boot-pf1007l-L.bin,u-boot-pf1007l-L.config,u-boot-qemu-opipc.bin,boot.cmd} "$in/"
 	cp "$om/kernel/dts/sun8i-a33-pf1007l.dts" "$om"/image/dts/sun8i-a33-pf1007l-{min,pmic,full}.dts "$in/dts/allwinner/"
-	cp "$om/kernel/patches/v$KVER/"*.patch "$in/linux-patches/"
+	cp "$HERE/linux-patches/v$KVER/"*.patch "$in/linux-patches/"
 	# The eMMC on in the DTBs the frame boots ("full", and "pmic" for tests): read-only to the
 	# card system (slot.rs never picks it), and the root disk of an eMMC install (tfctl emmc).
 	# "min" has no PMIC regulators for it and stays card-only.
@@ -131,6 +131,7 @@ step_check() {
 	grep -q "disk-signature = 0x$SIG" "$br/board/pf1007l/genimage.cfg" || stop "genimage signature != $SIG"
 	grep -q "PARTUUID=$SIG-0@PART@" "$HERE/boot/extlinux.conf.in" || stop "extlinux root != PARTUUID=$SIG-0N"
 	grep -q "VALUE=\"$KVER\"" "$br/configs/pf1007l_defconfig" || stop "defconfig kernel pin != $KVER"
+	ls "$HERE/linux-patches/v$KVER/"*.patch >/dev/null 2>&1 || stop "no image/linux-patches/v$KVER"
 	grep -q "\"kernel\":\"$KVER\"" "$br/board/pf1007l/post-image.sh" || stop "post-image.sh kernel != $KVER"
 	grep -q "grep -qx $KVER'" "$HERE/qemu-test.sh" || stop "qemu-test.sh kernel != $KVER"
 	echo "ok"

@@ -73,7 +73,7 @@ Ordered. Each has a gate. Do not start the next until the gate is checked and lo
       (The script became `scripts/flash.sh`; a real card was written with it, docs/log.md.)
 - [ ] Within 60 s the Mac sees a USB serial device and a USB Ethernet interface (192.168.7.1
       host / 192.168.7.2 frame). `ssh frame@192.168.7.2` logs in.
-- Gate: `uname -a` shows 7.2.10; `dmesg | grep -i -E 'panel|dsi'` shows the panel bound.
+- Gate: `uname -a` shows `KVER` from `image/build.sh`; `dmesg | grep -i -E 'panel|dsi'` shows the panel bound.
 
 ## 5. Display
 - [x] Console appears on the panel (DTB `full`; udev loads the panel module, there is no `modules-load.d`).

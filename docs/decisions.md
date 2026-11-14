@@ -40,7 +40,7 @@ the AIC8800 SDIO driver. ormarch carries the panel patch, the board DTS and the 
 recipe, proven on hardware against 7.2.10. Buildroot builds the kernel itself: we point it at a
 pinned mainline tag, apply the ormarch panel patch and DTS from `image/buildroot/board/pf1007l/`,
 and add `aic8800` as a Buildroot kernel-module package. Phase one pins the same 7.2.x line
-ormarch tested; bumping is a one-line change once the frame is verified.
+ormarch tested; TASK K1 moved it to mainline stable (see "Staying patched").
 
 ## BusyBox init instead of systemd
 Buildroot default. `/etc/inittab` respawns `tfctl kiosk`, which supervises cog itself (a software
@@ -178,8 +178,12 @@ upgrade on a 1 GB device with a flaky Wi-Fi link is the common case, not the edg
   pinned kernel, run the QEMU boot test and publish `system-<date>.tar`. In practice the owner
   builds images on the Mac (`image/build.sh`) and stages them on the server; frames pick a new
   system up on their next poll and install it to the other A/B slot.
-- Kernel: pinned to the ormarch-built 7.2.x line until TASK K1 (the same patches on current
-  mainline stable) lands.
+- Kernel: current mainline stable (TASK K1; `KVER` 7.3.4 on 2026-11-14). ormarch has the panel patch for
+  v7.2.10 only, so the one for each pin lives in `image/linux-patches/v$KVER/` (the same code,
+  context refreshed: v7.3 added a panel at the old insertion point, and Buildroot applies patches
+  with no fuzz). The board DTS and every `linux.fragment` option exist in 7.3.4. The weekly release run warns when `KVER` falls behind kernel.org's stable and
+  fails once its series is end of life; bumping is `KVER`, its patch directory, the defconfig, `post-image.sh` and
+  `qemu-test.sh` (`image/build.sh check` refuses a mismatch), then the QEMU test and the frame.
 - Dependabot/Renovate on `server/` and `tfctl/` dependencies.
 - Baseline on the frame: root fs read-only; no password login anywhere; sshd key-only, `frame` user
   only; no sudo or doas; iwd joins WPA2-PSK and open networks (SAE is off in the driver, log

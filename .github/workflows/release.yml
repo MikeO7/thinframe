@@ -32,6 +32,21 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$v" >/dev/null 2>&1 ||
             gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$v" -f sha="$GITHUB_SHA" >/dev/null
 
+  # TASK K1: track kernel.org stable. A warning when the pin is behind; red once its series is EOL.
+  kernel-pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: kernel pin vs kernel.org stable
+        run: |
+          pin=$(sed -n 's/^KVER="\([^"]*\)".*/\1/p' image/build.sh)
+          j=$(curl -fsS https://www.kernel.org/releases.json)
+          latest=$(jq -r .latest_stable.version <<<"$j")
+          eol=$(jq -r --arg s "${pin%.*}." '[.releases[] | select(.version|startswith($s))] | if length == 0 then "gone" else .[0].iseol end' <<<"$j")
+          echo "pin $pin, kernel.org stable $latest, pinned series eol: $eol"
+          [ "$pin" = "$latest" ] || echo "::warning::kernel pin $pin is behind kernel.org stable $latest (bump KVER in image/build.sh)"
+          [ "$eol" = false ] || { echo "::error::kernel series of $pin is end of life on kernel.org"; exit 1; }
+
   image:
     needs: tag
     runs-on: ubuntu-latest

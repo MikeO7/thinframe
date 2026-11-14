@@ -2,7 +2,7 @@
 # aic8800: AIC8800DC SDIO Wi-Fi driver, the radxa-pkg source ormarch's wifi/build.sh pins,
 # with the SDIO hunks of radxa's debian/patches series (same selection as wifi/build.sh).
 ################################################################################
-AIC8800_VERSION = e9e43ed79c50483080e9bcdfb08caeeb869d7191
+AIC8800_VERSION = 5562c254b0231be34588dc608ec28c4f1d613285
 AIC8800_SITE = https://github.com/radxa-pkg/aic8800
 AIC8800_SITE_METHOD = git
 AIC8800_LICENSE = GPL-2.0
