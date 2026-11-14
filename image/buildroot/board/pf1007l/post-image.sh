@@ -54,7 +54,7 @@ U="$S/bundle" && mkdir -p "$U"
 cp "$B/zImage" "$U/zImage"
 zstd -q -19 -T0 -f "$B/rootfs.ext4" -o "$U/rootfs.ext4.zst"
 (cd "$U" && sha256sum zImage rootfs.ext4.zst > sha256)
-printf '{"version":"%s","kernel":"7.2.10"}\n' "$VER" > "$U/version.json"
+printf '{"version":"%s","kernel":"7.3.4"}\n' "$VER" > "$U/version.json"
 tar -C "$U" --owner=0 --group=0 -cf "$B/system-$VER.tar" zImage rootfs.ext4.zst sha256 version.json
 cp "$S/boot.scr" "$S/slot-a.conf" "$B/"
 echo "post-image: $B/thinframe-sd.img, $B/system-$VER.tar"

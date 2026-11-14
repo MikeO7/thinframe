@@ -15,7 +15,7 @@ check "login prompt on the serial console" wait_for 900 grep -q -a 'login:' "$W/
 echo "boot to login prompt: $(( $(date +%s) - started )) s" | tee -a "$RES"
 check "U-Boot ran our boot.scr (slot a, no tries pending)" grep -q -a 'thinframe: slot a, tries left 0' "$W/serial.log"
 check "dropbear: key login as frame" wait_for 120 r true
-check "kernel 7.2.10" r 'uname -r | grep -qx 7.2.10'
+check "kernel 7.3.4" r 'uname -r | grep -qx 7.3.4'
 check "root is read-only ext4" r 'grep -q " / ext4 ro," /proc/mounts'
 check "PFBOOT mounted read-only at /boot" r 'grep -q " /boot vfat ro," /proc/mounts'
 check "data partition mounted, bound over dropbear and iwd; conf is a link into /data" \

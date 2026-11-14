@@ -80,7 +80,7 @@ microSD (MBR)
              p4 ext4 data, rest of card   thinframe.conf, ssh keys, iwd profiles
 
 OS      : Buildroot (musl, BusyBox init), WPE WebKit 2.50 + cog 0.18.4 on DRM, mesa lima
-Kernel  : mainline 7.2.x + ormarch panel patch/DTS + aic8800 module package
+Kernel  : mainline stable (7.3.x) + ormarch panel patch/DTS + aic8800 module package
 Init    : BusyBox init
 Net     : iwd (Wi-Fi) + dhcpcd, USB-C gadget (CDC ECM 192.168.7.2) as fallback
 Control : one outbound WebSocket from tfctl; server pushes, frame acks. No inbound ports. SSH for humans only.
