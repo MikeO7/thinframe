@@ -12,8 +12,21 @@ use std::time::{Duration, Instant};
 const HISTORY: Duration = Duration::from_secs(3);
 /// The newest samples are left out of the baseline, so a dip does not drag it down.
 const FRESH: Duration = Duration::from_millis(500);
-/// A wave needs a lit room: below this baseline a hand changes too little.
-pub const WAVE_BASE_MIN: u8 = 12;
+/// A wave needs some room light: below this baseline a hand changes too little. It was 12, so
+/// in a dim room (light.rs LIGHT_MIN) a wave could not wake an off screen; a covered hole reads
+/// 0..2, so a dim room's 6 still leaves a clear dip.
+pub const WAVE_BASE_MIN: u8 = 6;
+
+/// A reading at or below this, from baseline `b`, is a hand over the hole.
+fn covered(b: u8) -> u8 {
+    (b / 4).max(2)
+}
+
+/// A reading at or above this, from baseline `b`, is the hand gone again: half the baseline,
+/// and always two counts above `covered` so a dim room does not flap at the edge.
+fn uncovered(b: u8) -> u8 {
+    (b / 2).max(covered(b) + 2)
+}
 /// A wave is covered at least this long (a flicker is not a hand) and at most this long
 /// (longer is a hand resting there, or night: light.rs handles that).
 const WAVE_MIN: Duration = Duration::from_millis(150);
@@ -95,7 +108,7 @@ impl Sense {
         match self.state {
             State::Idle => {
                 if let Some(b) = base.filter(|b| *b >= WAVE_BASE_MIN) {
-                    if v <= (b / 4).max(3) {
+                    if v <= covered(b) {
                         self.state = State::Down(now, b);
                     }
                 }
@@ -105,7 +118,7 @@ impl Sense {
             }
             State::Down(since, b) => {
                 let held = now.saturating_duration_since(since);
-                if v >= b / 2 {
+                if v >= uncovered(b) {
                     self.state = State::Idle;
                     if held >= WAVE_MIN {
                         out = Some(Gesture::Wave);
@@ -117,7 +130,7 @@ impl Sense {
                 }
             }
             State::Held(b) => {
-                if v >= b / 2 {
+                if v >= uncovered(b) {
                     self.state = State::Idle;
                     self.hist.clear(); // a new room light, maybe
                 }
@@ -217,11 +230,31 @@ mod tests {
         // 5 s: a hand resting, or the lights went out.
         assert!(run(&mut s, &mut t, 0, 5000).is_empty());
         assert!(run(&mut s, &mut t, 61, 3000).is_empty());
-        // A dim room has no room for a dip.
+        // A room barely above dark has no room for a dip.
         let (mut s, mut t) = (Sense::new(), Instant::now());
-        run(&mut s, &mut t, 6, 3000);
+        run(&mut s, &mut t, 4, 3000);
         assert!(run(&mut s, &mut t, 1, 500).is_empty());
+        assert!(run(&mut s, &mut t, 4, 500).is_empty());
+    }
+
+    #[test]
+    fn a_hand_in_a_dim_room_is_a_wave() {
+        let (mut s, mut t) = (Sense::new(), Instant::now());
+        assert!(run(&mut s, &mut t, 6, 3000).is_empty());
+        assert!(run(&mut s, &mut t, 1, 500).is_empty());
+        assert_eq!(run(&mut s, &mut t, 6, 500), vec![Gesture::Wave]);
+        // Noise of a count is not a hand.
+        assert!(run(&mut s, &mut t, 6, 3000).is_empty());
+        assert!(run(&mut s, &mut t, 4, 500).is_empty());
         assert!(run(&mut s, &mut t, 6, 500).is_empty());
+    }
+
+    #[test]
+    fn the_lit_room_thresholds_did_not_move() {
+        for b in 12..=63 {
+            assert_eq!(covered(b), (b / 4).max(3), "covered {b}");
+            assert_eq!(uncovered(b), b / 2, "uncovered {b}");
+        }
     }
 
     #[test]

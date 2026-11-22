@@ -368,7 +368,8 @@ by itself (docs/decisions.md "Speed"). The server can override with the `screen`
 a frame reports `screen_state` in heartbeats. Touch during off turns the screen on for 60 s.
 
 The light sensor (docs/hardware.md) also turns the screen off: median of 5 one-second readings
-at or below 3 for 2 min = dark, at or above 10 for 3 s = lit (tfctl `light.rs`). Off when the
+at or below 3 for 2 min = dark, at or above 5 for 3 s = lit (tfctl `light.rs`; was 10 until
+2026-11-21, see below). Off when the
 schedule or the dark says off; each acts only when its wish changes, so a server `screen`
 action holds until then. `DARK_OFF=0` keeps the screen on in the dark. No crate: the two LRADC
 registers are read through an mmap of `/dev/mem`, and the kernel's LRADC key driver is left out
@@ -945,7 +946,7 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
 - The owner asked for "a motion sensor". The PF1007L has one analog light sensor (LRADC0, 6 bits;
   light.rs), no PIR or proximity part. tfctl now reads it 10 times a second (it was once a
   second; the kiosk loop passes every 100 ms when the sensor exists) and `sense.rs` derives:
-  - **Wave** (`wave`): a dip to a quarter of a lit baseline (at least 12) for 0.15 to 1.5 s, then
+  - **Wave** (`wave`): a dip to a quarter of a lit baseline (at least 6; 12 until 2026-11-21) for 0.15 to 1.5 s, then
     back. Off screen: on for 60 s like a touch. On: the page turns to the next tab (frame event
     `light wave`, the server relays `{"gesture":"wave"}`), or closes a camera view.
     [D] upstream E064: 60..62 lit, 7..14 partly covered, 0..2 covered; [U] on this frame.
@@ -960,6 +961,17 @@ Kernel start to dashboard on screen, warm boot: 14.3 s before, 11.7 s now; init 
   the backlight on: the panel's own light does not reach the sensor, so auto-brightness cannot
   chase itself.
 - Off by default; the server's frame config turns each on (MCP `set_frame_config`).
+
+## A dim room turns the screen back on (2026-11-21)
+- Owner: the screen stayed off when it should have been on. The lit threshold was 10, the
+  vendor's first brightness band, never measured here. Once the room had gone dark (0 [V]), a
+  lamp or early daylight that reads 4..9 was neither dark nor lit, so the screen stayed off
+  until a touch; a wave needed a baseline of 12, so it could not help either. [U]: the frame's
+  dim-room reading is not measured yet; the log line `tfctl: light: room lit (<v>)` shows it.
+- Now lit at 5 (two counts above dark, with the 5-sample median and 3 s hold for noise), and a
+  wave works from a baseline of 6: covered at a quarter of it (at least 2), uncovered at half
+  (at least 2 counts above covered). From a baseline of 12 up nothing changed (test
+  `the_lit_room_thresholds_did_not_move`).
 
 ## QA pass 2 (2026-10-26)
 - Every tab and button clicked on a copy of the live data (hooks pointed at a local sink): all
