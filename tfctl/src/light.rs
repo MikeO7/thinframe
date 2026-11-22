@@ -11,8 +11,11 @@ use std::time::{Duration, Instant};
 
 /// At or below this the room counts as dark.
 pub const DARK_MAX: u8 = 3;
-/// At or above this the room counts as lit again (the vendor's first brightness band).
-pub const LIGHT_MIN: u8 = 10;
+/// At or above this the room counts as lit again. It was 10 (the vendor's first brightness
+/// band), which left a dim room (one lamp, early daylight) reading 4..9 in no man's land: once
+/// dark, the screen stayed off until a touch. The dark room reads a steady 0 [V 2026-10-26], so
+/// two counts of hysteresis above DARK_MAX are enough; the median and LIGHT_FOR take out noise.
+pub const LIGHT_MIN: u8 = 5;
 /// Dark this long before the screen goes off: a hand or a shadow over the hole is not night.
 pub const DARK_FOR: Duration = Duration::from_secs(120);
 /// Lit this long before it comes back on: a passing headlight is not morning.
@@ -411,11 +414,29 @@ mod tests {
         let mut d = Dark::new();
         feed(&mut d, 0, t0, 200);
         assert!(d.is_dark());
-        // One bright sample is outvoted by the median; dim light (5) is neither.
+        // One bright sample is outvoted by the median; a glow of 4 is neither.
         let t1 = t0 + Duration::from_secs(200);
         assert_eq!(d.step(60, t1), None);
-        assert!(feed(&mut d, 5, t1 + Duration::from_secs(1), 60).is_empty());
+        assert!(feed(&mut d, 4, t1 + Duration::from_secs(1), 60).is_empty());
         assert!(d.is_dark());
+    }
+
+    #[test]
+    fn a_dim_room_turns_the_screen_back_on() {
+        // Lights out, then one lamp: the reading rises to 5..9, not to a lit room's 60.
+        for lamp in [5, 6, 9] {
+            let t0 = Instant::now();
+            let mut d = Dark::new();
+            feed(&mut d, 0, t0, 200);
+            assert!(d.is_dark());
+            let ch = feed(&mut d, lamp, t0 + Duration::from_secs(200), 10);
+            assert_eq!(ch, vec![(5, false)], "lamp {lamp}");
+        }
+        // A dim room stays on: it is above DARK_MAX.
+        let t0 = Instant::now();
+        let mut d = Dark::new();
+        assert!(feed(&mut d, 5, t0, 600).is_empty());
+        assert!(!d.is_dark());
     }
 
     #[test]
